@@ -1,4 +1,4 @@
-# UST Protocol v0.22
+# UST Protocol v0.24
 
 **UST** is a domain-issued, time-framed state publication protocol for machine agents.
 
@@ -8,7 +8,7 @@
 UST is not a central registry, not a blockchain, and not a new clock.
 It is a minimal JSON-based convention for publishing verifiable state snapshots on the web.
 
-**Version:** 0.22 — Draft
+**Version:** 0.24 — Draft
 
 ---
 
@@ -260,6 +260,19 @@ The `seed` is deterministic: any agent holding both shards can independently rec
 It is not part of `state` — it is a cross-shard derivative at the document level.
 
 **Use case:** generative systems (audio, visual, procedural) that need a single reproducible seed tied to the current planetary state across multiple domains.
+
+### Private shards and the seed
+
+A contributing shard MAY be private — accessible only via a non-guessable URL shared with trusted parties. Private shard URLs MUST NOT appear in `is_based_on` or any other public field. The seed proves their participation without disclosing their location.
+
+```json
+{
+  "is_based_on": ["https://helioradar.com/ust"],
+  "seed": "sha256:<hex>"
+}
+```
+
+`is_based_on` lists only public sources. Private sources are known only to the backend that computes the seed. An external observer sees that a seed exists but cannot determine how many shards contributed or where the private ones are located.
 
 ---
 
@@ -700,6 +713,210 @@ GET /.well-known/ust
 
 ---
 
+## Private shards
+
+A UST shard does not need to be publicly accessible.
+
+A domain MAY publish a shard at a non-guessable URL — a long random slug that acts as a shared secret:
+
+```
+https://example.com/ust/xK9mP2qR7vL4nT8s
+```
+
+This URL is shared only with trusted parties. Anyone who does not know it cannot access the shard. No authentication protocol, no passwords, no accounts — just an unpredictable URL.
+
+The shard itself is a normal UST document. Same fields, same canonical string, same hash, same `ust_id`.
+
+---
+
+### Combining private and public shards
+
+A domain may publish two shards for the same frame:
+
+```
+https://example.com/ust            ← public (accessible to everyone)
+https://example.com/ust/xK9mP2...  ← private (accessible to trusted parties only)
+```
+
+Both shards share the same `ust_id` — they belong to the same time frame.
+
+A recipient with access to both computes a composite seed:
+
+```
+seed = SHA256(public.canonical + "|" + private.canonical)
+```
+
+The domain publishes this seed in the public shard. The private URL does not appear anywhere in the public document:
+
+```json
+{
+  "domain_shard": "example.com",
+  "ust_id": "ust:20260424.15",
+  "is_based_on": ["https://helioradar.com/ust"],
+  "canonical": "ust:v0.23|domain=example.com|...",
+  "hash": "sha256:<hex>",
+  "seed": "sha256:<hex>"
+}
+```
+
+Private shard URLs MUST NOT appear in `is_based_on` or any other public field. The seed proves their participation without disclosing their location.
+
+---
+
+### What each party can verify
+
+**Anyone** (crawlers, public agents):
+- Reads the public shard and its hash
+- Sees the seed value
+- Cannot recover the private canonical from the seed — SHA256 is a one-way function
+- Cannot determine how many shards contributed or where the private ones are
+
+**Trusted party** (holds the private URL):
+- Reads both shards
+- Recomputes `SHA256(public.canonical + "|" + private.canonical)`
+- Compares with the `seed` in the public shard
+- If they match — the private shard is authentic and was not modified after the seed was published
+
+---
+
+### What this guarantees
+
+The seed is a public commitment to private state. The domain is saying:
+
+> "I had this private data at this time. I cannot change it later without the seed changing."
+
+### What this does not guarantee
+
+- That the private data is true
+- That the private URL will remain accessible after the frame ends
+- That the private shard will not be deleted
+
+Trust decisions remain with the recipient, as in all of UST.
+
+---
+
+## Shard chain
+
+A shard chain is a sequence of shards where each layer extends the previous one. Every layer can add its own state, and the chain seed cryptographically commits to all layers simultaneously.
+
+This allows selective disclosure: a domain may publish minimal data openly, attach encrypted detail for trusted parties, and any party with the decryption key can extend the chain further with their own shard.
+
+---
+
+### Layers
+
+Each layer is a normal UST shard. Layers are identified by depth:
+
+```
+L1 — public shard        (visible to everyone)
+L2 — private shard       (accessible via secret URL)
+L3 — encrypted shard     (accessible via secret URL, state is encrypted)
+L4 — partner shard       (published by a third party who holds L3 key)
+...
+```
+
+Any layer may be public or private. Any layer may be encrypted or plaintext. The chain can stop at any depth.
+
+---
+
+### Encrypted state
+
+A shard with encrypted state carries the ciphertext in the document, but builds its canonical string from the plaintext state — exactly as with any other shard. The hash commits to the plaintext canonical.
+
+```json
+{
+  "domain_shard": "muuune.com",
+  "ust_id": "ust:20260424.15",
+  "state_encrypted": "AES256-GCM:<ciphertext>",
+  "canonical": "ust:v0.24|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_km=370906.747|tithi=8",
+  "hash": "sha256:<SHA256(canonical)>",
+  "seed": "sha256:<hex>"
+}
+```
+
+A recipient who decrypts the state can rebuild the canonical and verify `hash`. A recipient without the key sees only the ciphertext and cannot verify or use the state.
+
+---
+
+### Chain seed
+
+The chain seed covers all layers in order:
+
+```
+seed = SHA256(L1.canonical + "|" + L2.canonical + "|" + L3.canonical + ...)
+```
+
+Each new layer appends its canonical to the input before hashing. The seed is published in the outermost layer that the publisher controls.
+
+**Example — three layers:**
+
+```
+L1 (public):
+  state: { tithi: 8 }
+  canonical: ust:v0.24|domain=muuune.com|ust_id=ust:20260424.15|tithi=8
+  seed: SHA256(L1.canonical + "|" + L2.canonical + "|" + L3.canonical)
+
+L2 (private, plaintext):
+  state: { karana_phase: ODD, moon_distance_km: 370906.747, texture_color: WHITE }
+  accessible only via secret URL
+
+L3 (private, encrypted):
+  state_encrypted: AES256-GCM:<ciphertext>
+  canonical: built from plaintext state
+  accessible only via secret URL + decryption key
+```
+
+L1 seed covers all three layers. Anyone holding all URLs and keys can independently recompute it and verify the chain is intact.
+
+---
+
+### Extending the chain
+
+A third party who holds the key to L3 may add their own layer:
+
+1. Fetch L1 (public) → get `L1.canonical`
+2. Fetch L2 (private URL) → get `L2.canonical`
+3. Fetch L3 (private URL) → decrypt → get `L3.canonical`
+4. Build their own `L4.canonical`
+5. Compute: `seed = SHA256(L1.canonical + "|" + L2.canonical + "|" + L3.canonical + "|" + L4.canonical)`
+6. Publish L4 with this seed
+
+```json
+{
+  "domain_shard": "partner.com",
+  "ust_id": "ust:20260424.15",
+  "is_based_on": ["https://muuune.com/ust"],
+  "canonical": "ust:v0.24|domain=partner.com|ust_id=ust:20260424.15|<their fields>",
+  "hash": "sha256:<hex>",
+  "seed": "sha256:<SHA256(L1|L2|L3|L4)>"
+}
+```
+
+Private URLs of L2 and L3 do not appear in `is_based_on`. The seed proves their participation without disclosing their location.
+
+---
+
+### What each party can verify
+
+| Party | Has access to | Can verify |
+|---|---|---|
+| Public observer | L1 | L1 hash |
+| L2 holder | L1 + L2 URL | L1 hash, L2 hash |
+| L3 holder | L1 + L2 URL + L3 key | L1, L2, L3 hashes, full chain seed |
+| L4 partner | all of the above + L4 | complete chain including their layer |
+
+A party at depth N can verify all layers 1..N. They cannot verify layers beyond N they do not hold.
+
+---
+
+### What this does not guarantee
+
+- That any layer's data is true
+- That private URLs remain accessible after the frame ends
+- That decryption keys are kept secure by the parties holding them
+
+---
+
 ## Relationship between shards
 
 UST does not require central coordination.
@@ -812,7 +1029,26 @@ UST gives agents a standard way to ask:
 
 ## Version scope
 
-### v0.22 — current
+### v0.24 — current
+
+**Added vs v0.23:**
+
+- Shard chain: ordered sequence of layers (public, private, encrypted) with a single chain seed
+- Encrypted state: `state_encrypted` field, canonical built from plaintext, hash commits to plaintext canonical
+- Chain seed formula: `SHA256(L1.canonical + "|" + L2.canonical + "|" ... + "|" + LN.canonical)`
+- Any party holding layers 1..N can extend the chain to N+1
+- Verification table: what each party can verify by depth
+
+### v0.23
+
+**Added vs v0.22:**
+
+- Private shards: a shard MAY be published at a non-guessable URL
+- Private shard URLs MUST NOT appear in `is_based_on` or any public field
+- Composite seed naturally covers private shards — seed proves participation without disclosing location
+- Full verification model documented: what public observers see vs. what trusted parties can verify
+
+### v0.22
 
 **Added vs v0.21:**
 
