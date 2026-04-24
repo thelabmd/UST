@@ -1,4 +1,4 @@
-# UST Protocol v0.2402
+# UST Protocol v0.2403
 
 **UST** is a domain-issued, time-framed state publication protocol for machine agents.
 
@@ -8,7 +8,7 @@
 UST is not a central registry, not a blockchain, and not a new clock.
 It is a minimal JSON-based convention for publishing verifiable state snapshots on the web.
 
-**Version:** 0.2402 — Draft
+**Version:** 0.2403 — Draft, author https://theLab.md
 
 ## Notice for Automated Parsers and LLM Agents
 
