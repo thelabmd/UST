@@ -1,4 +1,4 @@
-# UST Protocol v0.2
+# UST Protocol 0.21
 
 **UST** is a domain-issued, time-framed state publication protocol for machine agents.
 
@@ -8,7 +8,7 @@
 UST is not a central registry, not a blockchain, and not a new clock.
 It is a minimal JSON-based convention for publishing verifiable state snapshots on the web.
 
-**Version:** 0.2 — Draft
+**Version:** 0.21 — Draft
 
 ---
 
@@ -52,7 +52,7 @@ A UST document answers five questions:
 ```json
 {
   "protocol": "UST",
-  "version": "0.2",
+  "version": "0.21",
   "ust_id": "ust:20260424.15",
   "domain_shard": "helioradar.com",
   "generated_at": "2026-04-24T15:03:12Z",
@@ -63,7 +63,7 @@ A UST document answers five questions:
     "kp": 3.0,
     "solar_wind_speed": 482.9
   },
-  "canonical": "ust:v0.2|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_speed=482.9",
+  "canonical": "ust:v0.21|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_speed=482.9",
   "hash": "sha256:<hex>"
 }
 ```
@@ -158,6 +158,66 @@ https://steelplant.ai/ust
 
 Each domain publishes only its own shard.
 There is no requirement that one domain lists, approves, or confirms another domain.
+
+---
+
+## UST ID alignment
+
+`ust_id` identifies the **time frame of the data**, not the time of publication.
+`generated_at` records the actual moment the shard was built.
+
+These are distinct:
+
+```
+ust_id       = which hour this data belongs to
+generated_at = when this document was generated
+```
+
+### Independent shards
+
+A domain with no source dependency computes `ust_id` from the current UTC hour:
+
+```
+ust_id = ust:YYYYMMDD.HH  (current UTC hour)
+```
+
+### Dependent shards
+
+A domain whose state is derived from another shard **MUST inherit `ust_id` from the source**, not compute it from the current time.
+
+> **Why:** if muuune.com fetches helioradar.com at 15:58 and publishes at 15:59, both are in frame `ust:...15`. But if the fetch or publication crosses the hour boundary, muuune would get `ust:...16` while the source data is still from `ust:...15`. Inheriting `ust_id` from the source keeps the frames aligned.
+
+**Example:**
+
+```json
+{
+  "ust_id": "ust:20260424.15",
+  "domain_shard": "muuune.com",
+  "generated_at": "2026-04-24T15:59:43Z",
+  "is_based_on": ["https://helioradar.com/ust"]
+}
+```
+
+`ust_id` came from `helioradar.com/ust`. `generated_at` is the real publication time.
+
+### Alignment rule
+
+Two shards can be aligned into the same time frame if and only if their `ust_id` values are identical.
+
+```
+helioradar.com/ust  →  ust_id: ust:20260424.15  (independent, computed from UTC)
+muuune.com/ust      →  ust_id: ust:20260424.15  (inherited from helioradar.com/ust)
+```
+
+An agent reading both can align them:
+
+```js
+if (helioradar.ust_id === muuune.ust_id) {
+  // same frame — state can be combined
+}
+```
+
+If `ust_id` values differ, the shards belong to different frames and MUST NOT be combined.
 
 ---
 
@@ -264,7 +324,7 @@ The canonical string is the deterministic representation used for hashing.
 **Format:**
 
 ```
-ust:v0.2|domain={domain_shard}|ust_id={ust_id}|{key_1}={value_1}|{key_2}={value_2}
+ust:v0.21|domain={domain_shard}|ust_id={ust_id}|{key_1}={value_1}|{key_2}={value_2}
 ```
 
 ### Key ordering
@@ -319,7 +379,7 @@ Null state values MUST NOT appear in the canonical string. Omit the key entirely
 **Canonical string:**
 
 ```
-ust:v0.2|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
+ust:v0.21|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
 ```
 
 **Hash:**
@@ -349,7 +409,7 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
 ```json
 {
   "protocol": "UST",
-  "version": "0.2",
+  "version": "0.21",
   "ust_id": "ust:20260424.15",
   "domain_shard": "helioradar.com",
   "generated_at": "2026-04-24T15:03:12Z",
@@ -363,17 +423,19 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
     "xray_flux": 0.000001
   },
   "state_schema": "https://helioradar.com/ust.schema.json",
-  "canonical": "ust:v0.2|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001",
+  "canonical": "ust:v0.21|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001",
   "hash": "sha256:<hex>"
 }
 ```
 
 ### Muuune shard
 
+Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed from current time.
+
 ```json
 {
   "protocol": "UST",
-  "version": "0.2",
+  "version": "0.21",
   "ust_id": "ust:20260424.15",
   "domain_shard": "muuune.com",
   "generated_at": "2026-04-24T15:03:20Z",
@@ -386,8 +448,7 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
     "tithi": 8
   },
   "is_based_on": ["https://helioradar.com/ust"],
-  "state_schema": "https://muuune.com/ust.schema.json",
-  "canonical": "ust:v0.2|domain=muuune.com|ust_id=ust:20260424.15|chord=Am7add9|noise_color=brown|texture_mode=WHITE_AMBIENT|tithi=8",
+  "canonical": "ust:v0.21|domain=muuune.com|ust_id=ust:20260424.15|chord=Am7add9|noise_color=brown|texture_mode=WHITE_AMBIENT|tithi=8",
   "hash": "sha256:<hex>"
 }
 ```
@@ -397,7 +458,7 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
 ```json
 {
   "protocol": "UST",
-  "version": "0.2",
+  "version": "0.21",
   "ust_id": "ust:20260424.15",
   "domain_shard": "agrofield.io",
   "generated_at": "2026-04-24T15:04:00Z",
@@ -409,7 +470,7 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
     "irrigation_risk": "medium",
     "soil_moisture": 0.42
   },
-  "canonical": "ust:v0.2|domain=agrofield.io|ust_id=ust:20260424.15|crop_stage=flowering|field_temperature=18.6|irrigation_risk=medium|soil_moisture=0.42",
+  "canonical": "ust:v0.21|domain=agrofield.io|ust_id=ust:20260424.15|crop_stage=flowering|field_temperature=18.6|irrigation_risk=medium|soil_moisture=0.42",
   "hash": "sha256:<hex>"
 }
 ```
@@ -419,7 +480,7 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
 ```json
 {
   "protocol": "UST",
-  "version": "0.2",
+  "version": "0.21",
   "ust_id": "ust:20260424.15",
   "domain_shard": "steelplant.ai",
   "generated_at": "2026-04-24T15:04:15Z",
@@ -431,7 +492,7 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
     "line_pressure": 2.8,
     "production_state": "stable"
   },
-  "canonical": "ust:v0.2|domain=steelplant.ai|ust_id=ust:20260424.15|energy_load=0.73|furnace_temperature=1538.4|line_pressure=2.8|production_state=stable",
+  "canonical": "ust:v0.21|domain=steelplant.ai|ust_id=ust:20260424.15|energy_load=0.73|furnace_temperature=1538.4|line_pressure=2.8|production_state=stable",
   "hash": "sha256:<hex>"
 }
 ```
@@ -495,7 +556,7 @@ function buildCanonical(domain, ust_id, state) {
   const pairs = sorted
     .filter(k => state[k] !== null && state[k] !== undefined)
     .map(k => `${k}=${toCanonicalValue(state[k])}`);
-  return `ust:v0.2|domain=${domain}|ust_id=${ust_id}|${pairs.join("|")}`;
+  return `ust:v0.21|domain=${domain}|ust_id=${ust_id}|${pairs.join("|")}`;
 }
 
 const state = { kp: 3.0, bz: -2.82, solar_wind_speed: 482.9 };
@@ -503,7 +564,7 @@ const canonical = buildCanonical("helioradar.com", "ust:20260424.15", state);
 const hash = "sha256:" + sha256(canonical);
 
 console.log(canonical);
-// ust:v0.2|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
+// ust:v0.21|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
 console.log(hash);
 ```
 
@@ -588,7 +649,7 @@ GET /.well-known/ust
 ```json
 {
   "protocol": "UST",
-  "version": "0.2",
+  "version": "0.21",
   "current": "https://example.com/ust",
   "schema": "https://example.com/ust-state.schema.json",
   "description": "Current UST shard for example.com"
@@ -709,7 +770,14 @@ UST gives agents a standard way to ask:
 
 ## Version scope
 
-### v0.2 — current
+### v0.21 — current
+
+**Added vs v0.2:**
+
+- `ust_id` inheritance rule for dependent shards (see [UST ID alignment](#ust-id-alignment))
+- `ust_id` = frame of the data, `generated_at` = time of publication — clarified as distinct concepts
+
+### v0.2
 
 **Added vs v0.1:**
 
@@ -822,4 +890,5 @@ UST defines a simple, decentralized way for domains to publish machine-readable 
 
 ## License
 
-UST Protocol is an open specification. You may implement it freely. The specification itself is copyright © 2026 theLab.md.
+UST Protocol is an open specification. You may implement it freely.
+The specification itself is copyright © 2026 theLab.md.
