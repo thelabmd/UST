@@ -1,4 +1,4 @@
-# UST Protocol
+# UST Protocol v0.2
 
 **UST** is a domain-issued, time-framed state publication protocol for machine agents.
 
@@ -7,6 +7,8 @@
 
 UST is not a central registry, not a blockchain, and not a new clock.
 It is a minimal JSON-based convention for publishing verifiable state snapshots on the web.
+
+**Version:** 0.2 — Draft
 
 ---
 
@@ -50,18 +52,18 @@ A UST document answers five questions:
 ```json
 {
   "protocol": "UST",
-  "version": "0.1",
+  "version": "0.2",
   "ust_id": "ust:20260424.15",
   "domain_shard": "helioradar.com",
   "generated_at": "2026-04-24T15:03:12Z",
   "valid_from": "2026-04-24T15:00:00Z",
   "valid_to": "2026-04-24T16:00:00Z",
   "state": {
-    "kp": 3.0,
     "bz": -2.82,
+    "kp": 3.0,
     "solar_wind_speed": 482.9
   },
-  "canonical": "ust:v0.1|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_speed=482.9",
+  "canonical": "ust:v0.2|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_speed=482.9",
   "hash": "sha256:<hex>"
 }
 ```
@@ -186,9 +188,11 @@ UST separates four concepts: **identity**, **integrity**, **truth**, and **trust
 
 If an agent fetches `https://helioradar.com/ust` and the document contains `"domain_shard": "helioradar.com"`, then HTTPS binds the response to the domain.
 
+**CDN and proxy note:** `domain_shard` MUST match the public-facing hostname used to fetch the document — the hostname in the request URL, not the IP or CDN edge address. When behind a reverse proxy or CDN (Cloudflare, Fastly, etc.), the `Host` header determines the origin. Agents verify `domain_shard` against the URL they issued, not the network path.
+
 ### Hash confirms integrity
 
-The `hash` confirms that the canonical state representation has not changed.
+The `hash` confirms that the canonical state representation has not changed between publication and receipt.
 
 ### Trust is client-side
 
@@ -209,19 +213,19 @@ It only proves that this domain published this structured state, for this UST fr
 
 ## Required fields
 
-A minimal UST v0.1 document **MUST** include:
+A minimal UST v0.2 document **MUST** include:
 
 | Field | Description |
 |---|---|
 | `protocol` | Must be `"UST"` |
-| `version` | Protocol version, e.g. `"0.1"` |
+| `version` | Protocol version, e.g. `"0.2"` |
 | `ust_id` | Time-frame identifier |
 | `domain_shard` | Domain publishing the shard |
-| `generated_at` | When this shard was generated |
-| `valid_from` | Start of the validity window |
-| `valid_to` | End of the validity window |
-| `state` | Domain-specific state payload |
-| `canonical` | Deterministic canonical representation |
+| `generated_at` | When this shard was generated (ISO 8601 UTC) |
+| `valid_from` | Start of the validity window (ISO 8601 UTC) |
+| `valid_to` | End of the validity window (ISO 8601 UTC) |
+| `state` | Domain-specific state payload (object) |
+| `canonical` | Deterministic canonical representation (string) |
 | `hash` | SHA-256 hash of the canonical string |
 
 ---
@@ -236,7 +240,7 @@ A minimal UST v0.1 document **MUST** include:
   "fetched_at": "2026-04-24T15:03:02Z",
   "published_at": "2026-04-24T15:03:12Z",
   "latency_ms": 14000,
-  "state_schema": "https://example.com/ust.schema.json",
+  "state_schema": "https://example.com/ust-state.schema.json",
   "is_based_on": [
     "https://services.swpc.noaa.gov/"
   ],
@@ -249,26 +253,65 @@ A minimal UST v0.1 document **MUST** include:
 }
 ```
 
+`state_schema` is strongly recommended when the state payload has a stable structure — it allows agents and validators to check field types and presence without hardcoding expectations.
+
 ---
 
 ## Canonical string
 
 The canonical string is the deterministic representation used for hashing.
 
-**Recommended format:**
+**Format:**
 
 ```
-ust:v0.1|domain={domain_shard}|ust_id={ust_id}|{key_1}={value_1}|{key_2}={value_2}
+ust:v0.2|domain={domain_shard}|ust_id={ust_id}|{key_1}={value_1}|{key_2}={value_2}
 ```
 
-State keys **SHOULD** be sorted alphabetically.
+### Key ordering
+
+State keys **MUST** be sorted by Unicode code point value (UTF-8 byte order).
+For ASCII-only keys this is standard alphabetical order.
+
+> Rationale: Unicode code point sort is unambiguous across all languages and runtimes. Do not rely on locale-aware sorting.
+
+### Number serialization
+
+Numeric values in the canonical string **MUST** follow these rules:
+
+- No scientific notation. `0.000001` not `1e-6`.
+- No trailing zeros after the decimal point. `3.0` → `3`, `482.90` → `482.9`.
+- Integer values: no decimal point. `8` not `8.0`.
+- Negative values: leading minus. `-2.82`.
+
+> Rationale: different runtimes serialize floats differently. `3.0` in Python is `3.0`, in JavaScript `String(3.0)` is `"3"`. Explicit rules make canonical strings identical across implementations.
+
+Publishers MUST apply these rules before building the canonical string, not after.
+The `state` JSON object in the response MAY use any valid JSON number representation — only the canonical string representation is normalized.
+
+### String values
+
+String values are included as-is, without quotes:
+
+```
+|texture_mode=WHITE_AMBIENT
+```
+
+### Boolean values
+
+Boolean values are lowercased: `true`, `false`.
+
+### Null values
+
+Null state values MUST NOT appear in the canonical string. Omit the key entirely.
+
+---
 
 **Example state:**
 
 ```json
 {
-  "kp": 3.0,
   "bz": -2.82,
+  "kp": 3.0,
   "solar_wind_speed": 482.9
 }
 ```
@@ -276,23 +319,23 @@ State keys **SHOULD** be sorted alphabetically.
 **Canonical string:**
 
 ```
-ust:v0.1|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_speed=482.9
+ust:v0.2|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
 ```
 
 **Hash:**
 
 ```
-hash = sha256(canonical)
+hash = "sha256:" + SHA256(canonical_string_as_utf8)
 ```
 
 > **Important:** Do not hash only a sum of state values.
 >
-> ❌ Bad — loses structure, allows different state objects to collide:
+> ❌ Bad — loses structure, different state objects can produce the same sum:
 > ```
 > SHA256(domain + ust_id + sum(values))
 > ```
 >
-> ✅ Good — preserves all values and their keys:
+> ✅ Good — preserves all keys and values, order is deterministic:
 > ```
 > SHA256(canonical)
 > ```
@@ -306,20 +349,21 @@ hash = sha256(canonical)
 ```json
 {
   "protocol": "UST",
-  "version": "0.1",
+  "version": "0.2",
   "ust_id": "ust:20260424.15",
   "domain_shard": "helioradar.com",
   "generated_at": "2026-04-24T15:03:12Z",
   "valid_from": "2026-04-24T15:00:00Z",
   "valid_to": "2026-04-24T16:00:00Z",
   "state": {
-    "kp": 3.0,
     "bz": -2.82,
-    "solar_wind_speed": 482.9,
+    "kp": 3.0,
     "solar_wind_density": 3.66,
+    "solar_wind_speed": 482.9,
     "xray_flux": 0.000001
   },
-  "canonical": "ust:v0.1|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001",
+  "state_schema": "https://helioradar.com/ust.schema.json",
+  "canonical": "ust:v0.2|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001",
   "hash": "sha256:<hex>"
 }
 ```
@@ -329,20 +373,21 @@ hash = sha256(canonical)
 ```json
 {
   "protocol": "UST",
-  "version": "0.1",
+  "version": "0.2",
   "ust_id": "ust:20260424.15",
   "domain_shard": "muuune.com",
   "generated_at": "2026-04-24T15:03:20Z",
   "valid_from": "2026-04-24T15:00:00Z",
   "valid_to": "2026-04-24T16:00:00Z",
   "state": {
-    "tithi": 8,
-    "texture_mode": "WHITE_AMBIENT",
     "chord": "Am7add9",
-    "noise_color": "brown"
+    "noise_color": "brown",
+    "texture_mode": "WHITE_AMBIENT",
+    "tithi": 8
   },
   "is_based_on": ["https://helioradar.com/ust"],
-  "canonical": "ust:v0.1|domain=muuune.com|ust_id=ust:20260424.15|chord=Am7add9|noise_color=brown|texture_mode=WHITE_AMBIENT|tithi=8",
+  "state_schema": "https://muuune.com/ust.schema.json",
+  "canonical": "ust:v0.2|domain=muuune.com|ust_id=ust:20260424.15|chord=Am7add9|noise_color=brown|texture_mode=WHITE_AMBIENT|tithi=8",
   "hash": "sha256:<hex>"
 }
 ```
@@ -352,19 +397,19 @@ hash = sha256(canonical)
 ```json
 {
   "protocol": "UST",
-  "version": "0.1",
+  "version": "0.2",
   "ust_id": "ust:20260424.15",
   "domain_shard": "agrofield.io",
   "generated_at": "2026-04-24T15:04:00Z",
   "valid_from": "2026-04-24T15:00:00Z",
   "valid_to": "2026-04-24T16:00:00Z",
   "state": {
-    "soil_moisture": 0.42,
-    "field_temperature": 18.6,
     "crop_stage": "flowering",
-    "irrigation_risk": "medium"
+    "field_temperature": 18.6,
+    "irrigation_risk": "medium",
+    "soil_moisture": 0.42
   },
-  "canonical": "ust:v0.1|domain=agrofield.io|ust_id=ust:20260424.15|crop_stage=flowering|field_temperature=18.6|irrigation_risk=medium|soil_moisture=0.42",
+  "canonical": "ust:v0.2|domain=agrofield.io|ust_id=ust:20260424.15|crop_stage=flowering|field_temperature=18.6|irrigation_risk=medium|soil_moisture=0.42",
   "hash": "sha256:<hex>"
 }
 ```
@@ -374,19 +419,19 @@ hash = sha256(canonical)
 ```json
 {
   "protocol": "UST",
-  "version": "0.1",
+  "version": "0.2",
   "ust_id": "ust:20260424.15",
   "domain_shard": "steelplant.ai",
   "generated_at": "2026-04-24T15:04:15Z",
   "valid_from": "2026-04-24T15:00:00Z",
   "valid_to": "2026-04-24T16:00:00Z",
   "state": {
+    "energy_load": 0.73,
     "furnace_temperature": 1538.4,
     "line_pressure": 2.8,
-    "energy_load": 0.73,
     "production_state": "stable"
   },
-  "canonical": "ust:v0.1|domain=steelplant.ai|ust_id=ust:20260424.15|energy_load=0.73|furnace_temperature=1538.4|line_pressure=2.8|production_state=stable",
+  "canonical": "ust:v0.2|domain=steelplant.ai|ust_id=ust:20260424.15|energy_load=0.73|furnace_temperature=1538.4|line_pressure=2.8|production_state=stable",
   "hash": "sha256:<hex>"
 }
 ```
@@ -398,11 +443,11 @@ hash = sha256(canonical)
 A client verifies a UST shard by:
 
 1. Fetching the document over HTTPS
-2. Checking that `domain_shard` matches the origin domain
-3. Checking the `ust_id` format
-4. Checking `valid_from` and `valid_to`
-5. Recomputing `SHA256(canonical)`
-6. Comparing it with `hash`
+2. Checking `domain_shard` matches the hostname in the request URL
+3. Checking the `ust_id` format matches `ust:YYYYMMDD.HH[[:MM[:SS]]`
+4. Checking `valid_from` ≤ now ≤ `valid_to`
+5. Recomputing `SHA256(doc.canonical)` using UTF-8 encoding
+6. Comparing `"sha256:" + computed` with `doc.hash`
 7. Applying its own trust policy for the domain
 
 **Example pseudocode:**
@@ -411,6 +456,10 @@ A client verifies a UST shard by:
 function verifyUST(doc, originDomain) {
   if (doc.protocol !== "UST") return false;
   if (doc.domain_shard !== originDomain) return false;
+
+  const now = new Date();
+  if (now < new Date(doc.valid_from)) return false;
+  if (now > new Date(doc.valid_to)) return false;
 
   const computed = "sha256:" + sha256(doc.canonical);
   if (computed !== doc.hash) return false;
@@ -431,10 +480,30 @@ function sha256(input) {
     .digest("hex");
 }
 
-const canonical =
-  "ust:v0.1|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_speed=482.9";
+// Build canonical from state — apply number normalization rules
+function toCanonicalValue(v) {
+  if (typeof v === "number") {
+    // No scientific notation, no trailing zeros
+    return String(parseFloat(v.toPrecision(15)));
+  }
+  if (typeof v === "boolean") return String(v);
+  return String(v);
+}
 
+function buildCanonical(domain, ust_id, state) {
+  const sorted = Object.keys(state).sort(); // Unicode code point order
+  const pairs = sorted
+    .filter(k => state[k] !== null && state[k] !== undefined)
+    .map(k => `${k}=${toCanonicalValue(state[k])}`);
+  return `ust:v0.2|domain=${domain}|ust_id=${ust_id}|${pairs.join("|")}`;
+}
+
+const state = { kp: 3.0, bz: -2.82, solar_wind_speed: 482.9 };
+const canonical = buildCanonical("helioradar.com", "ust:20260424.15", state);
 const hash = "sha256:" + sha256(canonical);
+
+console.log(canonical);
+// ust:v0.2|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
 console.log(hash);
 ```
 
@@ -450,7 +519,13 @@ UST endpoints SHOULD be cacheable.
 Cache-Control: public, max-age=3600, stale-while-revalidate=7200
 ```
 
-Better implementations MAY set `max-age` dynamically until the next UTC frame rollover.
+Better implementations MAY set `max-age` dynamically based on remaining seconds until the next UTC frame rollover:
+
+```js
+const now = new Date();
+const secondsUntilNextHour = 3600 - (now.getUTCMinutes() * 60 + now.getUTCSeconds());
+// Cache-Control: public, max-age={secondsUntilNextHour}, stale-while-revalidate=7200
+```
 
 **Example:**
 
@@ -513,9 +588,9 @@ GET /.well-known/ust
 ```json
 {
   "protocol": "UST",
-  "version": "0.1",
+  "version": "0.2",
   "current": "https://example.com/ust",
-  "schema": "https://example.com/ust.schema.json",
+  "schema": "https://example.com/ust-state.schema.json",
   "description": "Current UST shard for example.com"
 }
 ```
@@ -551,7 +626,7 @@ These relationships are informational. Clients decide whether to follow or trust
 
 ## Verified UST receipts
 
-UST v0.1 does not require external verification.
+UST v0.2 does not require external verification.
 
 However, a separate verification service or laboratory may provide receipts — confirming that a given shard hash was observed or validated at a specific time.
 
@@ -580,18 +655,18 @@ However, a separate verification service or laboratory may provide receipts — 
 }
 ```
 
-Receipts are optional and outside the UST v0.1 core.
+Receipts are optional and outside the UST v0.2 core.
 
 ---
 
 ## Security model
 
-UST v0.1 provides **integrity**, not absolute truth.
+UST v0.2 provides **integrity**, not absolute truth.
 
 ### UST can verify
 
-- The document came from this domain
-- The document has a valid canonical hash
+- The document came from this domain (HTTPS + `domain_shard` match)
+- The canonical hash is intact
 - The state belongs to this UST frame
 - The payload has not changed relative to its canonical string
 
@@ -603,7 +678,7 @@ UST v0.1 provides **integrity**, not absolute truth.
 - The upstream source was correct
 - The domain should be trusted
 
-Those are handled by client trust policies, domain reputation, optional receipts, signatures, or evidence-backed verification.
+Those are handled by client trust policies, domain reputation, optional receipts, cryptographic signatures, or evidence-backed verification.
 
 ---
 
@@ -632,11 +707,24 @@ UST gives agents a standard way to ask:
 
 ---
 
-## Version 0.1 scope
+## Version scope
 
-UST v0.1 intentionally stays small.
+### v0.2 — current
 
-**Included:**
+**Added vs v0.1:**
+
+- Number serialization rules (no scientific notation, no trailing zeros, integers without decimal)
+- Key sorting rule clarified: Unicode code point order, not locale-aware
+- `domain_shard` matching rule under CDN/proxy
+- `state_schema` promoted to strongly recommended
+- `valid_from` / `valid_to` check added to verification pseudocode
+- Dynamic `max-age` example for cache headers
+- `buildCanonical` reference implementation in Node.js
+- Null value rule: omit from canonical string
+
+### v0.1 — initial draft
+
+**Included in both versions:**
 
 - `/ust` JSON endpoint
 - `ust_id`
@@ -647,7 +735,7 @@ UST v0.1 intentionally stays small.
 - SHA-256 hash
 - HTTPS domain binding
 
-**Not included:**
+**Not included in either version:**
 
 - global registry
 - whitelist
@@ -666,16 +754,18 @@ UST v0.1 intentionally stays small.
 - [ ] Add `GET /ust`
 - [ ] Return `Content-Type: application/json`
 - [ ] Generate current `ust_id`
-- [ ] Add `domain_shard`
-- [ ] Add `generated_at`, `valid_from`, `valid_to`
-- [ ] Add domain-specific `state`
-- [ ] Build deterministic `canonical`
-- [ ] Compute `hash = sha256(canonical)`
-- [ ] Add cache headers
+- [ ] Add `domain_shard` matching the public hostname
+- [ ] Add `generated_at`, `valid_from`, `valid_to` in ISO 8601 UTC
+- [ ] Add domain-specific `state` (keys alphabetically sorted by Unicode code point)
+- [ ] Apply number serialization rules before building canonical
+- [ ] Build `canonical` string deterministically
+- [ ] Compute `hash = "sha256:" + SHA256(canonical)`
+- [ ] Set `Cache-Control` headers (dynamic `max-age` recommended)
 - [ ] Add `<link rel="alternate" type="application/json" href="/ust">` in `<head>`
+- [ ] Add `state_schema` pointing to a published JSON Schema
 - [ ] Optionally add JSON-LD `DataFeed`
 - [ ] Optionally add `/.well-known/ust`
-- [ ] Optionally publish a simple validator script
+- [ ] Optionally publish a validator endpoint
 
 ---
 
