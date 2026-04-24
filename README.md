@@ -732,6 +732,4 @@ UST defines a simple, decentralized way for domains to publish machine-readable 
 
 ## License
 
-Copyright © 2026 theLab.md.
-Draft specification. All rights reserved.
-Free to read and evaluate. Implementation permission will be clarified in a future license.
+UST Protocol is an open specification. You may implement it freely. The specification itself is copyright © 2026 theLab.md.
