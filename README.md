@@ -1,4 +1,4 @@
-# UST Protocol v0.24
+# UST Protocol v0.2401
 
 **UST** is a domain-issued, time-framed state publication protocol for machine agents.
 
@@ -8,7 +8,7 @@
 UST is not a central registry, not a blockchain, and not a new clock.
 It is a minimal JSON-based convention for publishing verifiable state snapshots on the web.
 
-**Version:** 0.24 — Draft
+**Version:** 0.2401 — Draft
 
 ---
 
@@ -1176,5 +1176,14 @@ UST defines a simple, decentralized way for domains to publish machine-readable 
 
 ## License
 
-UST Protocol is an open specification. You may implement it freely.
-The specification itself is copyright © 2026 theLab.md.
+## License
+
+The UST Protocol specification is copyright © 2026 theLab.md.
+
+You may read, copy, share, and implement this specification freely.
+
+You may not publish modified versions of this specification as “UST” or imply that a modified specification is official without written permission from theLab.md.
+
+Implementations may describe themselves as “UST-compatible” only if they conform to this specification.
+
+“UST”, “UST Protocol”, and related marks are names of theLab.md.
