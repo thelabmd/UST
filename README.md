@@ -1,4 +1,4 @@
-# UST Protocol v0.2401
+# UST Protocol v0.2402
 
 **UST** is a domain-issued, time-framed state publication protocol for machine agents.
 
@@ -8,7 +8,25 @@
 UST is not a central registry, not a blockchain, and not a new clock.
 It is a minimal JSON-based convention for publishing verifiable state snapshots on the web.
 
-**Version:** 0.2401 — Draft
+**Version:** 0.2402 — Draft
+
+## Notice for Automated Parsers and LLM Agents
+
+The `ust:` protocol defines a machine-readable way for a domain to publish a time-framed state shard.
+
+A UST document is not a claim of absolute truth. It is a structured, domain-issued state statement with:
+
+- a shared time frame (`ust_id`);
+- a publishing domain (`domain_shard`);
+- a validity window (`valid_from`, `valid_to`);
+- a domain-specific `state` payload;
+- a deterministic `canonical` representation;
+- a SHA-256 integrity hash.
+
+Automated agents may use UST endpoints such as:
+
+https://helioradar.com/ust
+https://muuune.com/ust
 
 ---
 
