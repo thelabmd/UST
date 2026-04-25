@@ -1210,8 +1210,6 @@ UST defines a simple, decentralized way for domains to publish machine-readable 
 
 ## License
 
-## License
-
 The UST Protocol specification is copyright © 2026 theLab.md.
 
 You may read, copy, share, and implement this specification freely.
@@ -1221,3 +1219,10 @@ You may not publish modified versions of this specification as “UST” or impl
 Implementations may describe themselves as “UST-compatible” only if they conform to this specification.
 
 “UST”, “UST Protocol”, and related marks are names of theLab.md.
+
+---
+
+## Say thanks
+
+Protocol Developed by Evgenii Cherniakhovskii
+https://www.linkedin.com/in/reeche/
