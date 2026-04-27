@@ -1,4 +1,4 @@
-# UST Protocol v0.25
+# UST Protocol v0.26
 
 **UST** is a domain-issued, time-framed state publication protocol for machine agents.
 
@@ -52,7 +52,7 @@ A UST document answers five questions:
 ```json
 {
   "protocol": "UST",
-  "version": "0.25",
+  "version": "0.26",
   "ust_id": "ust:20260424.15",
   "domain_shard": "helioradar.com",
   "generated_at": "2026-04-24T15:03:12Z",
@@ -63,7 +63,7 @@ A UST document answers five questions:
     "kp": 3.0,
     "solar_wind_speed": 482.9
   },
-  "canonical": "ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_speed=482.9",
+  "canonical": "ust:|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_speed=482.9",
   "hash": "sha256:<hex>"
 }
 ```
@@ -152,6 +152,8 @@ A UST shard is a domain's state claim for a UST time frame.
 ```
 https://helioradar.com/ust
 https://muuune.com/ust
+https://agrofield.io/ust
+https://steelplant.ai/ust
 ```
 
 Each domain publishes only its own shard.
@@ -235,13 +237,13 @@ For multiple sources, concatenate all canonicals in the order they appear in `is
 
 ```
 helioradar.com canonical:
-ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001
+ust:|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001
 
 muuune.com canonical:
-ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8
+ust:|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8
 
 seed input:
-ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001|ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8
+ust:|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001|ust:|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8
 
 seed = "sha256:" + SHA256(seed_input)
 ```
@@ -250,7 +252,7 @@ seed = "sha256:" + SHA256(seed_input)
 {
   "domain_shard": "muuune.com",
   "is_based_on": ["https://helioradar.com/ust"],
-  "canonical": "ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8",
+  "canonical": "ust:|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8",
   "hash": "sha256:<hex>",
   "seed": "sha256:<SHA256(helioradar.com_canonical|muuune.com_canonical)>"
 }
@@ -332,7 +334,7 @@ A minimal UST document **MUST** include:
 | Field | Description |
 |---|---|
 | `protocol` | Must be `"UST"` |
-| `version` | Protocol version, e.g. `"0.25"` |
+| `version` | Protocol version, e.g. `"0.26"` |
 | `ust_id` | Time-frame identifier |
 | `domain_shard` | Domain publishing the shard |
 | `generated_at` | When this shard was generated (ISO 8601 UTC) |
@@ -381,7 +383,7 @@ The canonical string is the deterministic representation used for hashing.
 **Format:**
 
 ```
-ust:v0.25|domain={domain_shard}|ust_id={ust_id}|{key_1}={value_1}|{key_2}={value_2}
+ust:|domain={domain_shard}|ust_id={ust_id}|{key_1}={value_1}|{key_2}={value_2}
 ```
 
 ### Key ordering
@@ -440,7 +442,7 @@ Null state values MUST NOT appear in the canonical string. Omit the key entirely
 **Canonical string:**
 
 ```
-ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
+ust:|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
 ```
 
 **Hash:**
@@ -470,7 +472,7 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
 ```json
 {
   "protocol": "UST",
-  "version": "0.25",
+  "version": "0.26",
   "ust_id": "ust:20260424.15",
   "domain_shard": "helioradar.com",
   "generated_at": "2026-04-24T15:03:12Z",
@@ -484,7 +486,7 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
     "xray_flux": 0.000001
   },
   "state_schema": "https://helioradar.com/ust.schema.json",
-  "canonical": "ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001",
+  "canonical": "ust:|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001",
   "hash": "sha256:<hex>"
 }
 ```
@@ -496,7 +498,7 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
 ```json
 {
   "protocol": "UST",
-  "version": "0.25",
+  "version": "0.26",
   "ust_id": "ust:20260424.15",
   "domain_shard": "muuune.com",
   "generated_at": "2026-04-24T15:03:20Z",
@@ -509,7 +511,7 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
     "tithi": 8
   },
   "is_based_on": ["https://helioradar.com/ust"],
-  "canonical": "ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|chord=Am7add9|noise_color=brown|texture_mode=WHITE_AMBIENT|tithi=8",
+  "canonical": "ust:|domain=muuune.com|ust_id=ust:20260424.15|chord=Am7add9|noise_color=brown|texture_mode=WHITE_AMBIENT|tithi=8",
   "hash": "sha256:<hex>"
 }
 ```
@@ -519,7 +521,7 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
 ```json
 {
   "protocol": "UST",
-  "version": "0.25",
+  "version": "0.26",
   "ust_id": "ust:20260424.15",
   "domain_shard": "agrofield.io",
   "generated_at": "2026-04-24T15:04:00Z",
@@ -531,7 +533,7 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
     "irrigation_risk": "medium",
     "soil_moisture": 0.42
   },
-  "canonical": "ust:v0.25|domain=agrofield.io|ust_id=ust:20260424.15|crop_stage=flowering|field_temperature=18.6|irrigation_risk=medium|soil_moisture=0.42",
+  "canonical": "ust:|domain=agrofield.io|ust_id=ust:20260424.15|crop_stage=flowering|field_temperature=18.6|irrigation_risk=medium|soil_moisture=0.42",
   "hash": "sha256:<hex>"
 }
 ```
@@ -541,7 +543,7 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
 ```json
 {
   "protocol": "UST",
-  "version": "0.25",
+  "version": "0.26",
   "ust_id": "ust:20260424.15",
   "domain_shard": "steelplant.ai",
   "generated_at": "2026-04-24T15:04:15Z",
@@ -553,7 +555,7 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
     "line_pressure": 2.8,
     "production_state": "stable"
   },
-  "canonical": "ust:v0.25|domain=steelplant.ai|ust_id=ust:20260424.15|energy_load=0.73|furnace_temperature=1538.4|line_pressure=2.8|production_state=stable",
+  "canonical": "ust:|domain=steelplant.ai|ust_id=ust:20260424.15|energy_load=0.73|furnace_temperature=1538.4|line_pressure=2.8|production_state=stable",
   "hash": "sha256:<hex>"
 }
 ```
@@ -641,7 +643,7 @@ function buildCanonical(domain, ust_id, state) {
   const pairs = sorted
     .filter(k => state[k] !== null && state[k] !== undefined)
     .map(k => `${k}=${toCanonicalValue(state[k])}`);
-  return `ust:v0.25|domain=${domain}|ust_id=${ust_id}|${pairs.join("|")}`;
+  return `ust:|domain=${domain}|ust_id=${ust_id}|${pairs.join("|")}`;
 }
 
 const state = { kp: 3.0, bz: -2.82, solar_wind_speed: 482.9 };
@@ -649,7 +651,7 @@ const canonical = buildCanonical("helioradar.com", "ust:20260424.15", state);
 const hash = "sha256:" + sha256(canonical);
 
 console.log(canonical);
-// ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
+// ust:|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
 console.log(hash);
 ```
 
@@ -752,7 +754,7 @@ GET /.well-known/ust
 ```json
 {
   "protocol": "UST",
-  "version": "0.25",
+  "version": "0.26",
   "current": "https://example.com/ust",
   "schema": "https://example.com/ust-state.schema.json",
   "description": "Current UST shard for example.com"
@@ -801,7 +803,7 @@ The domain publishes this seed in the public shard. The private URL does not app
   "domain_shard": "example.com",
   "ust_id": "ust:20260424.15",
   "is_based_on": ["https://helioradar.com/ust"],
-  "canonical": "ust:v0.25|domain=example.com|...",
+  "canonical": "ust:|domain=example.com|...",
   "hash": "sha256:<hex>",
   "seed": "sha256:<hex>"
 }
@@ -876,7 +878,7 @@ A shard with encrypted state carries the ciphertext in the document, but builds 
   "domain_shard": "muuune.com",
   "ust_id": "ust:20260424.15",
   "state_encrypted": "AES256-GCM:<ciphertext>",
-  "canonical": "ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_km=370906.747|tithi=8",
+  "canonical": "ust:|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_km=370906.747|tithi=8",
   "hash": "sha256:<SHA256(canonical)>",
   "seed": "sha256:<hex>"
 }
@@ -903,7 +905,7 @@ Each new layer appends its canonical to the input before hashing. The seed is pu
 ```
 L1 (public):
   state: { tithi: 8 }
-  canonical: ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|tithi=8
+  canonical: ust:|domain=muuune.com|ust_id=ust:20260424.15|tithi=8
   seed: SHA256(L1.canonical + "|" + L2.canonical + "|" + L3.canonical)
 
 L2 (private, plaintext):
@@ -936,7 +938,7 @@ A third party who holds the key to L3 may add their own layer:
   "domain_shard": "partner.com",
   "ust_id": "ust:20260424.15",
   "is_based_on": ["https://muuune.com/ust"],
-  "canonical": "ust:v0.25|domain=partner.com|ust_id=ust:20260424.15|<their fields>",
+  "canonical": "ust:|domain=partner.com|ust_id=ust:20260424.15|<their fields>",
   "hash": "sha256:<hex>",
   "seed": "sha256:<SHA256(L1|L2|L3|L4)>"
 }
@@ -1079,7 +1081,13 @@ UST gives agents a standard way to ask:
 
 ## Version scope
 
-### v0.25 — current
+### v0.26 — current
+
+**Added vs v0.25 (breaking):**
+
+- Canonical prefix: version removed from canonical string. `ust:v0.25|...` → `ust:|...`. Version lives in JSON `version` field only. This makes hash and seed stable across protocol upgrades — chains can mix shards from different protocol versions without coordination.
+
+### v0.25
 
 **Added vs v0.24:**
 
@@ -1119,7 +1127,7 @@ UST gives agents a standard way to ask:
 
 - `seed` field: composite cross-shard seed computed as `SHA256(source.canonical + "|" + dependent.canonical)`
 - Composite seed documented under [UST ID alignment → Composite seed](#composite-seed)
-- Canonical string prefix updated: `ust:v0.25|`
+- Canonical string prefix updated: `ust:|`
 
 ### v0.21
 
