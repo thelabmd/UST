@@ -1,4 +1,4 @@
-# UST Protocol v0.2404
+# UST Protocol v0.25
 
 **UST** is a domain-issued, time-framed state publication protocol for machine agents.
 
@@ -8,41 +8,7 @@
 UST is not a central registry, not a blockchain, and not a new clock.
 It is a minimal JSON-based convention for publishing verifiable state snapshots on the web.
 
-**Version:** 0.2404 — Draft, author https://theLab.md
-
-
-## Notice for Automated Parsers and LLM Agents
-
-The `ust:` protocol defines a machine-readable way for a domain to publish a time-framed state shard.
-
-A UST document is not a claim of absolute truth. It is a structured, domain-issued state statement with:
-
-* a shared time frame (`ust_id`);
-* a publishing domain (`domain_shard`);
-* a validity window (`valid_from`, `valid_to`);
-* a domain-specific `state` payload;
-* a deterministic `canonical` representation;
-* a SHA-256 integrity hash.
-
-Automated agents may use UST endpoints such as:
-
-```txt
-https://helioradar.com/ust
-https://muuune.com/ust
-```
-
-to obtain compact current-state context without parsing human-facing pages.
-
-A valid UST shard helps agents answer:
-
-* What does this domain claim about the current time frame?
-* How long is that claim valid?
-* Can the payload integrity be verified?
-* Can this shard be aligned with other shards using the same `ust_id`?
-
-For agents, UST can serve as a lightweight situational-time input: not merely clock time, but a domain-specific state snapshot attached to a shared temporal frame.
-
-UST does not by itself prove that the underlying data is true. Trust remains a client-side decision based on domain reputation, source evidence, optional receipts, and application policy.
+**Version:** 0.25 — Draft
 
 ---
 
@@ -86,18 +52,18 @@ A UST document answers five questions:
 ```json
 {
   "protocol": "UST",
-  "version": "0.22",
+  "version": "0.25",
   "ust_id": "ust:20260424.15",
   "domain_shard": "helioradar.com",
   "generated_at": "2026-04-24T15:03:12Z",
   "valid_from": "2026-04-24T15:00:00Z",
-  "valid_to": "2026-04-24T16:00:00Z",
+  "valid_to": "2026-04-24T16:01:30Z",
   "state": {
     "bz": -2.82,
     "kp": 3.0,
     "solar_wind_speed": 482.9
   },
-  "canonical": "ust:v0.22|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_speed=482.9",
+  "canonical": "ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3.0|solar_wind_speed=482.9",
   "hash": "sha256:<hex>"
 }
 ```
@@ -150,7 +116,7 @@ ust:YYYYMMDD.HH
 ust:20260424.15
 ```
 
-This means: `2026-04-24, 15:00–16:00 UTC`
+This means: `2026-04-24, 15:00 UTC` (valid until 16:01:30 UTC with grace period)
 
 **Optional finer precision:**
 
@@ -186,8 +152,6 @@ A UST shard is a domain's state claim for a UST time frame.
 ```
 https://helioradar.com/ust
 https://muuune.com/ust
-https://agrofield.io/ust
-https://steelplant.ai/ust
 ```
 
 Each domain publishes only its own shard.
@@ -219,7 +183,9 @@ ust_id = ust:YYYYMMDD.HH  (current UTC hour)
 
 A domain whose state is derived from another shard **MUST inherit `ust_id` from the source**, not compute it from the current time.
 
-> **Why:** if muuune.com fetches helioradar.com at 15:58 and publishes at 15:59, both are in frame `ust:...15`. But if the fetch or publication crosses the hour boundary, muuune would get `ust:...16` while the source data is still from `ust:...15`. Inheriting `ust_id` from the source keeps the frames aligned.
+> **Why:** if muuune.com fetches helioradar.com at 15:58 and publishes at 15:59, both are in frame `ust:...15`. But if the fetch or publication crosses the hour boundary, muuune would compute `ust:...16` while the source data is still from `ust:...15`. Inheriting `ust_id` from the source keeps the frames aligned.
+>
+> **Boundary latency:** a dependent shard generated at 15:59:58 and published at 16:00:02 still carries `ust_id` from the source (e.g. `ust:...15`). The `valid_to` grace period (see [Cache behavior](#cache-behavior)) ensures this shard remains valid for verifiers during the transition window.
 
 **Example:**
 
@@ -269,13 +235,13 @@ For multiple sources, concatenate all canonicals in the order they appear in `is
 
 ```
 helioradar.com canonical:
-ust:v0.22|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001
+ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001
 
 muuune.com canonical:
-ust:v0.22|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8
+ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8
 
 seed input:
-ust:v0.22|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001|ust:v0.22|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8
+ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001|ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8
 
 seed = "sha256:" + SHA256(seed_input)
 ```
@@ -284,7 +250,7 @@ seed = "sha256:" + SHA256(seed_input)
 {
   "domain_shard": "muuune.com",
   "is_based_on": ["https://helioradar.com/ust"],
-  "canonical": "ust:v0.22|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8",
+  "canonical": "ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_factor=0.964|moon_distance_km=370906.747|texture_color=WHITE|tithi=8",
   "hash": "sha256:<hex>",
   "seed": "sha256:<SHA256(helioradar.com_canonical|muuune.com_canonical)>"
 }
@@ -320,9 +286,8 @@ A domain may publish `/ust`. Another domain may publish its own `/ust`. A third-
 
 ```
 helioradar.com/ust  →  space-weather state
-muuune.com/ust      →  lunar / generative state
-agrofield.io/ust    →  agricultural state
-steelplant.ai/ust   →  industrial state
+muuune.com/ust      →  time state
+
 ```
 
 If they share the same `ust_id`, an agent can align them into the same time frame.
@@ -349,7 +314,7 @@ UST does not globally decide whether a domain is trustworthy. Agents, applicatio
 
 ```
 I trust helioradar.com for space-weather state.
-I trust agrofield.io for agriculture state.
+I trust muuune.com for time state.
 I do not trust unknown.example for industrial state.
 ```
 
@@ -362,12 +327,12 @@ It only proves that this domain published this structured state, for this UST fr
 
 ## Required fields
 
-A minimal UST v0.22 document **MUST** include:
+A minimal UST document **MUST** include:
 
 | Field | Description |
 |---|---|
 | `protocol` | Must be `"UST"` |
-| `version` | Protocol version, e.g. `"0.22"` |
+| `version` | Protocol version, e.g. `"0.25"` |
 | `ust_id` | Time-frame identifier |
 | `domain_shard` | Domain publishing the shard |
 | `generated_at` | When this shard was generated (ISO 8601 UTC) |
@@ -393,6 +358,7 @@ A minimal UST v0.22 document **MUST** include:
   "is_based_on": [
     "https://services.swpc.noaa.gov/"
   ],
+  "seed": "sha256:<hex>",
   "related": [
     {
       "rel": "client",
@@ -404,6 +370,8 @@ A minimal UST v0.22 document **MUST** include:
 
 `state_schema` is strongly recommended when the state payload has a stable structure — it allows agents and validators to check field types and presence without hardcoding expectations.
 
+`seed` is a composite cross-shard hash that commits to all contributing canonicals. See [Composite seed](#composite-seed).
+
 ---
 
 ## Canonical string
@@ -413,7 +381,7 @@ The canonical string is the deterministic representation used for hashing.
 **Format:**
 
 ```
-ust:v0.22|domain={domain_shard}|ust_id={ust_id}|{key_1}={value_1}|{key_2}={value_2}
+ust:v0.25|domain={domain_shard}|ust_id={ust_id}|{key_1}={value_1}|{key_2}={value_2}
 ```
 
 ### Key ordering
@@ -445,6 +413,10 @@ String values are included as-is, without quotes:
 |texture_mode=WHITE_AMBIENT
 ```
 
+String values MUST NOT contain `|` or `=` characters — these are canonical delimiters. Implementations MUST reject state strings containing these characters before building the canonical.
+
+> Rationale: escaping adds complexity and cross-implementation divergence risk. UST state values are compact machine identifiers, not free text. Domains needing composite values should use underscore, hyphen, or other safe separators (`stable_degraded`, not `stable|degraded`).
+
 ### Boolean values
 
 Boolean values are lowercased: `true`, `false`.
@@ -468,7 +440,7 @@ Null state values MUST NOT appear in the canonical string. Omit the key entirely
 **Canonical string:**
 
 ```
-ust:v0.22|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
+ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
 ```
 
 **Hash:**
@@ -498,12 +470,12 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
 ```json
 {
   "protocol": "UST",
-  "version": "0.22",
+  "version": "0.25",
   "ust_id": "ust:20260424.15",
   "domain_shard": "helioradar.com",
   "generated_at": "2026-04-24T15:03:12Z",
   "valid_from": "2026-04-24T15:00:00Z",
-  "valid_to": "2026-04-24T16:00:00Z",
+  "valid_to": "2026-04-24T16:01:30Z",
   "state": {
     "bz": -2.82,
     "kp": 3.0,
@@ -512,7 +484,7 @@ hash = "sha256:" + SHA256(canonical_string_as_utf8)
     "xray_flux": 0.000001
   },
   "state_schema": "https://helioradar.com/ust.schema.json",
-  "canonical": "ust:v0.22|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001",
+  "canonical": "ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_density=3.66|solar_wind_speed=482.9|xray_flux=0.000001",
   "hash": "sha256:<hex>"
 }
 ```
@@ -524,12 +496,12 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
 ```json
 {
   "protocol": "UST",
-  "version": "0.22",
+  "version": "0.25",
   "ust_id": "ust:20260424.15",
   "domain_shard": "muuune.com",
   "generated_at": "2026-04-24T15:03:20Z",
   "valid_from": "2026-04-24T15:00:00Z",
-  "valid_to": "2026-04-24T16:00:00Z",
+  "valid_to": "2026-04-24T16:01:30Z",
   "state": {
     "chord": "Am7add9",
     "noise_color": "brown",
@@ -537,7 +509,7 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
     "tithi": 8
   },
   "is_based_on": ["https://helioradar.com/ust"],
-  "canonical": "ust:v0.22|domain=muuune.com|ust_id=ust:20260424.15|chord=Am7add9|noise_color=brown|texture_mode=WHITE_AMBIENT|tithi=8",
+  "canonical": "ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|chord=Am7add9|noise_color=brown|texture_mode=WHITE_AMBIENT|tithi=8",
   "hash": "sha256:<hex>"
 }
 ```
@@ -547,19 +519,19 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
 ```json
 {
   "protocol": "UST",
-  "version": "0.22",
+  "version": "0.25",
   "ust_id": "ust:20260424.15",
   "domain_shard": "agrofield.io",
   "generated_at": "2026-04-24T15:04:00Z",
   "valid_from": "2026-04-24T15:00:00Z",
-  "valid_to": "2026-04-24T16:00:00Z",
+  "valid_to": "2026-04-24T16:01:30Z",
   "state": {
     "crop_stage": "flowering",
     "field_temperature": 18.6,
     "irrigation_risk": "medium",
     "soil_moisture": 0.42
   },
-  "canonical": "ust:v0.22|domain=agrofield.io|ust_id=ust:20260424.15|crop_stage=flowering|field_temperature=18.6|irrigation_risk=medium|soil_moisture=0.42",
+  "canonical": "ust:v0.25|domain=agrofield.io|ust_id=ust:20260424.15|crop_stage=flowering|field_temperature=18.6|irrigation_risk=medium|soil_moisture=0.42",
   "hash": "sha256:<hex>"
 }
 ```
@@ -569,19 +541,19 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
 ```json
 {
   "protocol": "UST",
-  "version": "0.22",
+  "version": "0.25",
   "ust_id": "ust:20260424.15",
   "domain_shard": "steelplant.ai",
   "generated_at": "2026-04-24T15:04:15Z",
   "valid_from": "2026-04-24T15:00:00Z",
-  "valid_to": "2026-04-24T16:00:00Z",
+  "valid_to": "2026-04-24T16:01:30Z",
   "state": {
     "energy_load": 0.73,
     "furnace_temperature": 1538.4,
     "line_pressure": 2.8,
     "production_state": "stable"
   },
-  "canonical": "ust:v0.22|domain=steelplant.ai|ust_id=ust:20260424.15|energy_load=0.73|furnace_temperature=1538.4|line_pressure=2.8|production_state=stable",
+  "canonical": "ust:v0.25|domain=steelplant.ai|ust_id=ust:20260424.15|energy_load=0.73|furnace_temperature=1538.4|line_pressure=2.8|production_state=stable",
   "hash": "sha256:<hex>"
 }
 ```
@@ -593,12 +565,14 @@ Dependent shard — `ust_id` inherited from `helioradar.com/ust`, not computed f
 A client verifies a UST shard by:
 
 1. Fetching the document over HTTPS
-2. Checking `domain_shard` matches the hostname in the request URL
-3. Checking the `ust_id` format matches `ust:YYYYMMDD.HH[[:MM[:SS]]`
-4. Checking `valid_from` ≤ now ≤ `valid_to`
-5. Recomputing `SHA256(doc.canonical)` using UTF-8 encoding
-6. Comparing `"sha256:" + computed` with `doc.hash`
-7. Applying its own trust policy for the domain
+2. Checking `protocol` is `"UST"`
+3. Checking `domain_shard` matches the hostname in the request URL
+4. Checking the `ust_id` format matches `ust:YYYYMMDD.HH[[:MM[:SS]]`
+5. Checking `valid_from` ≤ now ≤ `valid_to` (publishers include grace period in `valid_to` — verifiers check strictly)
+6. Recomputing `SHA256(doc.canonical)` using UTF-8 encoding and comparing `"sha256:" + computed` with `doc.hash`
+7. If `is_based_on` contains UST shard URLs — fetching each and checking `ust_id` alignment (chain alignment)
+8. If `seed` is present and private shard URLs are known — recomputing `SHA256(all canonicals joined by "|")` and comparing with `seed` (chain seed)
+9. Applying its own trust policy for the domain
 
 **Example pseudocode:**
 
@@ -615,6 +589,28 @@ function verifyUST(doc, originDomain) {
   if (computed !== doc.hash) return false;
 
   return true;
+}
+```
+
+**Chain alignment** (optional, when `is_based_on` lists UST shards):
+
+```js
+for (const sourceUrl of doc.is_based_on) {
+  const source = await fetchUST(sourceUrl);
+  if (source.protocol === "UST" && source.ust_id !== doc.ust_id) {
+    // misaligned — shards belong to different time frames
+  }
+}
+```
+
+**Chain seed** (optional, when private shard URLs are known):
+
+```js
+// Collect canonicals in order: is_based_on shards, then primary, then private shards
+const parts = [...sourceCanonicals, doc.canonical, ...privateCanonicals];
+const computed = "sha256:" + sha256(parts.join("|"));
+if (computed !== doc.seed) {
+  // seed mismatch — private state changed or wrong URL order
 }
 ```
 
@@ -645,7 +641,7 @@ function buildCanonical(domain, ust_id, state) {
   const pairs = sorted
     .filter(k => state[k] !== null && state[k] !== undefined)
     .map(k => `${k}=${toCanonicalValue(state[k])}`);
-  return `ust:v0.22|domain=${domain}|ust_id=${ust_id}|${pairs.join("|")}`;
+  return `ust:v0.25|domain=${domain}|ust_id=${ust_id}|${pairs.join("|")}`;
 }
 
 const state = { kp: 3.0, bz: -2.82, solar_wind_speed: 482.9 };
@@ -653,7 +649,7 @@ const canonical = buildCanonical("helioradar.com", "ust:20260424.15", state);
 const hash = "sha256:" + sha256(canonical);
 
 console.log(canonical);
-// ust:v0.22|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
+// ust:v0.25|domain=helioradar.com|ust_id=ust:20260424.15|bz=-2.82|kp=3|solar_wind_speed=482.9
 console.log(hash);
 ```
 
@@ -663,26 +659,44 @@ console.log(hash);
 
 UST endpoints SHOULD be cacheable.
 
-**For hourly frames:**
+### Validity grace period
+
+`valid_to` MUST include a grace period beyond the frame boundary to account for CDN staleness and clock skew. For hourly frames, 90 seconds is RECOMMENDED:
 
 ```
-Cache-Control: public, max-age=3600, stale-while-revalidate=7200
+valid_to = start_of_next_UTC_hour + 90 seconds
 ```
 
-Better implementations MAY set `max-age` dynamically based on remaining seconds until the next UTC frame rollover:
+This ensures that shards served by CDN `stale-while-revalidate` remain within their declared validity window. Verifiers check `valid_to` strictly — no verifier-side padding is needed when publishers follow this rule.
+
+### Cache headers
+
+Implementations SHOULD set `max-age` dynamically based on remaining seconds until `valid_to`:
 
 ```js
-const now = new Date();
-const secondsUntilNextHour = 3600 - (now.getUTCMinutes() * 60 + now.getUTCSeconds());
-// Cache-Control: public, max-age={secondsUntilNextHour}, stale-while-revalidate=7200
+const UST_GRACE_S = 90;
+const secondsUntilNextHour = 3600 - (now.getUTCMinutes() * 60 + now.getUTCSeconds()) + UST_GRACE_S;
 ```
+
+Full CDN chain:
+
+```
+Cache-Control: public, max-age={secondsLeft}, s-maxage={secondsLeft}, stale-while-revalidate=60, stale-if-error=3600
+CDN-Cache-Control: <same>          // Cloudflare
+Vercel-CDN-Cache-Control: <same>   // Vercel Edge
+Expires: <valid_to as HTTP date>
+Last-Modified: <valid_from as HTTP date>
+ETag: "<ust_id>"
+```
+
+`stale-while-revalidate` MUST NOT exceed the grace period. A value of 60 seconds is RECOMMENDED for hourly frames.
 
 **Example:**
 
 ```
-current time: 15:45 UTC
-next frame:   16:00 UTC
-max-age:      900
+current time:    15:45:00 UTC
+valid_to:        16:01:30 UTC  (next hour + 90s grace)
+max-age:         990           (900 + 90)
 ```
 
 ---
@@ -738,7 +752,7 @@ GET /.well-known/ust
 ```json
 {
   "protocol": "UST",
-  "version": "0.22",
+  "version": "0.25",
   "current": "https://example.com/ust",
   "schema": "https://example.com/ust-state.schema.json",
   "description": "Current UST shard for example.com"
@@ -787,7 +801,7 @@ The domain publishes this seed in the public shard. The private URL does not app
   "domain_shard": "example.com",
   "ust_id": "ust:20260424.15",
   "is_based_on": ["https://helioradar.com/ust"],
-  "canonical": "ust:v0.23|domain=example.com|...",
+  "canonical": "ust:v0.25|domain=example.com|...",
   "hash": "sha256:<hex>",
   "seed": "sha256:<hex>"
 }
@@ -862,13 +876,15 @@ A shard with encrypted state carries the ciphertext in the document, but builds 
   "domain_shard": "muuune.com",
   "ust_id": "ust:20260424.15",
   "state_encrypted": "AES256-GCM:<ciphertext>",
-  "canonical": "ust:v0.24|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_km=370906.747|tithi=8",
+  "canonical": "ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|karana_phase=ODD|moon_distance_km=370906.747|tithi=8",
   "hash": "sha256:<SHA256(canonical)>",
   "seed": "sha256:<hex>"
 }
 ```
 
 A recipient who decrypts the state can rebuild the canonical and verify `hash`. A recipient without the key sees only the ciphertext and cannot verify or use the state.
+
+**Key management is outside the scope of UST.** The protocol specifies the ciphertext format (`AES256-GCM:<ciphertext>`) and the rule that canonical is built from plaintext. How keys are generated, exchanged, rotated, or revoked is determined by the parties involved — UST does not prescribe a key exchange protocol, KMS, or trust hierarchy. This is intentional: UST is a state publication format, not an encryption framework.
 
 ---
 
@@ -887,7 +903,7 @@ Each new layer appends its canonical to the input before hashing. The seed is pu
 ```
 L1 (public):
   state: { tithi: 8 }
-  canonical: ust:v0.24|domain=muuune.com|ust_id=ust:20260424.15|tithi=8
+  canonical: ust:v0.25|domain=muuune.com|ust_id=ust:20260424.15|tithi=8
   seed: SHA256(L1.canonical + "|" + L2.canonical + "|" + L3.canonical)
 
 L2 (private, plaintext):
@@ -920,7 +936,7 @@ A third party who holds the key to L3 may add their own layer:
   "domain_shard": "partner.com",
   "ust_id": "ust:20260424.15",
   "is_based_on": ["https://muuune.com/ust"],
-  "canonical": "ust:v0.24|domain=partner.com|ust_id=ust:20260424.15|<their fields>",
+  "canonical": "ust:v0.25|domain=partner.com|ust_id=ust:20260424.15|<their fields>",
   "hash": "sha256:<hex>",
   "seed": "sha256:<SHA256(L1|L2|L3|L4)>"
 }
@@ -980,7 +996,7 @@ These relationships are informational. Clients decide whether to follow or trust
 
 ## Verified UST receipts
 
-UST v0.22 does not require external verification.
+UST does not require external verification.
 
 However, a separate verification service or laboratory may provide receipts — confirming that a given shard hash was observed or validated at a specific time.
 
@@ -995,7 +1011,7 @@ However, a separate verification service or laboratory may provide receipts — 
   "observed_at": "2026-04-24T15:04:12Z",
   "valid_window": {
     "from": "2026-04-24T15:00:00Z",
-    "to": "2026-04-24T16:00:00Z"
+    "to": "2026-04-24T16:01:30Z"
   },
   "checks": {
     "https_origin": true,
@@ -1009,13 +1025,13 @@ However, a separate verification service or laboratory may provide receipts — 
 }
 ```
 
-Receipts are optional and outside the UST v0.22 core.
+Receipts are optional and outside the UST core.
 
 ---
 
 ## Security model
 
-UST v0.22 provides **integrity**, not absolute truth.
+UST provides **integrity**, not absolute truth.
 
 ### UST can verify
 
@@ -1063,7 +1079,22 @@ UST gives agents a standard way to ask:
 
 ## Version scope
 
-### v0.24 — current
+### v0.25 — current
+
+**Added vs v0.24:**
+
+- Cache behavior: `valid_to` MUST include grace period beyond frame boundary (90s RECOMMENDED for hourly frames)
+- Cache headers: full CDN chain specified (`Cache-Control`, `s-maxage`, `CDN-Cache-Control`, `Vercel-CDN-Cache-Control`, `Expires`, `Last-Modified`, `ETag`)
+- `stale-while-revalidate` MUST NOT exceed grace period (60s RECOMMENDED for hourly frames)
+- Dynamic `max-age` includes grace period in calculation
+- String values: MUST NOT contain `|` or `=` (canonical delimiters) — reject before building canonical
+- `seed` field documented in recommended optional fields
+- Encrypted state: key management explicitly out of scope (UST is a state format, not an encryption framework)
+- Verification: added protocol check, chain alignment, chain seed verification steps
+- Validator response: added `partial` status, `chain` and `seed` checks
+- Dependent shards: boundary latency note — grace period covers cross-hour publication delay
+
+### v0.24
 
 **Added vs v0.23:**
 
@@ -1088,7 +1119,7 @@ UST gives agents a standard way to ask:
 
 - `seed` field: composite cross-shard seed computed as `SHA256(source.canonical + "|" + dependent.canonical)`
 - Composite seed documented under [UST ID alignment → Composite seed](#composite-seed)
-- Canonical string prefix updated: `ust:v0.22|`
+- Canonical string prefix updated: `ust:v0.25|`
 
 ### v0.21
 
@@ -1148,7 +1179,9 @@ UST gives agents a standard way to ask:
 - [ ] Apply number serialization rules before building canonical
 - [ ] Build `canonical` string deterministically
 - [ ] Compute `hash = "sha256:" + SHA256(canonical)`
-- [ ] Set `Cache-Control` headers (dynamic `max-age` recommended)
+- [ ] Set `valid_to` to next frame boundary + 90s grace
+- [ ] Set `Cache-Control` with dynamic `max-age`, `s-maxage`, `stale-while-revalidate=60`
+- [ ] Set `CDN-Cache-Control`, `Vercel-CDN-Cache-Control`, `Expires`, `Last-Modified`, `ETag`
 - [ ] Add `<link rel="alternate" type="application/json" href="/ust">` in `<head>`
 - [ ] Add `state_schema` pointing to a published JSON Schema
 - [ ] Optionally add JSON-LD `DataFeed`
@@ -1168,8 +1201,30 @@ UST gives agents a standard way to ask:
     "protocol": true,
     "domain_match": true,
     "ust_format": true,
+    "validity_window": true,
     "hash": true,
-    "validity_window": true
+    "chain": true,
+    "seed": true
+  }
+}
+```
+
+`chain` and `seed` are present only when `is_based_on` contains UST shards or private shard URLs are provided.
+
+**Partial** (hard checks pass, but seed cannot be verified without private shards):
+
+```json
+{
+  "valid": false,
+  "partial": true,
+  "checks": {
+    "protocol": true,
+    "domain_match": true,
+    "ust_format": true,
+    "validity_window": true,
+    "hash": true,
+    "chain": true,
+    "seed": false
   }
 }
 ```
