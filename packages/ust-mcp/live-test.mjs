@@ -21,7 +21,7 @@ const client = new Client({ name: 'ust-live-test', version: '1' }, { capabilitie
 await client.connect(transport);
 
 const tools = await client.listTools();
-check('live:tools/list = 8', tools.tools.length === 8, 'got ' + tools.tools.length);
+check('live:tools/list = 9', tools.tools.length === 9, 'got ' + tools.tools.length);
 check('live:key_id over the wire', (await call(client, 'ust_key_id', { pub: A.pubB64 })).key_id === A.key_id);
 
 // THE agent flow, entirely over MCP: build → sign with own key → verify
@@ -31,6 +31,14 @@ const doc = { ust: '1.0', state: built.state, sig: { alg: 'Ed25519', key_id: A.k
 check('live:build→sign→verify = VALID', (await call(client, 'ust_verify', { doc })).result === 'VALID');
 const bad = JSON.parse(JSON.stringify(doc)); bad.state.data.sw.value.kp = '9.9';
 check('live:tampered = INVALID', (await call(client, 'ust_verify', { doc: bad })).result === 'INVALID');
+
+// ust_verify_stream over the wire — a range (ust:…4001..4002) as one authority's complete stream
+const g = P.seal(P.buildGenesis({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.40', key_id: A.key_id }, t, A.pubB64), A.priv, A.pubB64);
+const fr0 = P.seal(P.buildState({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.4001', key_id: A.key_id, class: 'observation' }, t, { r: { kind: 'captured', value: { n: '1' } } }, { prev: P.contentHash(g) }), A.priv, A.pubB64);
+const fr1 = P.seal(P.buildState({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.4002', key_id: A.key_id, class: 'observation' }, t, { r: { kind: 'captured', value: { n: '2' } } }, { prev: P.contentHash(fr0) }), A.priv, A.pubB64);
+const hd = P.contentHash(fr1);
+const ckp = P.seal(P.buildCheckpoint({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.4003', key_id: A.key_id }, t, hd, 2, hd), A.priv, A.pubB64);
+check('live:verify_stream = proven', (await call(client, 'ust_verify_stream', { frames: [fr0, fr1], genesis: g, checkpoint: ckp })).complete === 'proven');
 
 await client.close();
 console.log('\n════════════════════════════════════════════');

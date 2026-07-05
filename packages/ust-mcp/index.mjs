@@ -1,5 +1,5 @@
 // ust-mcp — the agent-facing MCP surface over `ust-protocol` (+ `ustate`). Two surfaces (bd 9oov):
-//   PROTOCOL MCP = universal (create/verify/combine/resolve/anchor over the stateless base) — built here.
+//   PROTOCOL MCP = universal (create/verify/combine/resolve/anchor/verify-stream over the stateless base) — built here.
 //   PRODUCT MCP  = noosphere business (pricing, archive depth, receipts) — separate, stubbed below.
 // Methods are derived FROM the record's fields. This module is TRANSPORT-AGNOSTIC: it exports the tool
 // registry + `dispatch()`; the stdio/SSE JSON-RPC server (via @modelcontextprotocol/sdk) is a thin shell the
@@ -52,6 +52,12 @@ export const tools = [
     description: 'ANCHOR: verify a self-contained time proof — recompute the Merkle inclusion path from a content_hash to the anchored root (substrate verification is delegated).',
     inputSchema: { type: 'object', required: ['content_hash', 'proof'], properties: { content_hash: { type: 'string' }, proof: { type: 'object' } } },
     handler: ({ content_hash, proof }) => P.verifyAnchor(content_hash, proof),
+  },
+  {
+    name: 'ust_verify_stream',
+    description: 'VERIFY A RANGE as one authority\'s complete stream — e.g. you fetched ust(001)…ust(007) from an archive: every frame LIGHT-verifies, they are prev-chained with no gaps, all belong to ONE publisher (mixed publishers → E-AUTHORITY), and with a covering checkpoint the interval is provably complete. Returns { complete: "proven" | "provisional" | "none" } or an error (E-PREV broken/forked chain · E-AUTHORITY mixed authority · E-SIG bad frame). Retrieval is NOT the protocol\'s job — pass the records you already have.',
+    inputSchema: { type: 'object', required: ['frames'], properties: { frames: { type: 'array' }, genesis: { type: 'object' }, checkpoint: { type: 'object' } } },
+    handler: ({ frames, genesis, checkpoint }) => P.verifyStream(frames, { genesis, checkpoint }),
   },
   {
     name: 'ust_key_id',

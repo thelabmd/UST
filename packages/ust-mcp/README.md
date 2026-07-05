@@ -37,6 +37,7 @@ Or in any MCP client config:
 | `ust_combine_attestation` | Build an attestation over N constituents (auto Merkle root) |
 | `ust_resolve` | Resolve name authority → `authoritative` / `self-asserted` |
 | `ust_anchor_verify` | Verify a time-anchor's Merkle inclusion proof |
+| `ust_verify_stream` | Verify a RANGE (e.g. ust(001)…ust(007) fetched from an archive) as one authority's complete, prev-chained stream → `proven`/`provisional` (retrieval is the product's job, not the protocol's) |
 | `ust_key_id` | Derive a `key_id` from a public key |
 | `ust_canon` | Canonicalize a value (the exact bytes UST hashes/signs) |
 
