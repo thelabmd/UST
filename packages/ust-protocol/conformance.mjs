@@ -29,7 +29,7 @@ for (const v of V.vectors) {
         const bad = clone(mk()); bad.state.time.generated_at = v.id.includes('fractional') ? '2026-06-28T14:03:09.500Z' : '2026-06-28T14:03:09+00:00';
         check(v.id, P.verify(bad, { context: 'data' }).error === 'E-MALFORMED'); break;
       }
-      if (v.id.includes('dupkey')) { noted(v.id, 'JSON.parse collapses dups — raw-bytes parser needed'); break; }
+      if (v.id.includes('dupkey')) { check(v.id, P.verifyJson('{"a":"1","a":"2"}').error === 'E-CANON', 'verifyJson raw-bytes dup detection (F7 closed)'); break; }
       let input = v.input;
       if (!input && v.id.includes('nonNFC')) input = { note: 'e' + String.fromCharCode(0x301) };   // decomposed e + combining acute (NOT NFC)
       let threw = false; try { P.canon(input); } catch (e) { threw = e.code === 'E-CANON'; }
@@ -72,6 +72,30 @@ check('B leap-second→E-MALFORMED', P.verify(mk({ r: { kind: 'captured', value:
 check('G1 pinned in-set→strength pinned', (r => r.result === 'VALID' && r.identity.strength === 'pinned' && r.publisher === undefined && r.publisher_claimed === 'helioradar.com')(P.verify(mk(), { context: 'data', pinnedKeys: [A.key_id] })));
 check('G1 pinned not-in-set→E-KEY', P.verify(mk(), { context: 'data', pinnedKeys: ['sha256:' + '00'.repeat(32)] }).error === 'E-KEY');
 check('G1 Y3 LIGHT→publisher_claimed (not publisher)', (r => r.publisher === undefined && r.publisher_claimed === 'helioradar.com' && r.identity.strength === 'self-asserted')(P.verify(mk(), { context: 'data' })));
+
+// ── ChatGPT 5.5 Max audit — F1–F8 (all closed structurally) ──
+{
+  const G = kp('bb'.repeat(32)), K = kp('cc'.repeat(32)), E = kp('ee'.repeat(32)), signG = (s) => P.seal(s, G.priv, G.pubB64);
+  const gen = signG(P.buildGenesis({ domain_shard: 'v.com', ust_id: 'ust:20260628.10', key_id: G.key_id }, T, G.pubB64));
+  // F1 — new_key_id alias: entry adds K but claims new_key_id=E; doc signed by E must NOT be authoritative
+  const alias = signG(P.buildKeyLogEntry({ domain_shard: 'v.com', ust_id: 'ust:20260628.1001', key_id: G.key_id }, T, { op: 'add', pub: K.pubB64, new_key_id: E.key_id }, P.contentHash(gen)));
+  const docE = P.seal(P.buildState({ domain_shard: 'v.com', ust_id: 'ust:20260628.11', key_id: E.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { x: '1' } } }), E.priv, E.pubB64);
+  check('F1 keylog new_key_id alias→E-KEY', P.verify(docE, { genesis: gen, keylog: [alias], noForkConfirmed: true, context: 'data' }).error === 'E-KEY');
+}
+// F2 — stream checkpoint WITHOUT genesis → not proven
+{
+  const a0 = P.seal(P.buildState({ domain_shard: 'x.com', ust_id: 'ust:20260628.2001', key_id: A.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { n: '1' } } }), A.priv, A.pubB64);
+  const a1 = P.seal(P.buildState({ domain_shard: 'x.com', ust_id: 'ust:20260628.2002', key_id: A.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { n: '2' } } }, { prev: P.contentHash(a0) }), A.priv, A.pubB64);
+  const h = P.contentHash(a1), cp = P.seal(P.buildCheckpoint({ domain_shard: 'x.com', ust_id: 'ust:20260628.2003', key_id: A.key_id }, T, h, 2, h), A.priv, A.pubB64);
+  check('F2 stream checkpoint w/o genesis→not proven', P.verifyStream([a0, a1], { checkpoint: cp }).complete !== 'proven');
+}
+check('F3 embedded bad proof→E-ANCHOR', (() => { const b = clone(mk()); b.proof = { root: 'sha256:' + '00'.repeat(32), path: [], anchor: { substrate: 'bitcoin-ots' } }; return P.verify(b, { context: 'data' }).error === 'E-ANCHOR'; })());
+check('F4 derivation no-provenance→E-MALFORMED', P.verify(mk({ r: { kind: 'computed', value: { x: '1' } } }, { ...ID, class: 'derivation' }), { context: 'data' }).error === 'E-MALFORMED');
+check('F4 observation w/ root→E-MALFORMED', (() => { const st = P.buildState(ID, T, { r: { kind: 'captured', value: { x: '1' } } }); st.provenance = { constituents: ['sha256:' + '11'.repeat(32)], root: 'sha256:' + '99'.repeat(32) }; return P.verify(P.seal(st, A.priv, A.pubB64), { context: 'data' }).error === 'E-MALFORMED'; })());
+check('F5 encrypted w/o enc→E-MALFORMED', (() => { const st = { id: ID, time: T, data: { e: { kind: 'captured', privacy: 'encrypted', commit: 'sha256:' + 'cd'.repeat(32) } }, hashes: { e: P.partitionHash({ commit: 'sha256:' + 'cd'.repeat(32) }) } }; return P.verify(P.seal(st, A.priv, A.pubB64), { context: 'data' }).error === 'E-MALFORMED'; })());
+check('F6 non-NFC member name→E-CANON', (() => { try { P.canon({ ['e' + String.fromCharCode(0x301)]: '1' }); return false; } catch (e) { return e.code === 'E-CANON'; } })());
+check('F7 raw duplicate-key→E-CANON', P.verifyJson('{"ust":"0.0","ust":"1.0","state":{},"sig":{}}').error === 'E-CANON');
+check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured', value: { x: '1' } } }, { ...ID, ust_id: 'ust:20261340.99' }), { context: 'data' }).error === 'E-MALFORMED');
 
 // ─── 4. HIGH (genesis + keylog → authoritative) + TOP (stream proven, anchor inclusion) inline ───
 {

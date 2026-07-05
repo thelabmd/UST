@@ -15,12 +15,15 @@ const buildResult = (state) => ({ state, content_hash: P.contentHash(doc1(state)
 export const tools = [
   {
     name: 'ust_verify',
-    description: 'VERIFY a UST document (three outcomes: VALID / INVALID / INDETERMINATE-unavailable). Reports identity strength (self-asserted / pinned / authoritative), time strength, and disclosures. The domain is returned as `publisher` ONLY when authoritative; otherwise as `publisher_claimed` (a self-asserted label — never attribute it as the real publisher). Supply `pinnedKeys` (an array of trusted key_ids, TOFU) to accept only known keys; `genesis`+`keylog` for HIGH name-authority; `proof` for TOP anchored time.',
-    inputSchema: { type: 'object', required: ['doc'], properties: { doc: { type: 'object' }, pinnedKeys: { type: 'array' }, genesis: { type: 'object' }, keylog: { type: 'array' }, proof: { type: 'object' }, disclosures: { type: 'object' }, noForkConfirmed: { type: 'boolean' }, requireAuthoritative: { type: 'boolean' } } },
-    handler: ({ doc, pinnedKeys, genesis, keylog, proof, disclosures, noForkConfirmed, requireAuthoritative }) => {
-      const r = P.verify(doc, { pinnedKeys, genesis, keylog, disclosures, noForkConfirmed, requireAuthoritative, context: 'data' });
-      if (proof && r.result === 'VALID') { const a = P.verifyAnchor(r.content_hash, proof); r.time = { strength: a.time, status: a.status, inclusion: a.inclusion }; }
-      return r;
+    description: 'VERIFY a UST document (three outcomes: VALID / INVALID / INDETERMINATE-unavailable). Reports identity strength (self-asserted / pinned / authoritative), time strength, and disclosures. The domain is returned as `publisher` ONLY when authoritative; otherwise as `publisher_claimed` (a self-asserted label — never attribute it as the real publisher). Supply `pinnedKeys` (an array of trusted key_ids, TOFU) to accept only known keys; `genesis`+`keylog` for HIGH name-authority; `proof` for TOP anchored time. For UNTRUSTED transcripts from the network/storage, pass `json` (raw text) instead of `doc` — it scans for duplicate keys + non-NFC names before parsing (a JS object cannot represent those).',
+    inputSchema: { type: 'object', properties: { doc: { type: 'object' }, json: { type: 'string' }, pinnedKeys: { type: 'array' }, genesis: { type: 'object' }, keylog: { type: 'array' }, proof: { type: 'object' }, disclosures: { type: 'object' }, noForkConfirmed: { type: 'boolean' }, requireAuthoritative: { type: 'boolean' } } },
+    handler: ({ doc, json, pinnedKeys, genesis, keylog, proof, disclosures, noForkConfirmed, requireAuthoritative }) => {
+      const o = { pinnedKeys, genesis, keylog, disclosures, noForkConfirmed, requireAuthoritative, context: 'data' };
+      // pass `json` (raw text) for the safe conformance boundary — duplicate-key + NFC scan BEFORE parse (F7).
+      if (json !== undefined) return P.verifyJson(json, o);
+      // an embedded doc.proof is verified INSIDE verify (present-bad ⇒ E-ANCHOR); a separately-passed proof merges in.
+      const d = (proof !== undefined && doc && doc.proof === undefined) ? { ...doc, proof } : doc;
+      return P.verify(d, o);
     },
   },
   {

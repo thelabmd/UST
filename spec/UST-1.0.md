@@ -1,7 +1,7 @@
 # Universal State Transcript (UST) — Protocol Specification, Version 1.0
 
-> **Release candidate — `1.0.0-rc.3`.** This specification has been extensively red-teamed; an independent
-> external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned the reference impl to §3.1 `pinned` (TOFU) + Y3 name epistemics — NO normative spec change). Pin exact versions.
+> **Release candidate — `1.0.0-rc.4`.** This specification has been extensively red-teamed; an independent
+> external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode). Pin exact versions.
 
 **UST is trust infrastructure.** It gives any machine-published statement about the state of the world its own
 VERIFIABLE trust — WHO asserted it, WHAT exact bytes, for WHICH time-frame, WHEN, and FROM WHAT — checkable
@@ -202,7 +202,7 @@ untrusted per I9, but tamper-evident). Nothing a human sees is outside the signa
 live ONLY under `data`, cannot collide with identity). Count ≤ 64 (§13). Each partition is an envelope:
 ```
 Partition := { "kind":"captured"|"computed", "value": { <string leaves> } }               // PUBLIC
-            | { "kind":"captured"|"computed", "privacy":"blinded"|"encrypted"|"secret-url",
+            | { "kind":"captured"|"computed", "privacy":"blinded"|"encrypted",
                 "commit": ContentHash [, "enc": {"alg":string,"key_id":string,"ct":b64url}] }  // PRIVATE
 ```
 **Per-partition hashing (UNIFORM).** Each partition has its OWN hash in the signed `hashes` map. The preimage is
@@ -436,9 +436,11 @@ identity/integrity of the local State (§14 steps 1–5 complete regardless of r
 
 Visibility is per-PARTITION (§4.4): a document mixes public and private partitions freely. Three modes,
 WEAKEST → strongest (do NOT conflate — E5):
-- **secret-URL (029)** — the partition / shard / layer is published at a non-guessable URL acting as a shared
-  secret; obscurity-only (a bearer secret in a URL — leaks via Referer, logs, CDN, history, TLS SNI); low-
-  stakes sharing only. Its participation in a public frame is proven by the chain/layer `seed` (§9.5), never by
+- **secret-URL — REMOVED as a privacy mode (rc.4).** Publishing a partition at a non-guessable URL is a
+  DISCLOSURE CHANNEL (how an authorized party receives the plaintext, §out-of-scope G18), not a cryptographic
+  privacy mode — a verifier checks nothing (obscurity only; a bearer secret in a URL leaks via Referer, logs,
+  CDN, history, TLS SNI). The use-case is covered by a `blinded` commit in the signed state + URL delivery as one
+  operator channel. `privacy` modes are `blinded` and `encrypted` only. This once-useful 029 idea is superseded;
   exposing the URL.
 - **blinded (cryptographic)** — the partition's `value` is replaced by
   `commit = H_shard( canon({ domain_shard, ust_id, "nonce": <b64url ≥128-bit>, "partition": <name>, value }) )` — FRAME-BOUND
@@ -755,7 +757,7 @@ unresolved dependency ⇒ the corresponding error (never `VALID`).
    verification passes with completeness `none`/`provisional`.
 8. **Privacy.** For each PRIVATE partition (blinded/encrypted, §4.4/§10), if authorized: reproduce its `commit`
    from the disclosed `{nonce,value}` + the document's `domain_shard`/`ust_id` (frame-bound, G23), and for `encrypted` verify `AEAD-Decrypt(enc.ct)` reproduces exactly that
-   `{nonce,value}` → `commit` (E-COMMIT on mismatch). Secret-URL partitions verify by holding the URL + the
+   `{nonce,value}` → `commit` (E-COMMIT on mismatch). (A non-guessable delivery URL is an out-of-band channel, not a verified mode.) The
    layer seed (§9.5/§10a). Never brute-force.
 9. **Provenance.** For each source verify `src_sig` (§9.1); unauthenticated ⇒ mark, never attribute. For
    attestations recompute `root` from constituents when available (⇒ E-ROOT on mismatch). Walk
@@ -836,7 +838,7 @@ Independent re-implementation is expected; the vectors make "verify without trus
   (`Locator = {substrate:"bitcoin-ots", ots:b64url, block_height:int}`; OTS attestation → Bitcoin header;
   finality = ≥6 confirmations). Future substrates register the same way — the protocol is substrate-agnostic.
   AnchorProof keys `root,path,anchor`.
-- **partition kind:** `captured` · `computed` — BOTH bind `domain_shard` (descriptive tag only; the domain-less `computed` mode was REMOVED in rc.2). **partition privacy:** `secret-url` · `blinded` · `encrypted`.
+- **partition kind:** `captured` · `computed` — BOTH bind `domain_shard` (descriptive tag only; the domain-less `computed` mode was REMOVED in rc.2). **partition privacy:** `blinded` · `encrypted` (both cryptographic — what is HIDDEN in the signed state). A "secret URL" is a DISCLOSURE CHANNEL (§out-of-scope, G18), not a privacy mode; removed from the registry in rc.4.
 - **alg (signatures):** `Ed25519` (strict, §7). **hash:** `sha256:` domain-separated (§7). **enc.alg (AEAD):**
   `XChaCha20-Poly1305`, `AES-256-GCM`. **hash domain tags:** `ust:state` (whole-State `content_hash`) | `ust:shard` (a per-partition hash, §4.4) | `ust:keylog|ust:checkpoint|ust:node|ust:leaf|ust:seed|ust:source`.
   All algorithm-tagged for agility (§19).

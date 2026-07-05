@@ -33,11 +33,11 @@ const bad = JSON.parse(JSON.stringify(doc)); bad.state.data.sw.value.kp = '9.9';
 check('live:tampered = INVALID', (await call(client, 'ust_verify', { doc: bad })).result === 'INVALID');
 
 // ust_verify_stream over the wire — a range (ust:…4001..4002) as one authority's complete stream
-const g = P.seal(P.buildGenesis({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.40', key_id: A.key_id }, t, A.pubB64), A.priv, A.pubB64);
-const fr0 = P.seal(P.buildState({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.4001', key_id: A.key_id, class: 'observation' }, t, { r: { kind: 'captured', value: { n: '1' } } }, { prev: P.contentHash(g) }), A.priv, A.pubB64);
-const fr1 = P.seal(P.buildState({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.4002', key_id: A.key_id, class: 'observation' }, t, { r: { kind: 'captured', value: { n: '2' } } }, { prev: P.contentHash(fr0) }), A.priv, A.pubB64);
+const g = P.seal(P.buildGenesis({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.14', key_id: A.key_id }, t, A.pubB64), A.priv, A.pubB64);
+const fr0 = P.seal(P.buildState({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.1401', key_id: A.key_id, class: 'observation' }, t, { r: { kind: 'captured', value: { n: '1' } } }, { prev: P.contentHash(g) }), A.priv, A.pubB64);
+const fr1 = P.seal(P.buildState({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.1402', key_id: A.key_id, class: 'observation' }, t, { r: { kind: 'captured', value: { n: '2' } } }, { prev: P.contentHash(fr0) }), A.priv, A.pubB64);
 const hd = P.contentHash(fr1);
-const ckp = P.seal(P.buildCheckpoint({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.4003', key_id: A.key_id }, t, hd, 2, hd), A.priv, A.pubB64);
+const ckp = P.seal(P.buildCheckpoint({ domain_shard: 'helioradar.com', ust_id: 'ust:20260705.1403', key_id: A.key_id }, t, hd, 2, hd), A.priv, A.pubB64);
 check('live:verify_stream = proven', (await call(client, 'ust_verify_stream', { frames: [fr0, fr1], genesis: g, checkpoint: ckp })).complete === 'proven');
 
 await client.close();

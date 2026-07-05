@@ -15,6 +15,7 @@ export function canon(v) {
   if (typeof v === 'object') {
     const k = Object.keys(v);
     if (new Set(k).size !== k.length) throw err('E-CANON', 'duplicate key'); // §6.1
+    for (const x of k) if (x.normalize('NFC') !== x) throw err('E-CANON', 'non-NFC member name'); // §6 — NAMES too, not just leaves (F6)
     return '{' + k.slice().sort().map(x => JSON.stringify(x) + ':' + canon(v[x])).join(',') + '}';
   }
   throw err('E-CANON', 'unsupported');
@@ -117,13 +118,15 @@ const RESERVED = { transcript: ['ust','state','sig','proof'], state: ['id','time
   id: ['domain_shard','ust_id','key_id','class','parent_ust'], envelope: ['kind','value','privacy','commit','enc'],
   sig: ['alg','key_id','pub','sig'] };
 const RES_PARTITION_NAMES = new Set([...RESERVED.state, ...RESERVED.id, 'partition', 'nonce', '__proto__', 'constructor', 'prototype']);
-const KINDS = ['captured', 'computed'], PRIVACY = ['blinded', 'encrypted'];
+const KINDS = ['captured', 'computed'], PRIVACY = ['blinded', 'encrypted'];   // §S4/D1: secret-url is a disclosure CHANNEL (§out-of-scope), not a privacy mode
+const AEAD_ALGS = ['AES-256-GCM', 'XChaCha20-Poly1305'], B64URL = /^[A-Za-z0-9_-]+$/;
 const CLASSES = ['observation','attestation','derivation','genesis','key'];
 // §6 pinned RFC3339 UTC-Z with VALID RANGES — month 01-12, day 01-31, hour 00-23, min/sec 00-59.
 // Rejects leap seconds (:60) and out-of-range (:99, hour 99) so two conforming verifiers ALWAYS agree (I4).
 // Publishers MUST smear leap seconds to :59 (there is no representable :60).
 const TS = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\dZ$/;
-const USTID = /^ust:\d{8}\.\d{2}(\d{2}(\d{2})?)?$/;                        // §8
+// §8 ust_id = ust:YYYYMMDD.HH[MM[SS]] as a VALID UTC frame — month 01-12, day 01-31, hour 00-23, min/sec 00-59 (F8).
+const USTID = /^ust:\d{4}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\.([01]\d|2[0-3])(([0-5]\d)([0-5]\d)?)?$/;
 
 // ─── §13 structural bounds — hard ceilings; exceed ⇒ E-BOUNDS ─────────────────────────────────────────
 const BOUNDS = { depth: 8, array: 4096, partitions: 64, breadth: 64, sizeBytes: 1048576 };
@@ -187,10 +190,25 @@ export function verify(doc, opts = {}) {
     if (st.time.valid_from > st.time.valid_to) return bad('E-MALFORMED', 'valid_from > valid_to');
     if (!CLASSES.includes(st.id.class)) return bad('E-MALFORMED', 'unknown class ' + st.id.class);
     if (dk.length < 1) return bad('E-MALFORMED', 'no partition');
-    for (const name of dk) {                                            // private partitions carry a commit
+    const HASH = /^sha256:[0-9a-f]{64}$/;
+    for (const name of dk) {                                            // §S4/F5 — private partition schema
       const part = st.data[name];
-      if (part.privacy !== undefined && part.commit === undefined) return bad('E-MALFORMED', 'private partition without commit: ' + name);
-      if (part.privacy === undefined && part.value === undefined) return bad('E-MALFORMED', 'public partition without value: ' + name);
+      if (part.privacy !== undefined) {
+        if (!HASH.test(part.commit || '')) return bad('E-MALFORMED', 'private partition commit not sha256:hex: ' + name);
+        if (part.privacy === 'encrypted') {                             // encrypted MUST carry a well-formed AEAD block
+          const e = part.enc;
+          if (!e || !AEAD_ALGS.includes(e.alg) || typeof e.key_id !== 'string' || !B64URL.test(e.ct || '')) return bad('E-MALFORMED', 'encrypted partition missing/invalid enc{alg,key_id,ct}: ' + name);
+        }
+      } else if (part.value === undefined) return bad('E-MALFORMED', 'public partition without value: ' + name);
+    }
+    // §S4/F4 — class ↔ provenance consistency (§14.5, MUST). A signed gap record is the ONLY attestation whose
+    // constituents may be empty (class:attestation + provenance.prev; §14 step 5).
+    const pr = st.provenance;
+    if (st.id.class === 'observation' && (pr?.constituents !== undefined || pr?.root !== undefined)) return bad('E-MALFORMED', 'observation MUST NOT carry constituents/root');
+    if (st.id.class === 'derivation' && (pr?.based_on === undefined || pr?.seed === undefined)) return bad('E-MALFORMED', 'derivation MUST carry based_on + seed');
+    if (st.id.class === 'attestation') {
+      const isGap = pr?.prev !== undefined && (pr?.constituents === undefined || pr.constituents.length === 0);
+      if (!isGap && (pr?.constituents === undefined || pr?.root === undefined)) return bad('E-MALFORMED', 'attestation MUST carry constituents + root (unless a signed gap record)');
     }
     // W3 class-context: a data verify must not accept a key-log/genesis transcript as data
     if (opts.context === 'data' && (st.id.class === 'key' || st.id.class === 'genesis')) return bad('E-MALFORMED', 'class ' + st.id.class + ' not valid in data context (W3)');
@@ -246,9 +264,16 @@ export function verify(doc, opts = {}) {
     // self-asserted/pinned LABEL — `publisher_claimed` — so a consumer that never read Y3 cannot over-attribute.
     // (Pinning authenticates the KEY, not the name.)
     const nameField = identity.strength === 'authoritative' ? { publisher: st.id.domain_shard } : { publisher_claimed: st.id.domain_shard };
+    // §S3/F3 — an EMBEDDED proof MUST verify. present-but-bad ⇒ E-ANCHOR (never a VALID doc next to an unchecked
+    // "present" proof). `time.status:"present"` is reported ONLY for a proof whose inclusion actually verified.
+    let timeField = { strength: 'unproven', status: 'none' };
+    if (doc.proof !== undefined) {
+      const a = verifyAnchor(ch, doc.proof, opts);
+      if (!a.inclusion) return bad('E-ANCHOR', a.detail || 'embedded proof does not verify');
+      timeField = { strength: a.time, status: 'present', inclusion: true };
+    }
     return { result: 'VALID', identity, disclosed, sources, ...nameField,
-      ust_id: st.id.ust_id, class: st.id.class, content_hash: ch,
-      time: { strength: 'unproven', status: doc.proof ? 'present' : 'none' } };
+      ust_id: st.id.ust_id, class: st.id.class, content_hash: ch, time: timeField };
   } catch (e) {
     return bad(e.code || 'E-MALFORMED', e.detail || String(e));         // fail-closed (§14/I10)
   }
@@ -265,22 +290,26 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
   if (genesis.state.id.domain_shard !== doc.state.id.domain_shard) return { error: 'E-GENESIS', detail: 'genesis domain mismatch' };
   if (keylog.length > 256) return { error: 'E-BOUNDS', detail: 'key-log > 256 (§13)' };
   let prevHash = contentHash(genesis);
-  const validPubs = new Set([genesis.sig.pub]);                                   // genesis key signs the first entry
-  const addedKeyIds = new Set([genesis.state.id.key_id]);
+  // key_id is DERIVED from the pub (H(ust:keylog,pub)), never a free string — authority binds the KEY, not a label.
+  const validKeys = new Map([[genesis.state.id.key_id, genesis.sig.pub]]);         // key_id → pub
   const revoked = new Map();                                                      // §12.2 X1: key_id → {reason, compromised_since, at}
   for (const [i, e] of keylog.entries()) {                                        // §12.2 walk: prev-chained, self-signed
     const ev = verify(e, { context: 'key' });
     if (ev.result !== 'VALID') return { error: 'E-KEY', detail: 'key-log entry ' + i + ' invalid: ' + ev.error };
     if (e.state.id.class !== 'key') return { error: 'E-KEY', detail: 'entry ' + i + ' not class:key' };
     if (e.state.provenance?.prev !== prevHash) return { error: 'E-PREV', detail: 'entry ' + i + ' prev not chained' };
-    if (!validPubs.has(e.sig.pub)) return { error: 'E-KEY', detail: 'entry ' + i + ' not signed by a current valid key' };
+    if (![...validKeys.values()].includes(e.sig.pub)) return { error: 'E-KEY', detail: 'entry ' + i + ' not signed by a current valid key' };
     const op = e.state.data.key_op.value;
-    if (op.op === 'add' || op.op === 'rotate') { validPubs.add(op.pub); addedKeyIds.add(op.new_key_id); }
-    else if (op.op === 'revoke') revoked.set(keyId(op.pub), { reason: op.reason, compromised_since: op.compromised_since, at: e.state.time.generated_at });
+    if (op.op === 'add' || op.op === 'rotate') {
+      const derived = keyId(op.pub);                                             // F1: derive, do NOT trust op.new_key_id
+      if (op.new_key_id !== undefined && op.new_key_id !== derived) return { error: 'E-KEY', detail: 'entry ' + i + ' new_key_id != H(ust:keylog, pub)' };
+      validKeys.set(derived, op.pub);
+    } else if (op.op === 'revoke') revoked.set(keyId(op.pub), { reason: op.reason, compromised_since: op.compromised_since, at: e.state.time.generated_at });
     prevHash = contentHash(e);
   }
-  if (!addedKeyIds.has(doc.state.id.key_id))
-    return { strength: 'self-asserted', status: 'verified', detail: 'doc key not in this key-log' };
+  // authority is granted ONLY if the doc's key_id maps to the doc's ACTUAL signing pub (binding, not membership).
+  if (validKeys.get(doc.state.id.key_id) !== doc.sig.pub)
+    return { strength: 'self-asserted', status: 'verified', detail: 'doc key not bound in this key-log' };
   // §12.2 X1 — revocation window, decided against the anchor UPPER BOUND (U = anchorTime, from §11.2).
   const rev = revoked.get(doc.state.id.key_id);
   let suspect = false;
@@ -340,8 +369,10 @@ export function verifyStream(frames, { genesis, checkpoint, requirePerFrameValid
     if (p) seenPrev.add(p);
     prevHash = contentHash(f);
   }
-  // M5 — a COVERING checkpoint (class:attestation asserting head + frame_count) closes the interval → 'proven'.
+  // M5 — a COVERING checkpoint closes the interval → 'proven', but ONLY over a genesis-BOUND origin (TOP is built
+  // over HIGH). Without a genesis the first frame's origin is unbound → 'provisional', never 'proven' (F2).
   if (checkpoint) {
+    if (!genesis) return { complete: 'provisional', head: prevHash, reason: 'origin-unbound: no genesis, cannot prove completeness (TOP needs a HIGH origin)' };
     const cv = verify(checkpoint, { context: 'data' });
     if (cv.result !== 'VALID' || checkpoint.state.id.class !== 'attestation') return { error: 'E-PREV', detail: 'invalid checkpoint' };
     if (checkpoint.state.id.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'checkpoint not from the stream authority (' + authority + ') — TOP completeness cannot cross authority' };
@@ -351,6 +382,37 @@ export function verifyStream(frames, { genesis, checkpoint, requirePerFrameValid
     return { complete: 'proven', head: prevHash };
   }
   return { complete: 'provisional', head: prevHash };                  // no checkpoint → open tail (P5)
+}
+
+// ─── §S6/F7 — the CONFORMANCE boundary is raw bytes. `verify(JSON.parse(x))` can't satisfy §6 because JSON.parse
+//     silently collapses duplicate keys. `verifyJson` scans the raw bytes for duplicate member names BEFORE
+//     constructing the object, then verifies. Untrusted transcripts from the network/storage MUST enter here.
+export function verifyJson(rawBytes, opts = {}) {
+  const raw = typeof rawBytes === 'string' ? rawBytes : Buffer.from(rawBytes).toString('utf8');
+  const dup = scanDuplicateKeys(raw);
+  if (dup) return bad('E-CANON', dup);
+  let obj; try { obj = JSON.parse(raw); } catch { return bad('E-MALFORMED', 'not valid JSON'); }
+  return verify(obj, opts);
+}
+// minimal duplicate-key-detecting JSON scanner (zero-dep). Returns an error string or null. Keys are parsed
+// (via JSON.parse of the token) so `a` and `a` collide as the SAME member name.
+function scanDuplicateKeys(s) {
+  let i = 0; const n = s.length;
+  const ws = () => { while (i < n && ' \t\n\r'.includes(s[i])) i++; };
+  const str = () => { const a = i; i++; while (i < n) { if (s[i] === '\\') i += 2; else if (s[i] === '"') { i++; return JSON.parse(s.slice(a, i)); } else i++; } throw 'unterminated string'; };
+  function value() {
+    ws(); const c = s[i];
+    if (c === '{') {
+      i++; const keys = new Set(); ws();
+      if (s[i] === '}') { i++; return; }
+      for (;;) { ws(); if (s[i] !== '"') throw 'expected key'; const k = str(); if (keys.has(k)) throw 'duplicate member name: ' + k; keys.add(k); ws(); if (s[i] !== ':') throw 'expected colon'; i++; value(); ws(); if (s[i] === ',') { i++; continue; } if (s[i] === '}') { i++; return; } throw 'bad object'; }
+    } else if (c === '[') {
+      i++; ws(); if (s[i] === ']') { i++; return; }
+      for (;;) { value(); ws(); if (s[i] === ',') { i++; continue; } if (s[i] === ']') { i++; return; } throw 'bad array'; }
+    } else if (c === '"') { str(); }
+    else { while (i < n && !',}] \t\n\r'.includes(s[i])) i++; }        // number / true / false / null
+  }
+  try { value(); ws(); return i >= n ? null : 'trailing bytes'; } catch (e) { return typeof e === 'string' ? e : 'malformed JSON'; }
 }
 
 function err(code, detail) { const e = new Error(code); e.code = code; e.detail = detail; return e; }
