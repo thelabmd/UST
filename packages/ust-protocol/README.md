@@ -17,7 +17,7 @@ adapter for browsers and Workers — same rules, same results).
 ## Install
 
 ```
-npm i ust-protocol
+npm i ust-protocol@rc
 ```
 
 ## Verify a document

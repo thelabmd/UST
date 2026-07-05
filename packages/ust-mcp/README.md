@@ -12,19 +12,19 @@ of state is what it claims — who published it, when, unchanged — without tru
 ## Run
 
 ```
-npx ust-mcp
+npx -y ust-mcp@rc
 ```
 
 ## Add to Claude Code
 
 ```
-claude mcp add ust -- npx ust-mcp
+claude mcp add ust -- npx -y ust-mcp@rc
 ```
 
 Or in any MCP client config:
 
 ```json
-{ "mcpServers": { "ust": { "command": "npx", "args": ["ust-mcp"] } } }
+{ "mcpServers": { "ust": { "command": "npx", "args": ["-y", "ust-mcp@rc"] } } }
 ```
 
 ## Tools
