@@ -31,7 +31,7 @@ Or in any MCP client config:
 
 | Tool | Does |
 |------|------|
-| `ust_verify` | Verify a document (`VALID` / `INVALID` / `INDETERMINATE`); supply `genesis`+`keylog` for name authority, `proof` for anchored time |
+| `ust_verify` | Verify a document — the verdict carries its tier (`VALID:LIGHT`/`VALID:HIGH`/`VALID:TOP` / `INVALID` / `INDETERMINATE`); supply `genesis`+`keylog` for name authority, `proof` for anchored time |
 | `ust_build_observation` | Build (unsigned) an observation; returns `state` + `content_hash` + `signing_input` |
 | `ust_combine_derivation` | Build a derivation chained to other records by content-hash (auto seed) |
 | `ust_combine_attestation` | Build an attestation over N constituents (auto Merkle root) |

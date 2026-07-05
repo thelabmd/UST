@@ -120,6 +120,9 @@ const RESERVED = { transcript: ['ust','state','sig','proof'], state: ['id','time
 const RES_PARTITION_NAMES = new Set([...RESERVED.state, ...RESERVED.id, 'partition', 'nonce', '__proto__', 'constructor', 'prototype']);
 const KINDS = ['captured', 'computed'], PRIVACY = ['blinded', 'encrypted'];   // §S4/D1: secret-url is a disclosure CHANNEL (§out-of-scope), not a privacy mode
 const AEAD_ALGS = ['AES-256-GCM', 'XChaCha20-Poly1305'], B64URL = /^[A-Za-z0-9_-]+$/;
+// the verdict is tier-scoped (`VALID:LIGHT|HIGH|TOP`); this is the ONE place code should test "did it verify" —
+// a bare `r.result === 'VALID'` is intentionally no longer valid (it forces callers to face the tier).
+export const isValid = (r) => typeof r?.result === 'string' && r.result.slice(0, 6) === 'VALID:';
 const CLASSES = ['observation','attestation','derivation','genesis','key'];
 // §6 pinned RFC3339 UTC-Z with VALID RANGES — month 01-12, day 01-31, hour 00-23, min/sec 00-59.
 // Rejects leap seconds (:60) and out-of-range (:99, hour 99) so two conforming verifiers ALWAYS agree (I4).
@@ -272,7 +275,13 @@ export function verify(doc, opts = {}) {
       if (!a.inclusion) return bad('E-ANCHOR', a.detail || 'embedded proof does not verify');
       timeField = { strength: a.time, status: 'present', inclusion: true };
     }
-    return { result: 'VALID', identity, disclosed, sources, ...nameField,
+    // The verdict CARRIES ITS SCOPE: `VALID:LIGHT|HIGH|TOP`, so a consumer cannot read "valid" without reading
+    // valid-AT-WHAT (a bare `=== 'VALID'` no longer matches — the same forcing function as publisher_claimed).
+    // tier = the highest fully-satisfied rung (monotonic, §3.1): TOP = authoritative + anchored; HIGH =
+    // authoritative; else LIGHT (self-asserted or pinned). Per-axis strengths stay below for detail.
+    const authoritative = identity.strength === 'authoritative' && identity.status === 'verified';
+    const tier = authoritative ? (timeField.strength === 'anchored' ? 'TOP' : 'HIGH') : 'LIGHT';
+    return { result: 'VALID:' + tier, tier, identity, disclosed, sources, ...nameField,
       ust_id: st.id.ust_id, class: st.id.class, content_hash: ch, time: timeField };
   } catch (e) {
     return bad(e.code || 'E-MALFORMED', e.detail || String(e));         // fail-closed (§14/I10)
@@ -284,7 +293,7 @@ export function verify(doc, opts = {}) {
 export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, anchorTime } = {}) {
   if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
   const gv = verify(genesis);                                                     // genesis is itself a UST transcript
-  if (gv.result !== 'VALID') return { error: 'E-GENESIS', detail: 'genesis invalid: ' + gv.error };
+  if (!isValid(gv)) return { error: 'E-GENESIS', detail: 'genesis invalid: ' + gv.error };
   if (genesis.state.id.class !== 'genesis') return { error: 'E-GENESIS', detail: 'not class:genesis' };
   if (genesis.sig.key_id !== genesis.state.id.key_id) return { error: 'E-GENESIS', detail: 'genesis not self-signed' };
   if (genesis.state.id.domain_shard !== doc.state.id.domain_shard) return { error: 'E-GENESIS', detail: 'genesis domain mismatch' };
@@ -295,7 +304,7 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
   const revoked = new Map();                                                      // §12.2 X1: key_id → {reason, compromised_since, at}
   for (const [i, e] of keylog.entries()) {                                        // §12.2 walk: prev-chained, self-signed
     const ev = verify(e, { context: 'key' });
-    if (ev.result !== 'VALID') return { error: 'E-KEY', detail: 'key-log entry ' + i + ' invalid: ' + ev.error };
+    if (!isValid(ev)) return { error: 'E-KEY', detail: 'key-log entry ' + i + ' invalid: ' + ev.error };
     if (e.state.id.class !== 'key') return { error: 'E-KEY', detail: 'entry ' + i + ' not class:key' };
     if (e.state.provenance?.prev !== prevHash) return { error: 'E-PREV', detail: 'entry ' + i + ' prev not chained' };
     if (![...validKeys.values()].includes(e.sig.pub)) return { error: 'E-KEY', detail: 'entry ' + i + ' not signed by a current valid key' };
@@ -358,7 +367,7 @@ export function verifyStream(frames, { genesis, checkpoint, requirePerFrameValid
   const authority = frames[0].state.id.domain_shard;                   // §11.3: a stream belongs to ONE authority
   const seenUstId = new Set(), seenPrev = new Set();
   for (const [i, f] of frames.entries()) {
-    if (requirePerFrameValid) { const v = verify(f, { context: 'data' }); if (v.result !== 'VALID') return { error: 'E-SIG', detail: 'frame ' + i + ' invalid: ' + v.error }; } // X2
+    if (requirePerFrameValid) { const v = verify(f, { context: 'data' }); if (!isValid(v)) return { error: 'E-SIG', detail: 'frame ' + i + ' invalid: ' + v.error }; } // X2
     if (f.state.id.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'frame ' + i + ' domain_shard != stream authority (' + authority + ') — mixed-authority stream' };
     if (seenUstId.has(f.state.id.ust_id)) return { error: 'E-PREV', detail: 'duplicate ust_id (fork, Y1): ' + f.state.id.ust_id };
     seenUstId.add(f.state.id.ust_id);
@@ -374,7 +383,7 @@ export function verifyStream(frames, { genesis, checkpoint, requirePerFrameValid
   if (checkpoint) {
     if (!genesis) return { complete: 'provisional', head: prevHash, reason: 'origin-unbound: no genesis, cannot prove completeness (TOP needs a HIGH origin)' };
     const cv = verify(checkpoint, { context: 'data' });
-    if (cv.result !== 'VALID' || checkpoint.state.id.class !== 'attestation') return { error: 'E-PREV', detail: 'invalid checkpoint' };
+    if (!isValid(cv) || checkpoint.state.id.class !== 'attestation') return { error: 'E-PREV', detail: 'invalid checkpoint' };
     if (checkpoint.state.id.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'checkpoint not from the stream authority (' + authority + ') — TOP completeness cannot cross authority' };
     const a = checkpoint.state.data.checkpoint?.value;
     if (!a || a.head !== prevHash || String(a.frame_count) !== String(frames.length))

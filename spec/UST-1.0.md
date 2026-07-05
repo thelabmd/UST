@@ -1,6 +1,6 @@
 # Universal State Transcript (UST) — Protocol Specification, Version 1.0
 
-> **Release candidate — `1.0.0-rc.4`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.5`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode). Pin exact versions.
 
 **UST is trust infrastructure.** It gives any machine-published statement about the state of the world its own
@@ -126,8 +126,9 @@ These are testable (§16) and are the ship-gate: v1.0 is "ready" iff every invar
 
 Verification is TIERED so the FLOOR is adoptable in a minute, while the SAME document upgrades to notary-grade
 trust with no format change. Analogy: a self-signed TLS cert (LIGHT — encryption, no CA authority) → a CA-signed
-cert (HIGH — name authority) → an EV / CT-logged cert (TOP). Every verification REPORTS the tier it reached;
-nothing silently claims trust it did not establish.
+cert (HIGH — name authority) → an EV / CT-logged cert (TOP). Every verification EMITS the tier IN THE VERDICT
+itself — `VALID:LIGHT` / `VALID:HIGH` / `VALID:TOP`, never a bare `VALID` — so a consumer cannot read "valid"
+without reading valid-AT-WHAT; nothing silently claims trust it did not establish.
 
 - **LIGHT — trust in a minute (THE FLOOR).** A signed, canonical, addressable state document. *Publish* =
   generate a keypair, sign your canonical JSON, serve it (the pubkey travels in `sig.pub`). *Verify* = recompute
@@ -781,7 +782,11 @@ Verification MUST NOT branch on `X.ust` beyond selecting the single 1.x algorith
 ## 15. Error taxonomy
 
 A verifier returns one of THREE OUTCOME KINDS — **availability is distinct from failure**:
-- **VALID** — verified at the tier reached; each strength carries a STATUS (§14 step 10).
+- **VALID:LIGHT · VALID:HIGH · VALID:TOP** — verified, and the verdict CARRIES ITS TIER (the highest
+  fully-satisfied rung, §3.1) so a consumer cannot read "valid" without reading valid-AT-WHAT: LIGHT = integrity +
+  a claimed key; HIGH = + authoritative name; TOP = + anchored time (and completeness for streams). Per-axis
+  strengths (identity / time / completeness) remain below for detail. A BARE `VALID` is never emitted — that is
+  the point (it forecloses the over-read "THIS is valid" when only the floor is).
 - **INVALID** — a DEFINITE, deterministic negative (the document/chain is bad), terminal + fail-closed:
   `E-MALFORMED` (structure/namespace/identity), `E-CANON` (canonicalization/value-model), `E-BOUNDS`
   (size/depth/breadth), `E-CYCLE` (chain cycle), `E-SIG` (signature invalid / key_id mismatch), `E-KEY`
@@ -1094,6 +1099,11 @@ provenance and will be lifted into this ledger when the spec is published.
   + macOS genesis-key-ceremony (`rnd/red-team-rev22-high-availability.md`).
 - **REV 24** — GLOBAL consistency pass (V1–V6): propagated the availability split into §12.2 (V1) + stragglers
   (`rnd/red-team-rev23-global.md`).
+- **REV 25 (2026-07-05)** — 4th external audit (ChatGPT 5.5 Max) hardening: key-binding by KEY not a string, TOP
+  needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on member NAMES too,
+  a raw-bytes verify boundary, `ust_id` pinned to valid frames, and `secret-url` removed (a disclosure channel,
+  not a privacy mode). PLUS: the verdict now CARRIES ITS TIER — `VALID:LIGHT` / `VALID:HIGH` / `VALID:TOP`, never
+  a bare `VALID` (§3.1, §15) — the `publisher_claimed` forcing function applied at the verdict level.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

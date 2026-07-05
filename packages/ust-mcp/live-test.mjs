@@ -28,7 +28,7 @@ check('live:key_id over the wire', (await call(client, 'ust_key_id', { pub: A.pu
 const built = await call(client, 'ust_build_observation', { domain_shard: 'helioradar.com', ust_id: 'ust:20260705.16', key_id: A.key_id, time: t, data: { sw: { kind: 'captured', value: { kp: '3.3' } } } });
 const sig = edSign(null, Buffer.from(built.signing_input, 'utf8'), A.priv).toString('base64url');
 const doc = { ust: '1.0', state: built.state, sig: { alg: 'Ed25519', key_id: A.key_id, pub: A.pubB64, sig } };
-check('live:build→sign→verify = VALID', (await call(client, 'ust_verify', { doc })).result === 'VALID');
+check('live:build→sign→verify = VALID', (await call(client, 'ust_verify', { doc })).result.startsWith('VALID'));
 const bad = JSON.parse(JSON.stringify(doc)); bad.state.data.sw.value.kp = '9.9';
 check('live:tampered = INVALID', (await call(client, 'ust_verify', { doc: bad })).result === 'INVALID');
 

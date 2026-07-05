@@ -26,7 +26,8 @@ npm i ust-protocol@rc
 import { verify } from 'ust-protocol';
 
 const r = verify(doc);
-// { result: 'VALID' | 'INVALID' | 'INDETERMINATE', identity, time, publisher, content_hash, ... }
+// { result: 'VALID:LIGHT'|'VALID:HIGH'|'VALID:TOP' | 'INVALID' | 'INDETERMINATE', tier, identity, time, publisher_claimed|publisher, content_hash, ... }
+// The verdict CARRIES ITS TIER — a bare 'VALID' is never emitted. Test with isValid(r), not r.result === 'VALID'.
 ```
 
 - **`VALID`** — well-formed, hashes match the data, signature checks out: the document **is** what the publisher

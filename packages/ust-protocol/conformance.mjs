@@ -50,8 +50,8 @@ for (const v of V.vectors) {
 }
 
 // ─── 2. valid round-trip (new uniform preimage) + producer check ───
-check('valid-roundtrip', P.verify(mk(), { context: 'data' }).result === 'VALID');
-check('producer-seal-verifies', P.verify(mk({ a: { kind: 'captured', value: { x: '1' } }, b: { kind: 'computed', value: { y: '2' } } }), { context: 'data' }).result === 'VALID');
+check('valid-roundtrip', P.verify(mk(), { context: 'data' }).result === 'VALID:LIGHT');
+check('producer-seal-verifies', P.verify(mk({ a: { kind: 'captured', value: { x: '1' } }, b: { kind: 'computed', value: { y: '2' } } }), { context: 'data' }).result === 'VALID:LIGHT');
 
 // ─── 3. rc.2 negatives — audit findings + Gemini-B ───
 check('#1 stream-mixed-authority→E-AUTHORITY', (() => {
@@ -69,7 +69,7 @@ check('#5 anchor-missing-path→no-throw', (() => { try { P.verifyAnchor('sha256
 check('#6 sig-alg-none→E-SIG', (() => { const b = clone(mk()); b.sig.alg = 'none'; return P.verify(b, { context: 'data' }).error === 'E-SIG'; })());
 check('B leap-second→E-MALFORMED', P.verify(mk({ r: { kind: 'captured', value: { x: '1' } } }, ID, { generated_at: '2026-12-31T23:59:60Z', valid_from: '2026-12-31T23:00:00Z', valid_to: '2027-01-01T00:00:00Z' }), { context: 'data' }).error === 'E-MALFORMED');
 // G1 (Gemini 3.1) — pinned identity (§3.1 TOFU) + Y3 name epistemics (publisher only when authoritative)
-check('G1 pinned in-set→strength pinned', (r => r.result === 'VALID' && r.identity.strength === 'pinned' && r.publisher === undefined && r.publisher_claimed === 'helioradar.com')(P.verify(mk(), { context: 'data', pinnedKeys: [A.key_id] })));
+check('G1 pinned in-set→strength pinned', (r => r.result === 'VALID:LIGHT' && r.identity.strength === 'pinned' && r.publisher === undefined && r.publisher_claimed === 'helioradar.com')(P.verify(mk(), { context: 'data', pinnedKeys: [A.key_id] })));
 check('G1 pinned not-in-set→E-KEY', P.verify(mk(), { context: 'data', pinnedKeys: ['sha256:' + '00'.repeat(32)] }).error === 'E-KEY');
 check('G1 Y3 LIGHT→publisher_claimed (not publisher)', (r => r.publisher === undefined && r.publisher_claimed === 'helioradar.com' && r.identity.strength === 'self-asserted')(P.verify(mk(), { context: 'data' })));
 
@@ -103,8 +103,8 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const gen = signG(P.buildGenesis({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.19', key_id: G.key_id }, T, G.pubB64));
   const add = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1901', key_id: G.key_id }, T, { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(gen)));
   const docK = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.20', key_id: K.key_id, class: 'observation' }, T, { sw: { kind: 'captured', value: { kp: '5' } } }), K.priv, K.pubB64);
-  check('HIGH genesis VALID+self-signed', P.verify(gen).result === 'VALID' && gen.sig.key_id === gen.state.id.key_id);
-  check('HIGH resolve→authoritative', (r => r.result === 'VALID' && r.identity?.strength === 'authoritative')(P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data' })));
+  check('HIGH genesis VALID+self-signed', P.verify(gen).result === 'VALID:LIGHT' && gen.sig.key_id === gen.state.id.key_id);
+  check('HIGH resolve→authoritative', (r => r.result === 'VALID:HIGH' && r.identity?.strength === 'authoritative')(P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data' })));
   check('G1 Y3 authoritative→publisher (not claimed)', (r => r.publisher === 'noosphere.md' && r.publisher_claimed === undefined)(P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data' })));
   // TOP stream (single authority) + checkpoint → proven
   const s0 = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.2001', key_id: G.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { n: '1' } } }, { prev: P.contentHash(gen) }), G.priv, G.pubB64);
@@ -120,6 +120,12 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const dir = sorted[0] === leaf ? 'R' : 'L';
   const proof = { root, path: [{ dir, hash: P.Hbytes('ust:leaf', Buffer.from(sib, 'utf8')) }], anchor: { substrate: 'bitcoin-ots', status: 'pending' } };
   check('TOP anchor inclusion', P.verifyAnchor(leaf, proof).inclusion === true);
+  // TOP tier via verify(): authoritative identity + an embedded, substrate-final anchor ⇒ VALID:TOP
+  const dch = P.contentHash(docK);
+  const topProof = { root: P.Hbytes('ust:leaf', Buffer.from(dch, 'utf8')), path: [], anchor: { substrate: 'bitcoin-ots' } };
+  const topR = P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', substrateVerify: () => ({ final: true, time: '2027-01-01T00:00:00Z' }) });
+  check('TOP authoritative+anchored→VALID:TOP', topR.result === 'VALID:TOP');
+  check('tier ladder distinct: LIGHT vs TOP', P.verify(mk(), { context: 'data' }).result === 'VALID:LIGHT' && topR.tier === 'TOP');
 }
 
 console.log('\n════════════════════════════════════════════');
