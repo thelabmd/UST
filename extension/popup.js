@@ -83,3 +83,16 @@ async function runVerify() {
   }
 }
 vin.addEventListener('input', runVerify);
+
+// ── "Verify UST" context menu handoff: the selection arrives via storage.session — fill the box and verify. ──
+(async () => {
+  try {
+    const { pendingVerify } = await chrome.storage.session.get('pendingVerify');
+    if (pendingVerify) {
+      await chrome.storage.session.remove('pendingVerify');
+      chrome.action.setBadgeText({ text: '' });            // clear the fallback badge, if any
+      vin.value = pendingVerify;
+      runVerify();
+    }
+  } catch { /* storage unavailable (e.g. opened as a plain page) — paste still works */ }
+})();

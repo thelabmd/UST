@@ -5,8 +5,9 @@ A minimal Manifest V3 extension that packages the **LIGHT tier** of [UST](https:
 into one gesture each way:
 
 - **Sign:** select text → right-click → **"Make it UST"** → a signed transcript is on your clipboard.
-- **Verify:** click the toolbar icon → paste any UST (the whole blob, the base64, or the JSON) → the verdict plus
-  the **real signed content**, verified locally.
+- **Verify:** select a pasted UST anywhere → right-click → **"Verify UST"** → the popup opens with the verdict
+  plus the **real signed content**, verified locally. (Or click the toolbar icon and paste it into the box —
+  same thing.) Chrome collapses newlines in a selection; harmless — the signed bytes ride as base64 armor.
 
 It is the reference consumer of [`ust-web-signer`](../packages/ust-web-signer) (bundled in `lib/`, alongside the
 zero-dependency verifier `ust-verify.mjs`).
