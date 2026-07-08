@@ -1,4 +1,7 @@
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Universal State Transcript (UST) — Protocol Specification, Version 1.0
+
+*This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
 > **Release candidate — `1.0.0-rc.5`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode). Pin exact versions.
@@ -15,9 +18,9 @@ Status: **Normative specification — 1.0 REV 25 (2026-07-05).** The SECURELY-ST
 closed all red-team findings STRUCTURALLY (I3 collision unrepresentable, I1 whole-State signature by
 construction, no stored-hash footgun), with ALL v0.29 FEATURES merged IN (not a flat-wire revert): per-partition
 captured/computed hashing (cross-engine corroboration for computed parts), `parent_ust` (hour-close timing),
-per-partition privacy incl. mixed open+closed in one shard, shard-chain LAYERS + selective disclosure +
-secret-URL. Features are capabilities orthogonal to wire shape; this keeps the structure's security AND every
-029 function. Flat-wire attempt archived (`UST-1.0-flat-evo-archive.md`); feature audit `rnd/feature-audit-029-vs-v1.0.md`.
+per-partition privacy incl. mixed open+closed in one shard, shard-chain LAYERS + selective disclosure.
+Features are capabilities orthogonal to wire shape; this keeps the structure's security AND every retained
+029 function (secret-URL was removed as a privacy mode in rc.4 — see §10). Flat-wire attempt archived (`UST-1.0-flat-evo-archive.md`); feature audit `rnd/feature-audit-029-vs-v1.0.md`.
 Model (tiered): the LIGHT floor mandates only a signed, canonical, addressable State (identity+
 integrity, self-contained); NAME-AUTHORITY (genesis/key-log), TIME (anchoring) and COMPLETENESS are HIGH/TOP
 operator tiers, verified when present and reported as verification STRENGTHS — never a floor gate (§3.1). The
@@ -496,8 +499,8 @@ A shard chain is a sequence of **layers**, each a normal signed UST document, th
 **layer seed** commits to all layers at once, enabling selective disclosure.
 ```
 L1 — public shard      (visible to everyone)
-L2 — private shard     (secret URL, §10)
-L3 — encrypted shard   (secret URL, partition(s) encrypted, §10)
+L2 — private shard     (blinded commitment, §10)
+L3 — encrypted shard   (partition(s) encrypted, §10)
 L4 — partner shard     (published by a third party holding the L3 key)
 …   any layer public/private, encrypted/plaintext; the chain stops at any depth.
 ```

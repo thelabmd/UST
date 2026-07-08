@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
 // ust-mcp stdio server — mounts the protocol tool registry over MCP (JSON-RPC on stdio). Run as `npx ust-mcp@rc`
 // or wire into any MCP client. Transport is the only stateful part; the tools themselves are ust-protocol.
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';

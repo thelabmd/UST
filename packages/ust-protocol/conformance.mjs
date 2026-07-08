@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Conformance runner (rc.2): every primitive vector + every negative class verified against ust-protocol.
 // Negatives are CONSTRUCTED from the live impl (not skipped), so this is a real pass/fail. HIGH/TOP built inline.
 import * as P from './index.mjs';

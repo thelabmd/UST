@@ -1,4 +1,4 @@
-# UST — Universal State Transcript
+# Universal State Transcript (UST)
 
 **Verify machine-readable state without trusting whoever handed it to you.**
 
@@ -38,4 +38,10 @@ and **that nothing was tampered** — a real, bounded guarantee, not an oracle o
 
 ## License
 
-Apache-2.0 · © 2026 THE LAB
+**Code: Apache-2.0.** **Specification text: CC BY 4.0.** Source code (`packages/**`, tooling) is licensed under
+the Apache License 2.0 (`LICENSE`); the specification and documentation prose (`spec/**` and other `.md` docs)
+under Creative Commons Attribution 4.0 International (`LICENSE-SPEC`). The names *UST* / *Universal State
+Transcript* and the *UST-compatible* claim: see [`TRADEMARK.md`](TRADEMARK.md). How changes are made:
+[`GOVERNANCE.md`](GOVERNANCE.md).
+
+© 2026 THE LAB

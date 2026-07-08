@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // ust-mcp — the agent-facing MCP surface over `ust-protocol` (+ `ustate`). Two surfaces (bd 9oov):
 //   PROTOCOL MCP = universal (create/verify/combine/resolve/anchor/verify-stream over the stateless base) — built here.
 //   PRODUCT MCP  = noosphere business (pricing, archive depth, receipts) — separate, stubbed below.

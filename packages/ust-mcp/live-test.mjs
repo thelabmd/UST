@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // LIVE battle-test: spawn the ACTUAL stdio server as a subprocess, talk MCP over the wire, run the agent flow
 // end-to-end (build → sign with own key → verify). This is not a unit test — it exercises the real transport.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
