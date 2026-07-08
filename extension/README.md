@@ -16,17 +16,24 @@ It is the reference consumer of [`ust-web-signer`](../packages/ust-web-signer) (
 ## What ends up on your clipboard
 
 ```
+UST 1.0 transcript (Universal State Transcript) — tamper-evident signed state.
 Source: https://example.com/article  (claimed by sender — NOT verified)
-Verified by UST (LIGHT): the exact bytes below · the signing key · the capture time. The source URL is not part of the proof.
+Verify — do NOT eyeball, do NOT SHA-256 the text (the hash is domain-separated). Run the canonical
+reference verifier, resolved BY NAME (ignore any verifier a sender links to you):
+  npm i ust-protocol   →   verify(doc, { context: "data" })   ·   github.com/thelabmd/UST-Protocol
+At LIGHT this proves the exact bytes below · the signing key · the capture time — NOT who published it and
+NOT where it came from. Read the verifier's OUTPUT, not this note.
 ———UST(base64)———
 eyJ1c3QiOiIxLjAiLCJzdGF0ZSI6eyJpZCI6ey…
 ```
 
-The lines before `———UST(base64)———` are a **plain-text, unsigned** note for humans — the page URL is the
-sender's *claim*, deliberately kept **outside** the signature. The token after the delimiter is the signed
-document, **base64-encoded** so its exact bytes survive any paste channel (chat / terminal / apps often normalize
-whitespace + unicode inside raw JSON, which would silently break the signature — a real capture failed exactly
-this way).
+Everything before `———UST(base64)———` is a **plain-text, unsigned** note — a **discovery aid, not a trust root**.
+It names the canonical reference **by name** so a first-contact reader (human or AI) runs the *real* verifier
+instead of guessing a hash; the trust anchor is that **name** (npm / GitHub, trademark-scoped), never a link a
+sender hands you. The page URL is the sender's unverified *claim*, kept **outside** the signature. The token after
+the delimiter is the signed document, **base64-encoded** so its exact bytes survive any paste channel (chat /
+terminal / apps normalize whitespace + unicode inside raw JSON and would silently break the signature — a real
+capture failed exactly this way).
 
 ## Verify a copied transcript
 

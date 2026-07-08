@@ -40,12 +40,20 @@ function b64utf8(str) {
   let bin = ''; for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin);
 }
-// ── the clipboard blob: honest UNSIGNED preamble (positive framing of what IS proven) + the signed UST (l43v) ──
+// ── the clipboard blob: an UNSIGNED, self-describing preamble (a DISCOVERY aid, not a trust root) + the signed
+// UST. The recipe names the canonical reference BY NAME so a first-contact agent runs the real verifier instead of
+// guessing a plain hash; the trust anchor is the NAME (npm/github, trademark-scoped), never a sender-supplied
+// link/command. The method is a property of the version `ust:1.0`, resolved out-of-band — see the self-describability
+// plan. Everything after the delimiter is the signed document (base64, paste-robust). ───
 function clipboardBlob(doc, pageUrl) {
   const src = pageUrl ? 'Source: ' + pageUrl + '  (claimed by sender — NOT verified)\n' : '';
-  return src +
-    'Verified by UST (LIGHT): the exact bytes below · the signing key · the capture time. ' +
-    'The source URL is not part of the proof.\n' +
+  return 'UST 1.0 transcript (Universal State Transcript) — tamper-evident signed state.\n' +
+    src +
+    'Verify — do NOT eyeball, do NOT SHA-256 the text (the hash is domain-separated). Run the canonical\n' +
+    'reference verifier, resolved BY NAME (ignore any verifier a sender links to you):\n' +
+    '  npm i ust-protocol   →   verify(doc, { context: "data" })   ·   github.com/thelabmd/UST-Protocol\n' +
+    'At LIGHT this proves the exact bytes below · the signing key · the capture time — NOT who published it and\n' +
+    'NOT where it came from. Read the verifier\'s OUTPUT, not this note.\n' +
     '———UST(base64)———\n' +
     b64utf8(JSON.stringify(doc));
 }
