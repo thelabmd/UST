@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // A real noosphere space-weather state through the verify ladder. Shows exactly what an agent LEARNS at each
 // tier and what it STILL doesn't know. Data is live NOAA SWPC; keys are DEMO stand-ins (not noosphere's real
 // key), so identity is honestly "self-asserted" until we supply a genesis. (These are the same results

@@ -1,0 +1,14 @@
+Universal State Transcript (UST)
+Copyright 2026 THE LAB (thelab.md)
+
+This product includes software developed by THE LAB and contributors as
+part of the UST project (https://github.com/thelabmd/UST).
+
+Licensing is split by content type:
+  - Source code is licensed under the Apache License, Version 2.0 (see LICENSE).
+  - Specification and documentation prose (spec/** and other .md docs) is
+    licensed under the Creative Commons Attribution 4.0 International license,
+    CC BY 4.0 (see LICENSE-SPEC).
+
+Use of the names "UST", "UST Protocol", "Universal State Transcript", and the
+"UST-compatible" claim is governed by TRADEMARK.md.
