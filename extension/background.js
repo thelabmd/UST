@@ -6,6 +6,7 @@
 import * as W from './lib/ust-web-signer.mjs';
 
 const MENU_ID = 'make-it-ust';
+const VERIFY_ID = 'verify-ust';
 
 // ── persistent, non-extractable Ed25519 identity in IndexedDB (CryptoKeys are structured-cloneable) ──
 function openDB() {
@@ -75,10 +76,24 @@ async function copyToTab(tabId, text) {
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({ id: MENU_ID, title: 'Make it UST', contexts: ['selection'] });
+  chrome.contextMenus.create({ id: VERIFY_ID, title: 'Verify UST', contexts: ['selection'] });
   getSigner();                                             // warm (generate) the identity on install
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  // ── Verify UST: select a pasted transcript on any page → the popup opens with the verdict. The selection is
+  // handed to the popup via storage.session (never rendered by the page). Chrome collapses newlines in
+  // selectionText — harmless BY DESIGN: the signed document rides as base64 (ASCII armor), so whitespace mangling
+  // in the wrapper can't touch the bytes. Verification itself happens in the popup, from the signed bytes. ──
+  if (info.menuItemId === VERIFY_ID) {
+    if (!info.selectionText) return;
+    await chrome.storage.session.set({ pendingVerify: info.selectionText });
+    try { await chrome.action.openPopup(); }               // user gesture from the menu click (Chrome 127+)
+    catch {                                                // older Chrome: badge-hint; the popup picks it up when opened
+      if (tab?.id) { chrome.action.setBadgeText({ text: 'UST', tabId: tab.id }); chrome.action.setBadgeBackgroundColor({ color: '#8a6d00', tabId: tab.id }); }
+    }
+    return;
+  }
   if (info.menuItemId !== MENU_ID || !info.selectionText || !tab?.id) return;
   try {
     const signer = await getSigner();
