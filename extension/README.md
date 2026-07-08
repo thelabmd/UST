@@ -16,17 +16,21 @@ It is the reference consumer of [`ust-web-signer`](../packages/ust-web-signer) (
 ## What ends up on your clipboard
 
 ```
-Source: https://example.com/article  (claimed by sender — NOT verified)
-Verified by UST (LIGHT): the exact bytes below · the signing key · the capture time. The source URL is not part of the proof.
+UST/1.0; ref=pkg:npm/ust-protocol; web=https://thelabmd.github.io/UST-Protocol/; call=verify(doc,{context:"data"}); hash=domain-separated; trust=resolve-by-name; proves=bytes+key+time
+Source: https://example.com/article  (claimed by sender — NOT verified; not part of the proof)
 ———UST(base64)———
 eyJ1c3QiOiIxLjAiLCJzdGF0ZSI6eyJpZCI6ey…
 ```
 
-The lines before `———UST(base64)———` are a **plain-text, unsigned** note for humans — the page URL is the
-sender's *claim*, deliberately kept **outside** the signature. The token after the delimiter is the signed
-document, **base64-encoded** so its exact bytes survive any paste channel (chat / terminal / apps often normalize
-whitespace + unicode inside raw JSON, which would silently break the signature — a real capture failed exactly
-this way).
+The first line is a **machine-first, self-describing header** — a parseable `key=value` line (read it like a
+`Content-Type`) that a receiving agent consumes deterministically. It is a **discovery aid, not a trust root**:
+`ref` is a [PURL](https://github.com/package-url/purl-spec) naming the canonical reference verifier;
+`trust=resolve-by-name` says resolve it **by name, out-of-band** (never from a link a sender hands you); `web` is a
+convenience browser verifier. The method is a property of the version `ust:1.0`, never a per-doc field. The `Source`
+line is the sender's unverified *claim*, kept **outside** the signature. Everything after the delimiter is the
+signed document, **base64-encoded** so its exact bytes survive any paste channel (chat / terminal / apps normalize
+whitespace + unicode inside raw JSON and would silently break the signature — a real capture failed exactly this
+way). *(For API / JSON-LD-graph surfaces, use the richer JSON-LD `UstVerify` object instead of this header.)*
 
 ## Verify a copied transcript
 
