@@ -1,10 +1,15 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Make it UST — test browser extension
 
-A minimal Manifest V3 extension that packages the **LIGHT tier** of [UST](https://github.com/thelabmd/UST) into
-one gesture: **select text → right-click → "Make it UST" → a signed transcript is on your clipboard.**
+A minimal Manifest V3 extension that packages the **LIGHT tier** of [UST](https://github.com/thelabmd/UST-Protocol)
+into one gesture each way:
 
-It is the reference consumer of [`ust-web-signer`](../packages/ust-web-signer) (bundled in `lib/`).
+- **Sign:** select text → right-click → **"Make it UST"** → a signed transcript is on your clipboard.
+- **Verify:** click the toolbar icon → paste any UST (the whole blob, the base64, or the JSON) → the verdict plus
+  the **real signed content**, verified locally.
+
+It is the reference consumer of [`ust-web-signer`](../packages/ust-web-signer) (bundled in `lib/`, alongside the
+zero-dependency verifier `ust-verify.mjs`).
 
 ## Load it (unpacked)
 
@@ -34,7 +39,10 @@ way). *(For API / JSON-LD-graph surfaces, use the richer JSON-LD `UstVerify` obj
 
 ## Verify a copied transcript
 
-Take the base64 after `———UST(base64)———`, decode it, and verify with the reference verifier:
+**In the extension (recipient side):** click the toolbar icon and paste the whole thing into **Verify a
+transcript** — it decodes, verifies with the bundled zero-dependency verifier, and shows the verdict plus the
+content **regenerated from the signed bytes** (the sender's preamble is never displayed as truth). Everything runs
+locally. Or use the [web verifier](https://thelabmd.github.io/UST-Protocol/), or the reference from npm:
 
 ```
 npm i ust-protocol@rc
