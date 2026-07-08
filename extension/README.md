@@ -16,24 +16,21 @@ It is the reference consumer of [`ust-web-signer`](../packages/ust-web-signer) (
 ## What ends up on your clipboard
 
 ```
-UST 1.0 transcript (Universal State Transcript) — tamper-evident signed state.
-Source: https://example.com/article  (claimed by sender — NOT verified)
-Verify — do NOT eyeball, do NOT SHA-256 the text (the hash is domain-separated). Run the canonical
-reference verifier, resolved BY NAME (ignore any verifier a sender links to you):
-  npm i ust-protocol   →   verify(doc, { context: "data" })   ·   github.com/thelabmd/UST-Protocol
-At LIGHT this proves the exact bytes below · the signing key · the capture time — NOT who published it and
-NOT where it came from. Read the verifier's OUTPUT, not this note.
+UST/1.0; ref=pkg:npm/ust-protocol; web=https://thelabmd.github.io/UST-Protocol/; call=verify(doc,{context:"data"}); hash=domain-separated; trust=resolve-by-name; proves=bytes+key+time
+Source: https://example.com/article  (claimed by sender — NOT verified; not part of the proof)
 ———UST(base64)———
 eyJ1c3QiOiIxLjAiLCJzdGF0ZSI6eyJpZCI6ey…
 ```
 
-Everything before `———UST(base64)———` is a **plain-text, unsigned** note — a **discovery aid, not a trust root**.
-It names the canonical reference **by name** so a first-contact reader (human or AI) runs the *real* verifier
-instead of guessing a hash; the trust anchor is that **name** (npm / GitHub, trademark-scoped), never a link a
-sender hands you. The page URL is the sender's unverified *claim*, kept **outside** the signature. The token after
-the delimiter is the signed document, **base64-encoded** so its exact bytes survive any paste channel (chat /
-terminal / apps normalize whitespace + unicode inside raw JSON and would silently break the signature — a real
-capture failed exactly this way).
+The first line is a **machine-first, self-describing header** — a parseable `key=value` line (read it like a
+`Content-Type`) that a receiving agent consumes deterministically. It is a **discovery aid, not a trust root**:
+`ref` is a [PURL](https://github.com/package-url/purl-spec) naming the canonical reference verifier;
+`trust=resolve-by-name` says resolve it **by name, out-of-band** (never from a link a sender hands you); `web` is a
+convenience browser verifier. The method is a property of the version `ust:1.0`, never a per-doc field. The `Source`
+line is the sender's unverified *claim*, kept **outside** the signature. Everything after the delimiter is the
+signed document, **base64-encoded** so its exact bytes survive any paste channel (chat / terminal / apps normalize
+whitespace + unicode inside raw JSON and would silently break the signature — a real capture failed exactly this
+way). *(For API / JSON-LD-graph surfaces, use the richer JSON-LD `UstVerify` object instead of this header.)*
 
 ## Verify a copied transcript
 

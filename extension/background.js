@@ -40,20 +40,17 @@ function b64utf8(str) {
   let bin = ''; for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin);
 }
-// ── the clipboard blob: an UNSIGNED, self-describing preamble (a DISCOVERY aid, not a trust root) + the signed
-// UST. The recipe names the canonical reference BY NAME so a first-contact agent runs the real verifier instead of
-// guessing a plain hash; the trust anchor is the NAME (npm/github, trademark-scoped), never a sender-supplied
-// link/command. The method is a property of the version `ust:1.0`, resolved out-of-band — see the self-describability
-// plan. Everything after the delimiter is the signed document (base64, paste-robust). ───
+// ── the clipboard blob: a MACHINE-FIRST self-describing header (a DISCOVERY aid, not a trust root) + the signed
+// UST. The header is a parseable key=value line (read like a Content-Type) an agent consumes deterministically —
+// prose is for humans, this is for the robot that receives it. `ref` is a PURL naming the canonical reference
+// verifier; `trust=resolve-by-name` says resolve it by NAME out-of-band, never from a sender-supplied link. The
+// method is a property of the version `ust:1.0`, not a per-doc field. `web=` is a convenience browser verifier.
+// (API/graph surfaces should use the richer JSON-LD form instead — see bd.) base64 = paste-robust exact bytes. ───
 function clipboardBlob(doc, pageUrl) {
-  const src = pageUrl ? 'Source: ' + pageUrl + '  (claimed by sender — NOT verified)\n' : '';
-  return 'UST 1.0 transcript (Universal State Transcript) — tamper-evident signed state.\n' +
+  const src = pageUrl ? 'Source: ' + pageUrl + '  (claimed by sender — NOT verified; not part of the proof)\n' : '';
+  return 'UST/1.0; ref=pkg:npm/ust-protocol; web=https://thelabmd.github.io/UST-Protocol/; ' +
+    'call=verify(doc,{context:"data"}); hash=domain-separated; trust=resolve-by-name; proves=bytes+key+time\n' +
     src +
-    'Verify — do NOT eyeball, do NOT SHA-256 the text (the hash is domain-separated). Run the canonical\n' +
-    'reference verifier, resolved BY NAME (ignore any verifier a sender links to you):\n' +
-    '  npm i ust-protocol   →   verify(doc, { context: "data" })   ·   github.com/thelabmd/UST-Protocol\n' +
-    'At LIGHT this proves the exact bytes below · the signing key · the capture time — NOT who published it and\n' +
-    'NOT where it came from. Read the verifier\'s OUTPUT, not this note.\n' +
     '———UST(base64)———\n' +
     b64utf8(JSON.stringify(doc));
 }
