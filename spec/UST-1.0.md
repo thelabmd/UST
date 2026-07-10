@@ -527,6 +527,13 @@ L4 — partner shard     (published by a third party holding the L3 key)
   signed order — NOT its own canonical. So there is NO circular definition (the outer layer's own `content_hash`
   is computed AFTER, over a canon that already contains this seed). It commits to every subordinate layer;
   private layers PARTICIPATE without their URL appearing in any public field.
+- **The two layer relationships have NAMES (they are different operations — do not conflate):**
+  **`seals`** — the CONTAINING direction: an outer layer's `seed` commits to its subordinate layers (L1 seals
+  L2..Ln). The bundle is pre-linked: publishing the outer layer proves the sealed set existed, but no layer can
+  be added to it afterwards. **`extends`** (derives_from) — the APPEND direction: a NEW layer cites prior layers
+  via `based_on` (+ recomputed `seed`, §9.4), under its own key (L4 extends L1..L3). Anyone holding the cited
+  layers can extend; the older layers never vouch for the newer (no retroactive containment). A chain may use
+  both: seal what you publish together, extend what grows later.
 - **Third-party extension (the bootstrap mechanism):** a holder of the L3 key fetches L1..L3, builds
   L4, computes L4's seed over the content_hashes of L1..L3 (its subordinate layers, §9.4), and publishes L4 — chaining ACROSS publishers (e.g. noosphere +
   helioradar + muuune → a BSI derived shard extends the chain).
