@@ -29,7 +29,14 @@ for (const ws of workspaces) {
   checked++;
   const tmp = mkdtempSync(join(tmpdir(), 'ust-drift-'));
   try {
-    execSync(`npm pack ${spec} --silent`, { cwd: tmp, stdio: ['ignore', 'pipe', 'pipe'] });
+    // freshly-published windows: registry metadata precedes CDN tarball availability by seconds-to-minutes.
+    // A transient fetch failure is NOT drift — retry, then fail CLOSED with a verdict, never a raw crash.
+    let packed = false, lastErr = '';
+    for (let i = 0; i < 3 && !packed; i++) {
+      try { execSync(`npm pack ${spec} --silent`, { cwd: tmp, stdio: ['ignore', 'pipe', 'pipe'] }); packed = true; }
+      catch (e) { lastErr = e.message; if (i < 2) execSync('sleep 10'); }
+    }
+    if (!packed) { drift++; console.error(`  ✗ ${spec}: published per the registry but the tarball is UNFETCHABLE after 3 tries (propagation or outage) — cannot verify immutability, failing closed: ${lastErr.split('\n')[0]}`); continue; }
     const tgz = readdirSync(tmp).find((f) => f.endsWith('.tgz'));
     execSync(`tar xzf ${tgz}`, { cwd: tmp });
     const pubDir = join(tmp, 'package');
