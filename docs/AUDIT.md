@@ -36,7 +36,7 @@ We have already done extensive **self**-review (§6). We are buying the thing se
 
 ```
 npm     npm i ust-protocol@rc          # the reference verifier + producer (Apache-2.0, zero-dep, node:crypto)
-        npx -y ust-mcp@rc              # the MCP server (9 tools)
+        npx -y ust-mcp@rc              # the MCP server (11 tools)
         npm i ust-web-signer@rc        # the WebCrypto browser signer (producer side)
 git     github.com/thelabmd/UST-Protocol   # monorepo — everything below in one clone
           spec/UST-1.0.md              # the normative specification (this is the source of truth)

@@ -46,6 +46,21 @@ export const tools = [
     handler: ({ domain_shard, ust_id, key_id, time, data, constituents }) => buildResult(P.buildAttestation({ domain_shard, ust_id, key_id }, time, data, constituents)),
   },
   {
+    name: 'ust_build_genesis',
+    description: 'CEREMONY (build, unsigned): a name-binding GENESIS — the self-signed root that weds a domain to a key (§12.1). Returns the unsigned genesis State + content_hash + signing_input; the operator signs it with its OWN ROOT key (this tool holds NO key — a shared signing key would be a forgery oracle). Then publish at https://<domain>/.well-known/ust-genesis + mirrors, and anchor its content_hash. Optional signed `max_partitions` declares the operator\'s partition capacity (bounds earned by ceremony).',
+    inputSchema: { type: 'object', required: ['domain_shard', 'ust_id', 'key_id', 'pub', 'time'], properties: { domain_shard: { type: 'string' }, ust_id: { type: 'string' }, key_id: { type: 'string', description: 'the ROOT key_id (self-signed: must equal the signing key)' }, pub: { type: 'string' }, time: { type: 'object' }, max_partitions: { type: 'number' } } },
+    handler: ({ domain_shard, ust_id, key_id, pub, time, max_partitions }) => {
+      const value = { pub, role: 'name-binding-root', ...(max_partitions ? { max_partitions: String(max_partitions) } : {}) };
+      return buildResult(P.buildState({ domain_shard, ust_id, key_id, class: 'genesis' }, time, { genesis: { kind: 'captured', value } }));
+    },
+  },
+  {
+    name: 'ust_build_key_log',
+    description: 'CEREMONY (build, unsigned): a KEY-LOG entry (§12.2) that add|rotate|revoke a key, prev-chained to the previous entry (or the genesis content_hash for the first). Returns the unsigned State + signing_input; sign with the CURRENTLY-VALID key. This is how a genesis root delegates to daily operational keys and how compromise is revoked.',
+    inputSchema: { type: 'object', required: ['domain_shard', 'ust_id', 'key_id', 'time', 'key_op', 'prev'], properties: { domain_shard: { type: 'string' }, ust_id: { type: 'string' }, key_id: { type: 'string' }, time: { type: 'object' }, key_op: { type: 'object', description: '{ op:"add"|"rotate"|"revoke", pub, new_key_id?, reason?, compromised_since? }' }, prev: { type: 'string', description: 'content_hash of the prior key-log entry, or of the genesis for the first' } } },
+    handler: ({ domain_shard, ust_id, key_id, time, key_op, prev }) => buildResult(P.buildKeyLogEntry({ domain_shard, ust_id, key_id }, time, key_op, prev)),
+  },
+  {
     name: 'ust_resolve',
     description: 'RESOLVE name authority: given a document, its publisher genesis + key-log, and a witness no-fork confirmation, return the identity strength (authoritative / pinned / self-asserted) and status.',
     inputSchema: { type: 'object', required: ['doc', 'genesis', 'keylog'], properties: { doc: { type: 'object' }, genesis: { type: 'object' }, keylog: { type: 'array' }, noForkConfirmed: { type: 'boolean' }, anchorTime: { type: 'string' } } },
