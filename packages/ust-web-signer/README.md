@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
-# ust-web-signer
+# @ust-protocol/web-signer
 
 The **browser-side signer** for [UST (Universal State Transcript)](https://github.com/thelabmd/UST-Protocol). It is the
 one piece [`ust-protocol`](https://www.npmjs.com/package/ust-protocol) deliberately leaves out: a **private key
@@ -10,7 +10,7 @@ it signs verifies **VALID** there.
 Runs in browsers, Web Workers / service workers, and Node ≥ 20 (global `crypto.subtle`). Zero dependencies.
 
 ```js
-import { generateSigner, signObservation, nowFrame } from 'ust-web-signer';
+import { generateSigner, signObservation, nowFrame } from '@ust-protocol/web-signer';
 
 const signer = await generateSigner();                 // Ed25519, private key NON-EXTRACTABLE (stays in WebCrypto)
 const { ust_id, time } = nowFrame();                   // hour frame for addressing; time = an INSTANT (valid_from = valid_to = generated_at)

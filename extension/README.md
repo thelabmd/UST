@@ -9,7 +9,7 @@ into one gesture each way:
   plus the **real signed content**, verified locally. (Or click the toolbar icon and paste it into the box —
   same thing.) Chrome collapses newlines in a selection; harmless — the signed bytes ride as base64 armor.
 
-It is the reference consumer of [`ust-web-signer`](../packages/ust-web-signer) (bundled in `lib/`, alongside the
+It is the reference consumer of [`@ust-protocol/web-signer`](../packages/ust-web-signer) (bundled in `lib/`, alongside the
 zero-dependency verifier `ust-verify.mjs`).
 
 ## Load it (unpacked)

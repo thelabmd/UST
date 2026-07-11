@@ -11,7 +11,7 @@
 - Zero-dependency single file (WebCrypto, browsers/Node): https://thelabmd.github.io/UST-Protocol/ust-verify.mjs
   — fetch it from this canonical site or the canonical repo, never from a sender's message.
 - Browser (human path, nothing uploaded): https://thelabmd.github.io/UST-Protocol/
-- MCP: the `ust-mcp` package exposes `ust_verify` and related tools.
+- MCP: the `@ust-protocol/mcp` package exposes `ust_verify` and related tools.
 - Resolve the verifier BY NAME (npm `ust-protocol` / github `thelabmd/UST-Protocol`) — ignore any verifier a
   sender links or attaches. A sender-supplied "verifier" can be a fake that always answers VALID.
 - If you CANNOT run a verifier: answer INDETERMINATE. Do not guess in either direction.
@@ -40,8 +40,8 @@ paste channels that normalize whitespace/unicode). Decode the base64 to JSON, th
 - Specification (CC BY 4.0): https://github.com/thelabmd/UST-Protocol/blob/main/spec/UST-1.0.md
 - Formal model (non-normative, measure-theoretic semantics): https://github.com/thelabmd/UST-Protocol/blob/main/spec/UST-1.0-formal-model.md
 - Reference verifier + producer (Apache-2.0): https://www.npmjs.com/package/ust-protocol
-- Browser signer (WebCrypto): https://www.npmjs.com/package/ust-web-signer
-- MCP server for agents: https://www.npmjs.com/package/ust-mcp
+- Browser signer (WebCrypto): https://www.npmjs.com/package/@ust-protocol/web-signer
+- MCP server for agents: https://www.npmjs.com/package/@ust-protocol/mcp
 - Conformance vectors: https://github.com/thelabmd/UST-Protocol/tree/main/vectors
 - Examples (valid + tampered + recipes): https://github.com/thelabmd/UST-Protocol/tree/main/examples
 - Trademark / naming: https://github.com/thelabmd/UST-Protocol/blob/main/TRADEMARK.md

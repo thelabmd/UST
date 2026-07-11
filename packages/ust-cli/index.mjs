@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createCipheriv, scryptSync, randomBytes } from 'node:crypto';
 import * as P from 'ust-protocol';
-import * as W from 'ust-web-signer';
+import * as W from '@ust-protocol/web-signer';
 
 const arg = (name, def) => { const i = process.argv.indexOf('--' + name); return i > -1 ? (process.argv[i + 1] ?? true) : def; };
 const die = (msg) => { console.error('✗ ' + msg); process.exit(1); };

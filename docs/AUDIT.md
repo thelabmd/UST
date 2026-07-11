@@ -24,7 +24,7 @@ We have already done extensive **self**-review (§6). We are buying the thing se
 - The protocol specification: `spec/UST-1.0.md`.
 - The reference verifier + producer: `ust-protocol` (npm) — canon, hashing, signing, LIGHT/HIGH/TOP verify.
 - The conformance vectors: `vectors/conformance-vectors.json`.
-- The agent surface: `ust-mcp` (thin MCP wrapper over `ust-protocol`; audit the exposure, not new crypto).
+- The agent surface: `@ust-protocol/mcp` (thin MCP wrapper over `ust-protocol`; audit the exposure, not new crypto).
 
 **OUT of scope (by design)**
 - **Data correctness** — UST proves _fixation, not truth_; a publisher may sign a wrong reading. Not a flaw.
@@ -36,8 +36,8 @@ We have already done extensive **self**-review (§6). We are buying the thing se
 
 ```
 npm     npm i ust-protocol@rc          # the reference verifier + producer (Apache-2.0, zero-dep, node:crypto)
-        npx -y ust-mcp@rc              # the MCP server (11 tools)
-        npm i ust-web-signer@rc        # the WebCrypto browser signer (producer side)
+        npx -y @ust-protocol/mcp@rc   # the MCP server (11 tools)
+        npm i @ust-protocol/web-signer@rc  # the WebCrypto browser signer (producer side)
 git     github.com/thelabmd/UST-Protocol   # monorepo — everything below in one clone
           spec/UST-1.0.md              # the normative specification (this is the source of truth)
           vectors/conformance-vectors.json   # deterministic test vectors (26; the runner adds behavioral checks — 56 total)

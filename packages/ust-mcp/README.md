@@ -1,8 +1,8 @@
-# ust-mcp
+# @ust-protocol/mcp
 
 **An MCP server that lets an agent verify, create, and combine UST records — using only this server and its own key.**
 
-`ust-mcp` exposes [`ust-protocol`](https://www.npmjs.com/package/ust-protocol) as
+`@ust-protocol/mcp` exposes [`ust-protocol`](https://www.npmjs.com/package/ust-protocol) as
 [Model Context Protocol](https://modelcontextprotocol.io) tools, so any MCP-capable agent can check that a piece
 of state is what it claims — who published it, when, unchanged — without trusting whoever served the bytes.
 
@@ -13,19 +13,19 @@ of state is what it claims — who published it, when, unchanged — without tru
 ## Run
 
 ```
-npx -y ust-mcp@rc
+npx -y @ust-protocol/mcp@rc
 ```
 
 ## Add to Claude Code
 
 ```
-claude mcp add ust -- npx -y ust-mcp@rc
+claude mcp add ust -- npx -y @ust-protocol/mcp@rc
 ```
 
 Or in any MCP client config:
 
 ```json
-{ "mcpServers": { "ust": { "command": "npx", "args": ["-y", "ust-mcp@rc"] } } }
+{ "mcpServers": { "ust": { "command": "npx", "args": ["-y", "@ust-protocol/mcp@rc"] } } }
 ```
 
 ## Tools

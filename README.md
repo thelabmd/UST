@@ -106,8 +106,8 @@ proves the document existed **by** a real point in time (and `generated_at` may 
 | `spec/UST-1.0-formal-model.md` | a measure-theoretic semantics (non-normative appendix) |
 | `vectors/` | deterministic conformance vectors — any implementation should pass them |
 | `packages/ust-protocol/` | the stateless reference verifier + producer ([npm](https://www.npmjs.com/package/ust-protocol)) |
-| `packages/ust-mcp/` | an MCP server exposing UST to agents ([npm](https://www.npmjs.com/package/ust-mcp)) |
-| `packages/ust-web-signer/` | WebCrypto browser signer ([npm](https://www.npmjs.com/package/ust-web-signer)) |
+| `packages/ust-mcp/` | an MCP server exposing UST to agents ([npm](https://www.npmjs.com/package/@ust-protocol/mcp)) |
+| `packages/ust-web-signer/` | WebCrypto browser signer ([npm](https://www.npmjs.com/package/@ust-protocol/web-signer)) |
 | `extension/` | "Make it UST" — a demo Chrome extension: sign by selection, verify by selection (LIGHT) |
 | `docs/` | the [web verifier](https://thelabmd.github.io/UST-Protocol/) (client-side, GitHub Pages) + `ust-verify.mjs`, a zero-dependency verifier + `llms.txt` |
 | `examples/` | sample documents (valid + tampered) and verification recipes |
@@ -122,7 +122,7 @@ npm test          # the conformance runner: 72 checks; asserts spec == package =
 Produce and verify a LIGHT transcript:
 
 ```js
-import { generateSigner, signObservation, nowFrame } from 'ust-web-signer';
+import { generateSigner, signObservation, nowFrame } from '@ust-protocol/web-signer';
 import { verify } from 'ust-protocol';
 const s = await generateSigner();                              // Ed25519, non-extractable
 const { ust_id, time } = nowFrame();                           // instant capture frame
@@ -137,7 +137,7 @@ Run the canonical reference — never eyeball:
 - **Browser (nothing is uploaded):** [thelabmd.github.io/UST-Protocol](https://thelabmd.github.io/UST-Protocol/) — paste the blob, the base64, or the JSON.
 - **Node:** `npm i ust-protocol` → `verify(doc, { context: 'data' })`
 - **Zero-dependency single file:** [`docs/ust-verify.mjs`](docs/ust-verify.mjs) (WebCrypto, clean-room, cross-checked against `ust-protocol`) — fetch it from **this** repository, never from a sender's message.
-- **MCP:** [`ust-mcp`](https://www.npmjs.com/package/ust-mcp) exposes `ust_verify` to agents.
+- **MCP:** [`@ust-protocol/mcp`](https://www.npmjs.com/package/@ust-protocol/mcp) exposes `ust_verify` to agents.
 
 ### If you are an AI agent
 
