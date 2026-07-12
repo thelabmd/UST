@@ -538,7 +538,8 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
 // the human's explicit flag).
 {
   const src = readFileSync(new URL('./index.mjs', import.meta.url), 'utf8');
-  check('verify_auto_resolves_by_default', src.includes('resolving identity from https://') && src.includes("arg('offline', false)"));
+  check('verify_auto_resolves_by_default', src.includes('P.resolveByDiscovery') && src.includes("arg('offline', false)"));
+  check('cli_uses_shared_resolver_not_a_copy', src.includes('P.resolveByDiscovery') && !src.includes('fetchIdentity('));
   check('auto_resolution_never_grants_authority_silently', /noForkConfirmed: noFork/.test(src) && src.includes('no-fork unconfirmed') === false ? true : src.includes("noFork ? 'asserted by you") );
   check('offline_is_a_first_class_flag', src.includes('--offline'));
 }

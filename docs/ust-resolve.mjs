@@ -9,6 +9,23 @@
 // resolution, never from a raw caller-attached genesis (rc.12).
 import { verify, contentHash, keyId } from './ust-verify.mjs';
 
+// SSRF guard (mirror of ust-protocol.isPublicDnsShard): the domain_shard is UNTRUSTED — a document must
+// never point this page's fetch at an internal address. Public DNS names only; no IP/localhost/port/path.
+export function isPublicDnsShard(shard) {
+  if (typeof shard !== 'string' || !shard || shard.length > 253) return false;
+  if (/[:/@\s]/.test(shard)) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(shard)) return false;
+  if (/^[0-9a-f]*:[0-9a-f:]*$/i.test(shard)) return false;
+  const lower = shard.toLowerCase();
+  if (lower === 'localhost' || lower.endsWith('.localhost') || lower.endsWith('.local') ||
+      lower.endsWith('.internal') || lower.endsWith('.home.arpa') || lower.endsWith('.onion')) return false;
+  const labels = lower.split('.');
+  if (labels.length < 2) return false;
+  if (!labels.every((l) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(l))) return false;
+  if (!/^[a-z]{2,}$/.test(labels[labels.length - 1])) return false;
+  return true;
+}
+
 export async function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false } = {}) {
   if (!genesis) return { error: 'no genesis supplied' };
   const gv = await verify(genesis, { context: 'key' });
@@ -61,6 +78,7 @@ export async function resolveAuthority(doc, { genesis, keylog = [], noForkConfir
 // Discovery fetch (§20.1 pair) — pull the publisher's OWN genesis + key log from the standard locations.
 // TLS to the claimed name is the observation; the chain math above is what actually binds the key.
 export async function fetchIdentity(domain, fetchImpl = fetch) {
+  if (!isPublicDnsShard(domain)) throw new Error('domain_shard is not a public DNS name — discovery refused (SSRF guard)');
   const get = async (path) => {
     const r = await fetchImpl(`https://${domain}${path}`, { signal: AbortSignal.timeout(10000) });
     if (!r.ok) throw new Error(`HTTP ${r.status} at ${path}`);

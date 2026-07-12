@@ -14,31 +14,10 @@ const buildResult = (state) => ({ state, content_hash: P.contentHash(doc1(state)
 
 // ─── PROTOCOL MCP tools (universal) ──────────────────────────────────────────────────────────────────
 
-// AUTO-RESOLUTION (owner 2026-07-12: "an agent receives a HIGH UST and by default sees LIGHT — or,
-// above the 64-partition floor, nothing at all; over MCP that is a total failure"). Resolution is the
-// DEFAULT path, not an expert action: the document carries its own name → fetch the §20.1 discovery
-// pair from that name, resolve, re-verify with the grant. Honest by construction: without an explicit
-// noForkConfirmed the name stays provisional (never silently authoritative), and `offline: true`
-// forbids the network entirely. fetchImpl injected — testable without a network.
-export async function autoResolveVerify(doc, o, { fetchImpl = fetch } = {}) {
-  const first = P.verify(doc, o);
-  const shard = doc?.state?.id?.domain_shard || '';
-  const nameForm = shard && !/^sha256:[0-9a-f]{64}$/.test(shard);
-  const worthIt = nameForm && (first.result === 'VALID:LIGHT' || (first.result === 'INDETERMINATE' && first.reason === 'unavailable'));
-  if (!worthIt) return first;
-  let genesis, keylog = [];
-  try {
-    const get = async (p) => { const r = await fetchImpl(`https://${shard}${p}`, { signal: AbortSignal.timeout(10000) }); if (!r.ok) throw new Error(`HTTP ${r.status} at ${p}`); return r.json(); };
-    genesis = await get('/.well-known/ust-genesis');
-    try { const k = await get('/.well-known/ust-keylog'); if (Array.isArray(k)) keylog = k; } catch { /* not served */ }
-  } catch (e) {
-    return { ...first, resolution: { attempted: true, error: 'discovery fetch failed: ' + (e && e.message || e), hint: 'supply genesis+keylog explicitly, or offline:true to silence this' } };
-  }
-  const auth = P.resolveAuthority(doc, { genesis, keylog, noForkConfirmed: !!o.noForkConfirmed });
-  if (auth.error) return { ...first, resolution: { attempted: true, error: auth.error + (auth.detail ? ' — ' + auth.detail : '') } };
-  const second = P.verify(doc, { ...o, genesis, keylog, capacity: auth.capacity });
-  return { ...second, resolution: { publisher: auth.publisher ?? shard, capacity: auth.capacity, noFork: o.noForkConfirmed ? 'asserted-by-caller' : 'unconfirmed — pass noForkConfirmed:true ONLY after independently checking no rival genesis exists', source: 'fetched from https://' + shard + '/.well-known/ (§20.1 discovery)' } };
-}
+// AUTO-RESOLUTION is the DEFAULT (owner: an agent gets a HIGH UST and by default sees LIGHT — or, above
+// the floor, nothing; over MCP that is a total failure). The single P.resolveByDiscovery (rc.13) carries
+// the SSRF guard + the one-copy resolve flow; this tool just calls it. Never silently authoritative:
+// HIGH still needs an explicit noForkConfirmed.
 
 export const tools = [
   {
@@ -48,16 +27,19 @@ export const tools = [
     handler: async ({ doc, json, offline, pinnedKeys, genesis, keylog, proof, disclosures, noForkConfirmed, requireAuthoritative, capacity, maxSupportedBytes }) => {
       const o = { pinnedKeys, genesis, keylog, disclosures, noForkConfirmed, requireAuthoritative, capacity, maxSupportedBytes, context: 'data' };
       // `json` (raw text) = the safe conformance boundary — duplicate-key + NFC scan BEFORE parse (F7).
+      const ro = { ...o, offline };
       if (json !== undefined) {
         const raw = P.verifyJson(json, o);
         if (offline || genesis !== undefined || !(raw.result === 'VALID:LIGHT' || (raw.result === 'INDETERMINATE' && raw.reason === 'unavailable'))) return raw;
         let parsed; try { parsed = JSON.parse(json); } catch { return raw; }
-        return autoResolveVerify(parsed, o);
+        const { verdict, resolution } = await P.resolveByDiscovery(parsed, ro);
+        return resolution ? { ...verdict, resolution } : verdict;
       }
       // an embedded doc.proof is verified INSIDE verify (present-bad ⇒ E-ANCHOR); a separately-passed proof merges in.
       const d = (proof !== undefined && doc && doc.proof === undefined) ? { ...doc, proof } : doc;
       if (offline || genesis !== undefined) return P.verify(d, o);
-      return autoResolveVerify(d, o);
+      const { verdict, resolution } = await P.resolveByDiscovery(d, ro);
+      return resolution ? { ...verdict, resolution } : verdict;
     },
   },
   {

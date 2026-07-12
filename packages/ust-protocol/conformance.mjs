@@ -279,6 +279,35 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
 }
 
 console.log('\n════════════════════════════════════════════');
+// ─── rc.13: discovery-driven resolution + SSRF guard (owner: a verifier that resolves BY NAME must not
+//     let an untrusted document point it at an internal address). The guard is a protocol-law boundary.
+{
+  const pub = ['noosphere.md', 'example.com', 'a.b.co.uk', 'x.london'];
+  const priv = ['localhost', '127.0.0.1', '169.254.169.254', '192.168.1.1', 'foo.internal', 'x.local',
+    'y.onion', '::1', 'fd00::1', 'host:8080', 'nohostonly', 'a..b.com', 'http://x.com', 'x.com/p', 'user@x.com'];
+  check('ssrf guard: public DNS names pass', pub.every(P.isPublicDnsShard));
+  check('ssrf guard: IPs/localhost/internal/ports/paths refused', priv.every((s) => !P.isPublicDnsShard(s)));
+
+  // resolveByDiscovery: an internal-address document NEVER makes a network call (fetchImpl asserts none)
+  let touched = 0;
+  const spyFetch = async () => { touched++; return { ok: false, status: 0, text: async () => '' }; };
+  const evilId = { ...ID, domain_shard: '169.254.169.254', ust_id: 'ust:20260628.15' };
+  const evil = P.seal(P.buildState(evilId, T, { p: { kind: 'captured', value: { x: '1' } } }), A.priv, A.pubB64);
+  const r1 = await P.resolveByDiscovery(evil, { context: 'data' }, { fetchImpl: spyFetch });
+  check('resolveByDiscovery: SSRF target never fetched', touched === 0 && !!r1.resolution?.skipped);
+
+  // offline forbids the network even for a public name
+  const okId = { ...ID, domain_shard: 'noosphere.md', ust_id: 'ust:20260628.15' };
+  const okDoc = P.seal(P.buildState(okId, T, { p: { kind: 'captured', value: { x: '1' } } }), A.priv, A.pubB64);
+  const r2 = await P.resolveByDiscovery(okDoc, { context: 'data', offline: true }, { fetchImpl: spyFetch });
+  check('resolveByDiscovery: offline makes zero network calls', touched === 0 && r2.resolution === null);
+
+  // a public-name LIGHT document IS worth resolving (a small slot still wants its publisher) — fetch fires
+  touched = 0;
+  const r3 = await P.resolveByDiscovery(okDoc, { context: 'data' }, { fetchImpl: spyFetch });
+  check('resolveByDiscovery: public LIGHT resolves (fetch fires, honest error on failure)', touched > 0 && !!r3.resolution?.error);
+}
+
 console.log('  ust-protocol ' + P.VERSION.spec + ' conformance vs ' + V.version);
 console.log('  PASS ' + pass + '   FAIL ' + fail + '   NOTES ' + note);
 if (fails.length) { console.log('\n  FAILURES:'); fails.forEach(f => console.log('    ✗ ' + f)); }

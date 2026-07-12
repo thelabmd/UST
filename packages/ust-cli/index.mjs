@@ -780,26 +780,15 @@ async function cmdVerify() {
   // pair from it, resolve, re-verify with the grant. --offline forbids the network. Honesty holds:
   // HIGH still requires YOUR --no-fork-confirmed — auto-resolution never silently grants authority.
   let resolution = null;
-  {
-    const shard = doc?.state?.id?.domain_shard || '';
-    const nameForm = shard && !/^sha256:[0-9a-f]{64}$/.test(shard);
-    const worthIt = !genesisPath && !arg('offline', false) && nameForm &&
-      (r.result === 'VALID:LIGHT' || (r.result === 'INDETERMINATE' && r.reason === 'unavailable'));
-    if (worthIt) {
-      console.error(`  ⏳ resolving identity from https://${shard}/.well-known/ … (--offline to skip)`);
-      try {
-        const get = async (p2) => { const res = await fetch(`https://${shard}${p2}`, { signal: AbortSignal.timeout(10000) }); if (!res.ok) throw new Error(`HTTP ${res.status} at ${p2}`); return res.text(); };
-        const g = verifyRaw(await get('/.well-known/ust-genesis'));
-        if (!P.isValid(g.verdict)) throw new Error('the published genesis does not VERIFY');
-        let entries = [];
-        try { const kl = parseKeylogRaw(await get('/.well-known/ust-keylog')); if (!kl.err) entries = kl.entries; } catch { /* not served */ }
-        const auth = P.resolveAuthority(doc, { genesis: g.doc, keylog: entries, noForkConfirmed: noFork });
-        if (auth.error) resolution = { error: auth.error + (auth.detail ? ' — ' + auth.detail : '') };
-        else {
-          resolution = { publisher: shard, capacity: auth.capacity, noFork: noFork ? 'asserted by you (--no-fork-confirmed)' : 'unconfirmed' };
-          r = verifyRaw(raw, { ...opts, genesis: g.doc, keylog: entries, noForkConfirmed: noFork, capacity: auth.capacity }).verdict;
-        }
-      } catch (e) { resolution = { error: 'discovery fetch failed: ' + e.message }; }
+  if (!genesisPath) {
+    // the SINGLE resolver (ust-protocol resolveByDiscovery, rc.13) — SSRF guard + one-copy flow live there
+    const rd = await P.resolveByDiscovery(doc, { context: opts.context, offline: !!arg('offline', false), noForkConfirmed: noFork },
+      { fetchImpl: async (u, init) => { console.error(`  ⏳ resolving identity from ${new URL(u).origin} … (--offline to skip)`); return fetch(u, init); } });
+    if (rd.resolution) {
+      r = rd.verdict;
+      resolution = rd.resolution.skipped ? { error: rd.resolution.skipped }
+                 : rd.resolution.error ? { error: rd.resolution.error }
+                 : { publisher: rd.resolution.publisher, capacity: rd.resolution.capacity, noFork: noFork ? 'asserted by you (--no-fork-confirmed)' : 'unconfirmed' };
     }
   }
   console.log(r.result + (r.error ? '  (' + r.error + (r.detail ? ' — ' + r.detail : '') + ')' : ''));

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.12' };
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.13' };
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -572,6 +572,57 @@ export function verifyJson(rawBytes, opts = {}) {
   let obj; try { obj = JSON.parse(raw); } catch { return bad('E-MALFORMED', 'not valid JSON'); }
   return verify(obj, opts);
 }
+
+// ─── DISCOVERY-DRIVEN RESOLUTION (rc.13) — the SINGLE resolver every surface (web/cli/mcp) calls, so the
+// "fetch the publisher's own genesis+keylog and re-verify with the grant" flow exists in ONE place, not
+// three copies that drift. A verifier that resolves BY NAME must first decide the name is safe to reach:
+// the domain_shard comes from an UNTRUSTED document, so an SSRF guard runs BEFORE any network call.
+
+// SSRF guard: a discovery target MUST be a public DNS name. Rejects IPs (v4/v6), localhost, non-public
+// TLDs/suffixes, ports, userinfo, and anything that is not label.label…public-tld. This is the boundary
+// between "resolve by name" and "let an attacker's document point my verifier at an internal address".
+export function isPublicDnsShard(shard) {
+  if (typeof shard !== 'string' || !shard || shard.length > 253) return false;
+  if (/[:/@\s]/.test(shard)) return false;                                  // no port/path/userinfo/space
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(shard)) return false;                  // IPv4
+  if (/^[0-9a-f]*:[0-9a-f:]*$/i.test(shard)) return false;                  // IPv6-ish
+  const lower = shard.toLowerCase();
+  if (lower === 'localhost' || lower.endsWith('.localhost') || lower.endsWith('.local') ||
+      lower.endsWith('.internal') || lower.endsWith('.home.arpa') || lower.endsWith('.onion')) return false;
+  const labels = lower.split('.');
+  if (labels.length < 2) return false;                                      // must have a TLD
+  if (!labels.every((l) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(l))) return false;  // RFC1123 labels
+  if (!/^[a-z]{2,}$/.test(labels[labels.length - 1])) return false;         // alphabetic public TLD
+  return true;
+}
+
+// Resolve a document's authority by fetching its OWN §20.1 discovery pair, then re-verify with the grant.
+// Returns { verdict, resolution } — verdict is what a caller should surface; resolution carries publisher /
+// capacity / noFork status / source (or an error/skip). Honest by construction: without an explicit
+// noForkConfirmed the name stays provisional (never silently authoritative). `offline` forbids the network.
+// fetchImpl injected for tests. This function performs the ONLY network egress in the verify path.
+export async function resolveByDiscovery(doc, opts = {}, { fetchImpl = fetch } = {}) {
+  const base = verify(doc, opts);
+  const shard = doc?.state?.id?.domain_shard || '';
+  const worth = !opts.offline && !opts.genesis &&
+    (base.result === 'VALID:LIGHT' || (base.result === 'INDETERMINATE' && base.reason === 'unavailable'));
+  if (!worth) return { verdict: base, resolution: null };
+  if (!isPublicDnsShard(shard)) return { verdict: base, resolution: { skipped: 'domain_shard is not a public DNS name — discovery refused (SSRF guard)' } };
+  let genesis, keylog = [];
+  try {
+    const get = async (p) => { const r = await fetchImpl(`https://${shard}${p}`, { signal: AbortSignal.timeout(10000), redirect: 'error' }); if (!r.ok) throw new Error(`HTTP ${r.status} at ${p}`); return r.text(); };
+    const gRaw = await get('/.well-known/ust-genesis');
+    const gv = verifyJson(gRaw, {});
+    if (!isValid(gv)) throw new Error('published genesis does not VERIFY');
+    genesis = JSON.parse(gRaw);
+    try { const kRaw = await get('/.well-known/ust-keylog'); const k = JSON.parse(kRaw); if (Array.isArray(k)) keylog = k; } catch { /* not served */ }
+  } catch (e) { return { verdict: base, resolution: { error: 'discovery fetch failed: ' + (e && e.message || e) } }; }
+  const auth = resolveAuthority(doc, { genesis, keylog, noForkConfirmed: !!opts.noForkConfirmed });
+  if (auth.error) return { verdict: base, resolution: { error: auth.error + (auth.detail ? ' — ' + auth.detail : '') } };
+  const verdict = verify(doc, { ...opts, genesis, keylog, capacity: auth.capacity });
+  return { verdict, resolution: { publisher: auth.publisher ?? shard, capacity: auth.capacity, noFork: opts.noForkConfirmed ? 'asserted-by-caller' : 'unconfirmed', source: `https://${shard}/.well-known/ (§20.1 discovery)` } };
+}
+
 // minimal duplicate-key-detecting JSON scanner (zero-dep). Returns an error string or null. Keys are parsed
 // (via JSON.parse of the token) so `a` and `a` collide as the SAME member name.
 function scanDuplicateKeys(s) {
