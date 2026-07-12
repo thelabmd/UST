@@ -359,6 +359,30 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   check('whats_next_no_overclaim', !/witnesses verified|anchored to bitcoin/i.test(s));
 }
 
+// ── 15. the key log rides WITH the genesis (owner: a verifier needs BOTH — the adapter must not leave
+// step-3-of-HIGH as homework), served APPEND-shaped (a rotation appends, never rewrites).
+{
+  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
+  const bytes = JSON.stringify(g.genesis);
+  const klArr = JSON.stringify([g.keylog0]);
+  const src = C.buildWorkerScript(bytes, klArr);
+  check('worker_serves_keylog_route', src.includes('/.well-known/ust-keylog'));
+  check('worker_without_keylog_backcompat', C.buildWorkerScript(bytes).includes('const KEYLOG = null'));
+  const proj = C.buildWranglerProject({ domain: DOMAIN, genesisText: bytes, keylogText: klArr });
+  check('wrangler_project_adds_keylog_route', proj['wrangler.toml'].includes('ust-keylog*'));
+  const projNo = C.buildWranglerProject({ domain: DOMAIN, genesisText: bytes });
+  check('wrangler_project_no_keylog_route_without', !projNo['wrangler.toml'].includes('ust-keylog*'));
+  // the SERVED shape resolves: exactly what a consumer downloads from /.well-known/ust-keylog feeds
+  // authority resolution and lifts an op-key document to VALID:HIGH
+  const t = (iso) => ({ generated_at: iso, valid_from: iso, valid_to: iso });
+  const obs = await W.seal(P.buildState({ domain_shard: DOMAIN, ust_id: 'ust:20260712.15', key_id: g.op.key_id, class: 'observation' }, t('2026-07-12T15:00:00Z'), { probe: { kind: 'captured', value: { ok: 'true' } } }), g.op);
+  const served = JSON.parse(klArr);
+  check('served_keylog_is_append_shaped', Array.isArray(served) && P.isValid(P.verify(served[0], { context: 'key' })));
+  const auth = P.resolveAuthority(obs, { genesis: g.genesis, keylog: served, noForkConfirmed: true });
+  const high = P.verify(obs, { context: 'data', genesis: g.genesis, keylog: served, noForkConfirmed: true, capacity: auth.capacity });
+  check('served_keylog_resolves_to_high', high.result === 'VALID:HIGH');
+}
+
 console.log(`\nPASS ${pass} FAIL ${fail} NOTES ${note}`);
 if (fail) { console.error('\nFAILURES:\n  ' + fails.join('\n  ')); process.exit(1); }
 console.log('✓ 9th-audit regression holds — the seven points cannot silently regress');
