@@ -82,10 +82,11 @@ export function checkPublished(liveText, genHash) {
 // roads get the same confirmation discipline (the record is confirmed by a resolver, never by the API
 // that wrote it). Returns seen/not — the CALLER decides whether absence is fatal (cf-api) or a warning
 // with a re-attest pointer (by-hand: registrar TTLs can be long, the ceremony must not strand the user).
-export async function dohConfirmTxt({ domain, genHash, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), attempts = 6, delayMs = 3000 }) {
+export async function dohConfirmTxt({ domain, genHash, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), attempts = 6, delayMs = 3000, onAttempt = null }) {
   for (let i = 0; i < attempts; i++) {
     const doh = await fetchImpl(`https://cloudflare-dns.com/dns-query?name=_ust.${domain}&type=TXT`, { headers: { accept: 'application/dns-json' } }).then((r) => r.json()).catch(() => ({}));
     if ((doh.Answer || []).some((a) => (a.data || '').replace(/"/g, '').includes(genHash))) return true;
+    onAttempt?.(i + 1, attempts);
     if (i < attempts - 1) await sleep(delayMs);
   }
   return false;
@@ -94,7 +95,7 @@ export async function dohConfirmTxt({ domain, genHash, fetchImpl = fetch, sleep 
 // Cloudflare one-click: UPSERT the _ust TXT (find → PUT if present, else POST) then CONFIRM it via a
 // DNS-over-HTTPS readback (idempotent + fail-closed, 9th audit #7). fetchImpl/sleep are injected so the
 // regression suite exercises the update-path and the readback-failure-path with no live network.
-export async function cfUpsert({ domain, txt, genHash, token, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+export async function cfUpsert({ domain, txt, genHash, token, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), onAttempt = null }) {
   if (!token) throw new Error('cf-api needs a ZONE-scoped CF_TOKEN (DNS:edit for this zone — never account-wide)');
   const cf = (path, init) => fetchImpl('https://api.cloudflare.com/client/v4' + path, { ...init, headers: { Authorization: 'Bearer ' + token, 'content-type': 'application/json', ...(init?.headers) } }).then((r) => r.json());
   const zone = (await cf(`/zones?name=${domain}`)).result?.[0]; if (!zone) throw new Error('CF zone not found / token cannot see ' + domain);
@@ -105,8 +106,11 @@ export async function cfUpsert({ domain, txt, genHash, token, fetchImpl = fetch,
     ? await cf(`/zones/${zone.id}/dns_records/${existing.id}`, { method: 'PUT', body })
     : await cf(`/zones/${zone.id}/dns_records`, { method: 'POST', body });
   if (!w.success) throw new Error('CF write failed: ' + (w.errors?.[0]?.message || '?'));
-  const seen = await dohConfirmTxt({ domain, genHash, fetchImpl, sleep });
-  if (!seen) throw new Error('CF wrote the record but DoH readback did not confirm it (propagation) — re-run or verify manually');
+  // UPDATE patience (live lesson, 2nd real ceremony): on an UPDATE the public resolver keeps serving the
+  // OLD value until its TTL (300 s) expires — 18 s of readback fails a perfectly good write. Wait through
+  // a full TTL window, narrated; a CREATE confirms on the first tries as before.
+  const seen = await dohConfirmTxt({ domain, genHash, fetchImpl, sleep, attempts: existing ? 24 : 6, delayMs: existing ? 15000 : 3000, onAttempt });
+  if (!seen) throw new Error('CF accepted the record, but the public resolver still serves the OLD value (resolver TTL cache — an updated record can take ~5 min to converge). Wait a few minutes and RE-RUN the ceremony: it is idempotent and rewrites the TXT and the worker consistently.');
   return { action: existing ? 'updated' : 'created' };
 }
 
@@ -671,7 +675,10 @@ async function cmdGenesis() {
     try {
       const dnsToken = await getDnsToken();   // env if set; otherwise the prefilled link + a paste (asked once)
       console.log('  ⏳ writing _ust.' + domain + ' TXT via the Cloudflare API (upsert + DoH readback)…');
-      res = await cfUpsert({ domain, txt, genHash, token: dnsToken });
+      res = await cfUpsert({
+        domain, txt, genHash, token: dnsToken,
+        onAttempt: (i, n) => console.log(`     ⏳ readback ${i}/${n} — the resolver still serves the previous record (TTL up to 300 s), waiting…`),
+      });
     } catch (e) { rl.close(); die(e.message); }
     console.log('  ✅ 3/5 🌐 _ust TXT ' + res.action + ' and confirmed by an independent DoH readback');
     console.log('       DNS now vouches for your hash even if every HTTP surface lies');

@@ -93,6 +93,16 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   const nc = mkCf({ existing: false, dohConfirms: false, genHash: g.genHash });
   check('doh_readback_failure_fails', await threw(() => C.cfUpsert({ domain: DOMAIN, txt: `ust-genesis=${g.genHash}`, genHash: g.genHash, token: 'x', fetchImpl: nc.fetchImpl, sleep: async () => {} })));
   check('cf_missing_token_fails', await threw(() => C.cfUpsert({ domain: DOMAIN, txt: 'x', genHash: g.genHash, token: '', fetchImpl: nc.fetchImpl, sleep: async () => {} })));
+  // UPDATE patience (2nd live ceremony): an updated record waits through a full resolver-TTL window
+  // (24 attempts, narrated) and the failure text explains TTL + the idempotent re-run — never a bare
+  // "re-run or verify manually" that leaves the operator guessing.
+  const upd = mkCf({ existing: true, dohConfirms: false, genHash: g.genHash });
+  const seenAttempts = [];
+  let updMsg = '';
+  try { await C.cfUpsert({ domain: DOMAIN, txt: `ust-genesis=${g.genHash}`, genHash: g.genHash, token: 'x', fetchImpl: upd.fetchImpl, sleep: async () => {}, onAttempt: (i) => seenAttempts.push(i) }); }
+  catch (e) { updMsg = e.message; }
+  check('doh_update_waits_full_ttl_window', seenAttempts.length === 24);
+  check('doh_failure_explains_ttl_and_rerun', updMsg.includes('TTL') && updMsg.includes('RE-RUN') && updMsg.includes('idempotent'));
 }
 
 // ── 7. witness_stage_does_not_claim_execution — the summary PREPARES the stage, never claims it ran
