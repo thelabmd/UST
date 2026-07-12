@@ -85,7 +85,10 @@ to bear:
 - **𝒮_HIGH := 𝒮_LIGHT ∨ 𝒩**, where **𝒩 := σ( genesis, key-log, name-binding root, witness no-fork )** is the
   **name-authority** σ-algebra (§12): the external information that binds a *name* to a key.
 - **𝒮_TOP := 𝒮_HIGH ∨ Fₜ** — the join with the **filtration itself** at the anchor time: the anchor embeds the
-  record's `content_hash` into `Fₜ`, making "committed by real time `t`" measurable.
+  record's `content_hash` into `Fₜ`, making "committed by real time `t`" measurable. A reorg-prone substrate
+  (PoW) enters `Fₜ` only at its REGISTERED FINALITY (§11.2/§17: the substrate's confirmation parameter; a
+  not-yet-final commitment is `unproven`, never VALID-time) — so the monotonicity of `Fₜ` is preserved by
+  construction: nothing enters the filtration that the substrate itself may still roll back.
 
 By construction they nest:
 
@@ -93,6 +96,10 @@ By construction they nest:
 
 Let a verifier's **information set** be a σ-algebra `ℐ` (what it can actually access: always the document; maybe a
 reachable genesis/witness; maybe a reachable substrate). Let `Validτ : Ω → {true, false}` be the tier-`τ` validity
+predicate; MEASURABILITY here always means the strict pre-image form: **the event `{ω ∈ Ω : Validτ(ω) = true}`
+belongs to `𝒮_τ`** (equivalently, `Validτ` is measurable w.r.t. `𝒮_τ` and the discrete σ-algebra on `{true,
+false}` — stated in pre-image form because any map into a two-point space is trivially "measurable" if the
+domain algebra is rich enough; the CONTENT is which algebra contains the truth-event).
 predicate.
 
 **Theorem F.5 (Tier = measurability level).**
@@ -122,6 +129,10 @@ predicate.
    tier, never fabricate one.
 
 *Sketch.* (1) canon/hash/verify are total deterministic functions of `R`'s bytes; measurability is immediate.
+(The determinism premise is NORMATIVELY guaranteed, not assumed: §6 pins RFC 8785 JCS with tightenings, §5's
+string-only value model makes float/NaN edge cases UNREPRESENTABLE by construction, and the raw-bytes boundary
+(§S6/F7 `verifyJson`) rejects duplicate keys before any parser ambiguity can arise — a parser that "floats" on
+edge cases is non-conforming, so the total-determinism claim is exactly what §16 conformance vectors test.)
 (2) name authority and anchoring are, by §12/§11, facts about objects **not contained in `R`**; the verdict genuinely
 depends on them, so it is measurable only in the larger σ-algebra. (3)–(5) are then read off the containment
 `𝒮_LIGHT ⊆ 𝒮_HIGH ⊆ 𝒮_TOP` and the definition of `ℐ`. ∎
@@ -295,8 +306,11 @@ necessary. Concrete values are calibration parameters with explicit, falsifiable
 - `W_default = 32` — a per-call walk depth (a caller budget), not a cap on how long a provenance chain may
   exist (rc.12 naming).
 
-**The model derives the law; benchmarks calibrate the constants.** A change in the target environment class or
-the measured amplification requires recalibration — not a reinterpretation of the mathematics.
+**The model derives the law; benchmarks calibrate the constants.** While `Ω` and `Fₜ` are purely mathematical
+objects, the resource bounds `ρ_v` and the numeric constants (`B₀`, `κ`, …) are ENGINEERING PARAMETERS
+instantiated for the declared target environment class `𝓔₀` — the platonic and the physical are joined only
+through explicitly published premises. A change in the target environment class or the measured amplification
+requires recalibration — not a reinterpretation of the mathematics.
 
 ---
 
