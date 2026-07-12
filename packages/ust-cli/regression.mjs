@@ -383,6 +383,49 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   check('served_keylog_resolves_to_high', high.result === 'VALID:HIGH');
 }
 
+// ── 16. the mirror method (owner: a general CLI method — and NEVER trust the user's word): mirrors are
+// FETCHED and hash-matched against the canonical; the gh road delegates to the user's own CLI, idempotent.
+{
+  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
+  const other = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
+  const bytes = JSON.stringify(g.genesis);
+  const klArr = JSON.stringify([g.keylog0]);
+  const mkNet = ({ mirrorBody, keylogMirrorBody, canonKeylog = klArr } = {}) => async (url) => {
+    const u = String(url);
+    if (u.includes(`/.well-known/ust-genesis`)) return { ok: true, text: async () => bytes };
+    if (u.includes(`/.well-known/ust-keylog`)) return canonKeylog ? { ok: true, text: async () => canonKeylog } : { ok: false, status: 404, text: async () => '' };
+    if (u.includes('mirror.example/g')) return mirrorBody ? { ok: true, text: async () => mirrorBody } : { ok: false, status: 404, text: async () => '' };
+    if (u.includes('mirror.example/k')) return keylogMirrorBody ? { ok: true, text: async () => keylogMirrorBody } : { ok: false, status: 404, text: async () => '' };
+    return { ok: false, status: 404, text: async () => '' };
+  };
+
+  // exact copies pass; a DIFFERENT genesis / a diverged key log FAIL — the fetch decides, never the claim
+  const okM = await C.attestMirror({ domain: DOMAIN, genesisUrls: ['https://mirror.example/g'], keylogUrls: ['https://mirror.example/k'], fetchImpl: mkNet({ mirrorBody: bytes, keylogMirrorBody: klArr }) });
+  check('mirror_exact_copies_pass', !okM.failed && okM.results.every((r) => r.status === 'pass'));
+  const wrongG = await C.attestMirror({ domain: DOMAIN, genesisUrls: ['https://mirror.example/g'], fetchImpl: mkNet({ mirrorBody: JSON.stringify(other.genesis) }) });
+  check('mirror_different_genesis_fails', wrongG.failed);
+  const wrongK = await C.attestMirror({ domain: DOMAIN, genesisUrls: [], keylogUrls: ['https://mirror.example/k'], fetchImpl: mkNet({ keylogMirrorBody: JSON.stringify([other.keylog0]) }) });
+  check('mirror_diverged_keylog_fails', wrongK.failed);
+  const dead = await C.attestMirror({ domain: DOMAIN, genesisUrls: ['https://mirror.example/g'], fetchImpl: mkNet({}) });
+  check('mirror_unreachable_fails_not_trusts', dead.failed); // a 404 mirror can NEVER pass on the user's word
+  const noCanonKl = await C.attestMirror({ domain: DOMAIN, genesisUrls: [], keylogUrls: ['https://mirror.example/k'], fetchImpl: mkNet({ keylogMirrorBody: klArr, canonKeylog: null }) });
+  check('mirror_keylog_skip_when_canonical_missing', noCanonKl.results[0].status === 'skip');
+
+  // gh road: default branch resolved, create (no sha) vs update (sha) both idempotent, raw URLs returned
+  const calls = [];
+  const ghExec = async (args) => {
+    calls.push(args.join(' '));
+    if (args[1] === `repos/o/r` && args.includes('.default_branch')) return 'main\n';
+    if (String(args[1]).includes('/contents/') && args[0] === 'api' && !args.includes('-X')) return args[1].includes('ust-genesis') ? 'abc123\n' : ''; // genesis exists → sha, keylog is new
+    return '{}';
+  };
+  const pub = await C.ghMirrorPublish({ repo: 'o/r', genesisText: bytes, keylogText: klArr, execImpl: ghExec });
+  check('gh_mirror_urls_are_raw', pub.genesisUrl === 'https://raw.githubusercontent.com/o/r/main/mirror/ust-genesis' && pub.keylogUrl.endsWith('/mirror/ust-keylog'));
+  const putG = calls.find((c) => c.includes('-X PUT') && c.includes('ust-genesis'));
+  const putK = calls.find((c) => c.includes('-X PUT') && c.includes('ust-keylog'));
+  check('gh_mirror_update_carries_sha_create_does_not', putG.includes('sha=abc123') && !putK.includes('sha='));
+}
+
 console.log(`\nPASS ${pass} FAIL ${fail} NOTES ${note}`);
 if (fail) { console.error('\nFAILURES:\n  ' + fails.join('\n  ')); process.exit(1); }
 console.log('✓ 9th-audit regression holds — the seven points cannot silently regress');

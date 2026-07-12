@@ -19,7 +19,8 @@ const HEADER = 'UST/1.0; ref=pkg:npm/ust-protocol; web=https://thelabmd.github.i
 export const decodeInput = (raw) => {
   let s = raw.trim(); const m = '———UST(base64)———';
   if (s.includes(m)) s = s.slice(s.lastIndexOf(m) + m.length).trim();
-  return s.startsWith('{') ? JSON.parse(s) : JSON.parse(Buffer.from(s.replace(/\s+/g, ''), 'base64').toString('utf8'));
+  // '[' admits the served key-log ARRAY shape (rc.16) — same decode path as single transcripts
+  return s.startsWith('{') || s.startsWith('[') ? JSON.parse(s) : JSON.parse(Buffer.from(s.replace(/\s+/g, ''), 'base64').toString('utf8'));
 };
 const nowFrame = () => W.nowFrame();
 // The verify context follows the record's own class: a genesis/key-log frame verifies as 'key', everything
@@ -438,6 +439,72 @@ export function ceremonySummary({ domain, genHash, opKeyId, maxP, outDir, encryp
   ];
 }
 
+// ─── vendor-independence: the MIRROR method (owner: a general CLI method — and never trust the user's
+// word that the bytes are there; ATTEST by fetching). A mirror is BY DEFINITION on a second vendor, so
+// the roads mirror the serving adapter: by-hand anywhere + a gh one-click (delegate to the vendor's own
+// authenticated CLI, exactly like wrangler for CF).
+
+// Fetch the CANONICAL surfaces (hash-verified) and attest every mirror URL against them — the mirror is
+// untrusted by design: bytes are fetched, verified as UST, and content_hash-matched. Never a claim.
+export async function attestMirror({ domain, genesisUrls = [], keylogUrls = [], fetchImpl = fetch }) {
+  const get = (u) => fetchImpl(u, { signal: AbortSignal.timeout(10000) }).then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))));
+  const canonical = await get(`https://${domain}/.well-known/ust-genesis`);
+  const canonDoc = decodeInput(canonical);
+  if (!P.isValid(P.verify(canonDoc))) throw new Error('the canonical well-known does not VERIFY — fix serving before mirroring');
+  const canonHash = P.contentHash(canonDoc);
+  let canonKeylogHashes = null; // entry hashes when the canonical key log is served
+  try {
+    const kl = decodeInput(await get(`https://${domain}/.well-known/ust-keylog`));
+    if (Array.isArray(kl)) canonKeylogHashes = kl.map((e) => P.contentHash(e));
+  } catch { /* canonical key log not served (yet) — keylog mirrors will be reported unverifiable */ }
+
+  const results = [];
+  for (const url of genesisUrls) {
+    try {
+      const d = decodeInput(await get(url));
+      if (!P.isValid(P.verify(d))) throw new Error('mirror document does not VERIFY');
+      if (P.contentHash(d) !== canonHash) throw new Error('mirror carries a DIFFERENT genesis (content_hash differs)');
+      results.push({ kind: 'genesis', url, status: 'pass', detail: 'content_hash matches the canonical' });
+    } catch (e) { results.push({ kind: 'genesis', url, status: 'fail', detail: e.message }); }
+  }
+  for (const url of keylogUrls) {
+    try {
+      if (!canonKeylogHashes) { results.push({ kind: 'keylog', url, status: 'skip', detail: 'canonical /.well-known/ust-keylog is not served — nothing to match against' }); continue; }
+      const d = decodeInput(await get(url));
+      if (!Array.isArray(d)) throw new Error('a key-log mirror must serve the JSON ARRAY shape');
+      const hashes = d.map((e) => P.contentHash(e));
+      if (JSON.stringify(hashes) !== JSON.stringify(canonKeylogHashes)) throw new Error('mirror key log DIFFERS from the canonical (entry hashes differ)');
+      results.push({ kind: 'keylog', url, status: 'pass', detail: `${d.length} entr${d.length === 1 ? 'y' : 'ies'}, hashes match` });
+    } catch (e) { results.push({ kind: 'keylog', url, status: 'fail', detail: e.message }); }
+  }
+  return { canonHash, results, failed: results.some((r) => r.status === 'fail') };
+}
+
+// GitHub one-click: publish the mirror bytes into a PUBLIC repo via the user's own authenticated `gh`
+// CLI (same delegation pattern as wrangler — we never hold the credential). Idempotent: create-or-update
+// by sha. Returns the raw URLs a verifier fetches.
+export async function ghMirrorPublish({ repo, dir = 'mirror', genesisText, keylogText = null, execImpl = null }) {
+  const exec = execImpl ?? (async (args) => {
+    const { spawnSync } = await import('node:child_process');
+    const r = spawnSync('gh', args, { encoding: 'utf8' });
+    if (r.status !== 0) throw new Error('gh failed: ' + (r.stderr || r.stdout || 'not logged in? run `gh auth login`').trim().slice(0, 200));
+    return r.stdout;
+  });
+  const branch = (await exec(['api', `repos/${repo}`, '--jq', '.default_branch'])).trim() || 'main';
+  const putFile = async (name, content) => {
+    let sha = null;
+    try { sha = (await exec(['api', `repos/${repo}/contents/${dir}/${name}?ref=${branch}`, '--jq', '.sha'])).trim() || null; } catch { sha = null; }
+    const args = ['api', '-X', 'PUT', `repos/${repo}/contents/${dir}/${name}`,
+      '-f', `message=ust mirror: ${name}`, '-f', `content=${Buffer.from(content).toString('base64')}`, '-f', `branch=${branch}`];
+    if (sha) args.push('-f', `sha=${sha}`);
+    await exec(args);
+    return `https://raw.githubusercontent.com/${repo}/${branch}/${dir}/${name}`;
+  };
+  const genesisUrl = await putFile('ust-genesis', genesisText);
+  const keylogUrl = keylogText !== null ? await putFile('ust-keylog', keylogText) : null;
+  return { genesisUrl, keylogUrl, branch };
+}
+
 // The closing story every publishing flow must end with (owner: "я вообще не понимаю что мне дальше
 // делать и где мой HIGH") — what just happened, the explicit PATH TO HIGH for the publisher's own
 // documents, and the housekeeping. One source, printed by publish AND folded into the ceremony summary.
@@ -619,6 +686,62 @@ async function cmdPublish() {
   // the flow must never just STOP at a verdict — close the story: what happened, the path to HIGH, housekeeping
   if (a.verdict !== 'FAILED') for (const l of whatsNextSummary({ domain, genHash: r.genHash })) console.log(l);
   process.exit(a.verdict === 'FAILED' ? 1 : 0);
+}
+
+// ─── ust mirror <domain> — vendor-independence on a SECOND vendor, attested never claimed ─────────────
+async function cmdMirror() {
+  const domain = process.argv[3];
+  if (!domain || domain.startsWith('--')) die('usage: ust mirror <domain> [--publish gh --repo owner/repo [--dir mirror]] [--url g1,g2] [--keylog-url k1]\n  publish/attest EXACT copies of your live identity on a SECOND vendor (§20.1 vendor-independence)');
+  const tty = !!process.stdin.isTTY;
+  const genesisUrls = String(arg('url', '') || '').split(',').filter(Boolean);
+  const keylogUrls = String(arg('keylog-url', '') || '').split(',').filter(Boolean);
+
+  if (arg('publish', null) === 'gh') {
+    const repoFlag = arg('repo'); if (!repoFlag || repoFlag === true) die('--repo owner/repo is required for --publish gh (a PUBLIC repo — the mirror must be readable by anyone)');
+    const dirFlag = arg('dir', 'mirror') === true ? 'mirror' : arg('dir', 'mirror');
+    console.log('  ⏳ fetching the canonical bytes from https://' + domain + '/.well-known/…');
+    let g; try { g = await fetch(`https://${domain}/.well-known/ust-genesis`, { signal: AbortSignal.timeout(10000) }).then((r) => (r.ok ? r.text() : Promise.reject(new Error('canonical genesis unreachable: HTTP ' + r.status)))); } catch (e) { die(e.message); }
+    let k = null;
+    try { const kr = await fetch(`https://${domain}/.well-known/ust-keylog`, { signal: AbortSignal.timeout(10000) }); k = kr.ok ? await kr.text() : null; } catch { k = null; }
+    console.log('  ⏳ publishing via YOUR gh CLI (create-or-update, idempotent — this tool holds no credential)…');
+    let pub; try { pub = await ghMirrorPublish({ repo: repoFlag, dir: dirFlag, genesisText: g, keylogText: k }); } catch (e) { die(e.message); }
+    console.log('  ✅ pushed: ' + pub.genesisUrl);
+    if (pub.keylogUrl) console.log('  ✅ pushed: ' + pub.keylogUrl);
+    else console.log('  ⬜ the canonical key log is not served yet — redeploy serving first, then re-run mirror');
+    genesisUrls.push(pub.genesisUrl);
+    if (pub.keylogUrl) keylogUrls.push(pub.keylogUrl);
+  } else if (!genesisUrls.length && tty) {
+    console.log('  by hand on a SECOND vendor (any static host / object storage / another CDN — NOT your primary):');
+    console.log('    1. download the canonical bytes:');
+    console.log(`       curl -o ust-genesis  https://${domain}/.well-known/ust-genesis`);
+    console.log(`       curl -o ust-keylog   https://${domain}/.well-known/ust-keylog    (if served)`);
+    console.log('    2. upload them anywhere PUBLIC on that second vendor');
+    console.log('    3. paste the URL(s) — I will FETCH and hash-match them (a claim is not a proof)');
+    const rl2 = createInterface({ input: process.stdin, output: process.stdout });
+    const gu = (await rl2.question('  genesis mirror URL: ')).trim();
+    const ku = (await rl2.question('  key-log mirror URL (Enter to skip): ')).trim();
+    rl2.close();
+    if (gu) genesisUrls.push(gu);
+    if (ku) keylogUrls.push(ku);
+  }
+  if (!genesisUrls.length) die('nothing to attest: give --url, use --publish gh, or answer interactively');
+
+  console.log('\n  ⏳ attesting the mirror(s) — fetching and hash-matching against the canonical…');
+  let m; try { m = await attestMirror({ domain, genesisUrls, keylogUrls }); } catch (e) { die(e.message); }
+  const mark = { pass: '✅', fail: '❌', skip: '⬜' };
+  for (const r of m.results) console.log(`  ${mark[r.status]}  [${r.kind}] ${r.url}  (${r.detail})`);
+
+  // fold into the FULL §20.1 verdict — an attested mirror is what flips PARTIAL → ATTESTED
+  console.log('\n  ⏳ full §20.1 attestation with the mirror declared…');
+  const a = await attestDiscovery({ domain, mirrors: genesisUrls, expectHash: m.canonHash });
+  for (const c of a.checks) console.log(`  ${mark[c.status]}  ${c.id}${c.detail ? '  (' + c.detail + ')' : ''}`);
+  const complete = a.verdict === 'ATTESTED' && !m.failed;
+  console.log(`\n  RESULT: ${complete ? '✅ COMPLETE — every §20.1 property attested, vendor-independence included' : m.failed || a.verdict === 'FAILED' ? '❌ FAILED — fix the ❌ lines above and re-run' : '⬜ PARTIAL — see the ⬜ lines above'}`);
+  if (complete) {
+    console.log('  keep the mirror URL(s) declared to your consumers (operator profile) and re-attest anytime:');
+    console.log(`    npx @ust-protocol/cli discovery ${domain} --mirror ${genesisUrls[0]}`);
+  }
+  process.exit(m.failed || a.verdict === 'FAILED' ? 1 : 0);
 }
 
 // ─── ust genesis --domain <d> [--profile] [--dns] — the ceremony (#37), orchestrating the core above ──
@@ -828,7 +951,7 @@ async function cmdGenesis() {
 const isMain = (() => { try { return process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; } })();
 if (isMain) {
   const cmd = process.argv[2];
-  const run = { verify: cmdVerify, canon: cmdCanon, genesis: cmdGenesis, discovery: cmdDiscovery, publish: cmdPublish }[cmd];
-  if (!run) { console.error('ust — verify machine-readable state\n\n  ust verify <file|->        verify a transcript (exit 0 = VALID, 1 = not)\n  ust canon  <file|->        print canonical bytes + hash (cross-language diff)\n  ust genesis --domain <d>   run the HIGH genesis ceremony (add --publish cf for one-click serving)\n  ust discovery <domain>     attest the §20.1 serving contract (any infra)\n  ust publish cf --domain <d> --genesis <f>   deploy the CF serving adapter for an existing genesis\n'); process.exit(cmd ? 1 : 0); }
+  const run = { verify: cmdVerify, canon: cmdCanon, genesis: cmdGenesis, discovery: cmdDiscovery, publish: cmdPublish, mirror: cmdMirror }[cmd];
+  if (!run) { console.error('ust — verify machine-readable state\n\n  ust verify <file|->        verify a transcript (exit 0 = VALID, 1 = not)\n  ust canon  <file|->        print canonical bytes + hash (cross-language diff)\n  ust genesis --domain <d>   run the HIGH genesis ceremony (add --publish cf for one-click serving)\n  ust discovery <domain>     attest the §20.1 serving contract (any infra)\n  ust publish cf --domain <d> --genesis <f>   deploy the CF serving adapter for an existing genesis\n  ust mirror <domain>        publish + attest a SECOND-vendor mirror (§20.1 vendor-independence)\n'); process.exit(cmd ? 1 : 0); }
   run().catch((e) => die(e.message || String(e)));
 }
