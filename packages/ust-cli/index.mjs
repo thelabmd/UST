@@ -28,6 +28,9 @@ export const contextFor = (doc) => (doc?.state?.id?.class === 'genesis' || doc?.
 
 // ─── ceremony CORE (pure, exported — a notary tool must be verifiable by tests, not just by eye) ─────────
 
+// gold IS the hardware tier — one refusal text, used by the core AND the interview (single source).
+export const GOLD_REFUSAL = 'gold is a HARDWARE ceremony (pkcs11 / air-gapped signer). This CLI cannot drive one yet and will not pretend — run --profile silver (software root, encrypted backup), then re-root to hardware via a §12.1 supersession when ready.';
+
 export const encryptKey = (pkcs8, pass) => {
   const salt = randomBytes(16), iv = randomBytes(12), key = scryptSync(pass, salt, 32);
   const c = createCipheriv('aes-256-gcm', key, iv);
@@ -40,7 +43,14 @@ export const encryptKey = (pkcs8, pass) => {
 // `warnings` carries the gold ASSURANCE LIMIT so the orchestrator (and the test) can assert it (9th audit #5).
 export async function buildCeremony({ domain, profile = 'silver', maxP, signerRef }) {
   const warnings = [];
-  if (profile === 'gold' && !signerRef) warnings.push('ASSURANCE LIMIT: software-generated extractable root (not a hardware ceremony). For a true gold root use --signer pkcs11:… / an air-gapped device.');
+  // Each tier is about ITS OWN thing (owner 2026-07-12). gold IS the hardware ceremony — and this
+  // reference CLI cannot drive a hardware signer yet, so it REFUSES instead of pretending: the old
+  // behavior (software key + a warning, --signer merely silencing it) sold software as gold. Silver
+  // is the honest software-root ceremony; a silver root upgrades to hardware later via §12.1
+  // supersession — refusal costs nothing permanent.
+  if (profile === 'gold') {
+    throw new Error(GOLD_REFUSAL + (signerRef ? `  (--signer ${signerRef} was given, but no hardware driver exists here)` : ''));
+  }
   const root = await W.generateSigner({ extractable: true });
   const pkcs8 = Buffer.from(await crypto.subtle.exportKey('pkcs8', root.privateKey));
   const { ust_id, time } = nowFrame();
@@ -348,12 +358,13 @@ export function verdictOf(checks) {
 // ─── ceremony UX (owner 2026-07-12): the terminal must EXPLAIN the road, not just walk it ─────────────
 // A first-time publisher sees WHERE they are, WHAT each step means in plain language, and WHAT comes
 // next — the ceremony is a story, not an opaque sequence only its author understands.
+// descriptions are pinned ≤70 chars — they must never wrap in an 80-col terminal
 export const CEREMONY_STEPS = [
-  ['🔑', 'ROOT key', 'the crown of your name — it signs ONLY the genesis and key rotations, never daily data; it stays cold'],
-  ['📜', 'genesis + key-log', 'your identity is born; a WARM operational key is added — the one your producer signs with every day'],
-  ['🌐', 'DNS binding', '_ust TXT carries the genesis hash — tamper-evident, outside HTTP entirely'],
-  ['📡', 'serving + live gate', 'https://<domain>/.well-known/ust-genesis must serve EXACTLY these bytes — checked fail-closed (§20.1)'],
-  ['⚓', 'witness / anchor', 'prepared for HIGH / TOP — the operator runs these later, this CLI never claims them'],
+  ['🔑', 'ROOT key', 'the crown of the name — signs only genesis & rotations; stays cold'],
+  ['📜', 'genesis + key-log', 'identity is born; a WARM key is added for daily signing'],
+  ['🌐', 'DNS binding', '_ust TXT carries the genesis hash — provable outside HTTP'],
+  ['📡', 'serving + live gate', 'well-known must serve EXACTLY these bytes — checked fail-closed'],
+  ['⚓', 'witness / anchor', 'prepared for HIGH / TOP — the operator runs these later'],
 ];
 export function ceremonyMap(current) {
   const lines = ['  ─── the road ───'];
@@ -560,31 +571,59 @@ async function cmdPublish() {
 
 // ─── ust genesis --domain <d> [--profile] [--dns] — the ceremony (#37), orchestrating the core above ──
 async function cmdGenesis() {
-  const domain = arg('domain'); if (!domain || domain === true) die('usage: ust genesis --domain <name> [--profile bronze|silver|gold] [--dns manual|cf-api] [--publish cf [--auth wrangler] [--flip-proxy]] [--signer <ref>] [--witness url,url] [--max-partitions N] [--out .]');
-  const profile = arg('profile', 'silver');
-  const outDir = arg('out', '.');
-  const maxP = arg('max-partitions', profile === 'gold' ? 256 : profile === 'silver' ? 64 : null);
+  const domain = arg('domain'); if (!domain || domain === true) die('usage: ust genesis --domain <name> [--profile bronze|silver|gold] [--dns manual|cf-api] [--publish cf [--auth wrangler] [--flip-proxy]] [--signer <ref>] [--witness url,url] [--max-partitions N] [--out .]\n  every option is also asked INTERACTIVELY — the flags only preselect');
   const signerRef = arg('signer', null);
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q) => rl.question(q);
-  console.log(`\n  🏛  ust genesis — the HIGH ceremony for ${domain}  (profile: ${profile})`);
+  const tty = !!process.stdin.isTTY;
+  console.log(`\n  🏛  ust genesis — the HIGH ceremony for ${domain}`);
   console.log('      One run creates your name\'s cryptographic identity and makes it publicly');
   console.log('      discoverable. Everything is verified fail-closed before it is claimed.\n');
   console.log(ceremonyMap(0));
 
+  // ── the INTERVIEW (rc.10, owner catch): every choice IS a choice — flags preselect, otherwise the
+  // ceremony asks, each question carrying its meaning. A dangling value-flag is an ERROR headless and
+  // just re-asked in a tty. Nothing is silently dictated.
+  const askOr = async (flag, question, def, validate) => {
+    let v = arg(flag, null);
+    if (v === true) { if (!tty) die(`--${flag} needs a value`); v = null; }
+    if (v === null && tty) { const a = (await ask(question)).trim(); v = a === '' ? def : a; }
+    if (v === null) v = def;
+    if (validate && !validate(String(v))) die(`--${flag}: "${v}" is not a valid value`);
+    return v;
+  };
+
+  console.log('\n  ⚙️  four choices, Enter accepts the [default]:');
+  console.log('\n  profile = how much ceremony rigor:');
+  console.log('    bronze  quick floor (plain backup)     silver  software root + ENCRYPTED backup');
+  console.log('    gold    HARDWARE root (pkcs11/air-gap) — refused honestly until this CLI can drive one');
+  const profile = await askOr('profile', '  profile [silver]: ', 'silver', (v) => ['bronze', 'silver', 'gold'].includes(v));
+  if (profile === 'gold') { rl.close(); die(GOLD_REFUSAL); }   // refuse NOW — not after three more questions
+
+  console.log('\n  capacity = max partitions your documents may DECLARE (signed into the genesis,');
+  console.log('  ceremony-earned; ABS ceiling 4096). More sources/fields later ⇒ pick headroom now.');
+  const defP = profile === 'gold' ? 256 : profile === 'silver' ? 64 : null;
+  const maxP = await askOr('max-partitions', `  max_partitions [${defP ?? 'floor 64'}]: `, defP, (v) => v === null || (Number(v) > 0 && Number(v) <= 4096));
+
+  const outDir = await askOr('out', '\n  output directory for the 4 ceremony files [.]: ', '.');
+
   // the road is a CHOICE, not a vendor default: by hand on YOUR infra (exact guidance) or one-click.
-  // Flags preselect; otherwise ask ONCE. Headless without flags = by-hand (never an implicit vendor).
   let dnsMode = arg('dns', null);
   let publishMode = arg('publish', null);
   let authMode = arg('auth', null);
-  if (!dnsMode && !publishMode && process.stdin.isTTY) {
+  if (!dnsMode && !publishMode && tty) {
     console.log('\n  How will you publish your identity? (both roads end at the same fail-closed checks)');
     console.log('    [1] by hand on MY infra — exact instructions for any DNS panel / any web stack');
     console.log('    [2] Cloudflare one-click — wrangler browser login (5 scopes) + a DNS-only token');
-    const a = (await ask('  choose 1 or 2: ')).trim();
+    console.log('        (credentials are asked ONLY when actually needed, with a prefilled link)');
+    const a = (await ask('  choose 1 or 2 [1]: ')).trim();
     if (a === '2') { dnsMode = 'cf-api'; publishMode = 'cf'; authMode = authMode || 'wrangler'; }
   }
   dnsMode = dnsMode || 'manual';
+  console.log(`\n  ⚙️  profile ${profile} · max_partitions ${maxP ?? '(floor 64)'} · out ${outDir} · road ${publishMode === 'cf' ? 'cloudflare one-click' : 'by hand'}`);
+  // one token, asked ONCE at first need — steps 3 and 4 share it (never a double paste-prompt)
+  let dnsTokenMemo = null;
+  const getDnsToken = async () => (dnsTokenMemo ??= await resolveDnsToken(ask));
 
   // 1–2. root key + genesis + key-log[0], all self-checked (fail-closed) inside buildCeremony
   let built; try { built = await buildCeremony({ domain, profile, maxP, signerRef }); }
@@ -599,7 +638,7 @@ async function cmdGenesis() {
 
   // backup the root key (gold forces a passphrase → AES-256-GCM; the file is an encrypted blob, NOT a UST)
   let pass = '';
-  if (profile === 'gold') {
+  if (profile !== 'bronze') {   // silver+: the software-operator ceremony encrypts the root backup
     console.log('\n  🧊 The root key is about to be written to disk ENCRYPTED. The passphrase you set now');
     console.log('     is the ONLY way to open that backup — store the file and the phrase in DIFFERENT');
     console.log('     places (split custody). You will need it roughly once a year (rotate/revoke).');
@@ -623,9 +662,13 @@ async function cmdGenesis() {
   console.log('\n' + ceremonyMap(2));
   const txt = `ust-genesis=${genHash}`;
   if (dnsMode === 'cf-api') {
-    console.log('\n  ⏳ 3/5 🌐 writing _ust.' + domain + ' TXT via the Cloudflare API (upsert + DoH readback)…');
-    let res; try { res = await cfUpsert({ domain, txt, genHash, token: process.env.CF_TOKEN || process.env.CLOUDFLARE_API_TOKEN }); }
-    catch (e) { rl.close(); die(e.message); }
+    console.log('\n  ▶️  3/5 🌐 the DNS half needs the DNS-only token (asked NOW because it is needed NOW):');
+    let res;
+    try {
+      const dnsToken = await getDnsToken();   // env if set; otherwise the prefilled link + a paste (asked once)
+      console.log('  ⏳ writing _ust.' + domain + ' TXT via the Cloudflare API (upsert + DoH readback)…');
+      res = await cfUpsert({ domain, txt, genHash, token: dnsToken });
+    } catch (e) { rl.close(); die(e.message); }
     console.log('  ✅ 3/5 🌐 _ust TXT ' + res.action + ' and confirmed by an independent DoH readback');
     console.log('       DNS now vouches for your hash even if every HTTP surface lies');
   } else {
@@ -645,7 +688,7 @@ async function cmdGenesis() {
       if (authMode === 'wrangler') {
         // combined auth: worker+route via wrangler OAuth; the token below stays DNS-only (smallest scope)
         const w = await wranglerDeploy({ domain, genesisText: JSON.stringify(genesis) });
-        const apex = await cfApexSteps({ domain, token: await resolveDnsToken(ask), flipProxy: !!arg('flip-proxy', false) });
+        const apex = await cfApexSteps({ domain, token: await getDnsToken(), flipProxy: !!arg("flip-proxy", false) });
         pub = { ...w, routeAction: 'wrangler', proxied: apex.proxied, flipped: apex.flipped, warnings: apex.warnings };
       } else {
         pub = await cfPublish({ domain, genesisText: JSON.stringify(genesis), token: process.env.CF_TOKEN || process.env.CLOUDFLARE_API_TOKEN, flipProxy: !!arg('flip-proxy', false) });

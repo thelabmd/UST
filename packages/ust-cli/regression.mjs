@@ -26,12 +26,18 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   return { fetchImpl, calls };
 };
 
-// ── 1. gold_without_signer_warns — a software gold root must announce its ASSURANCE LIMIT
+// ── 1. tiers are about their OWN thing (owner 2026-07-12): gold IS hardware — the CLI cannot drive a
+// hardware signer yet, so gold REFUSES honestly (the old shape — software key + a warning, --signer
+// merely silencing it — sold software as gold). A refusal names the silver path + §12.1 upgrade.
 {
-  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'gold' });
-  check('gold_without_signer_warns', g.warnings.some((w) => w.includes('ASSURANCE LIMIT')));
-  const s = await C.buildCeremony({ domain: DOMAIN, profile: 'gold', signerRef: 'pkcs11:slot0' });
-  check('gold_with_signer_clears_warning', s.warnings.length === 0);
+  let msg = '';
+  try { await C.buildCeremony({ domain: DOMAIN, profile: 'gold' }); } catch (e) { msg = e.message; }
+  check('gold_is_hardware_only_and_refuses', msg.includes('HARDWARE') && msg.includes('silver') && msg.includes('supersession'));
+  let msg2 = '';
+  try { await C.buildCeremony({ domain: DOMAIN, profile: 'gold', signerRef: 'pkcs11:slot0' }); } catch (e) { msg2 = e.message; }
+  check('gold_signer_flag_cannot_fake_hardware', msg2.includes('no hardware driver'));
+  const s = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
+  check('silver_builds_clean_no_false_assurance', s.warnings.length === 0 && !!s.genHash);
 }
 
 // ── 2. outputs_self_verify — both outputs verify, and the self-check is a REAL gate (tampering breaks it)
@@ -53,7 +59,7 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
 
 // ── 3. backup_is_not_ust — the encrypted key backup must NOT parse as a UST (so nobody runs `ust verify` on it)
 {
-  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'gold' });
+  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
   const enc = C.encryptKey(g.pkcs8, 'test-passphrase-12');
   let parsedAsUst = false;
   try { const o = JSON.parse(Buffer.from(enc, 'base64').toString('utf8')); parsedAsUst = !!(o && o.ust); } catch { parsedAsUst = false; }
@@ -91,8 +97,8 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
 
 // ── 7. witness_stage_does_not_claim_execution — the summary PREPARES the stage, never claims it ran
 {
-  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'gold' });
-  const lines = C.stageSummary({ genHash: g.genHash, witnesses: [], profile: 'gold' }).join(' ');
+  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
+  const lines = C.stageSummary({ genHash: g.genHash, witnesses: [], profile: 'silver' }).join(' ');
   const prepared = lines.includes('STAGE PREPARED (not executed');
   const falseClaim = /verified \d+ witnesses|witnesses verified|✓[^\n]*anchored|anchored to bitcoin/i.test(lines);
   check('witness_stage_does_not_claim_execution', prepared && !falseClaim);
@@ -107,7 +113,7 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
 // signer's PKCS#8 (opPkcs8), and it must round-trip exactly as the producer loads it
 // (Buffer.from(b64,'base64') → import Ed25519 → sign). A stranded op key = a dead genesis.
 {
-  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'gold' });
+  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
   check('operational_key_exported', Buffer.isBuffer(g.opPkcs8) && g.opPkcs8.length > 0);
   let signs = false;
   try {
@@ -271,7 +277,7 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
 // ── 12. ceremony UX (rc.8) — the map/summary/gate are pinned so the STORY cannot silently regress
 // back into an opaque sequence, and the tier promise the summary makes is PROVEN reachable.
 {
-  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'gold' });
+  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
   const bytes = JSON.stringify(g.genesis);
 
   // the road map: 5 steps, done/current/ahead marks move with progress

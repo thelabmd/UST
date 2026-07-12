@@ -66,7 +66,15 @@ The serving contract is infrastructure-agnostic (properties, not vendors). The c
 | `genesis-key.enc.b64` | 🧊 COLD | crown backup — keep the file and its passphrase APART; needed ~yearly (rotate/revoke) |
 | `operational-key.b64` | 🔥 WARM | your producer's signing-key secret (an env var of YOUR naming), then **DELETE the file** |
 
-Other flags: `--profile bronze|silver|gold` (gold forces a passphrase-encrypted root backup and warns `ASSURANCE LIMIT` unless `--signer` supplies a hardware root) · `--max-partitions N` (signed capacity — bounds earned by ceremony) · `--witness url,url` (prepared, never executed).
+### Profiles — each tier is about its own thing
+
+| profile | root | backup |
+|---|---|---|
+| `bronze` | software | plain b64 (quick floor) |
+| `silver` | software | **passphrase-encrypted** (the standard operator ceremony) |
+| `gold` | **hardware** (pkcs11 / air-gapped) | — this CLI cannot drive a hardware signer yet and **refuses honestly** instead of pretending; a silver root upgrades to hardware later via a §12.1 supersession |
+
+Other flags: `--max-partitions N` (signed capacity — bounds earned by ceremony) · `--witness url,url` (prepared, never executed). Every option is also asked interactively — flags only preselect.
 
 ## `ust discovery` — attest any stack
 
