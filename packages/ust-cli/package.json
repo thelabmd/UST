@@ -1,19 +1,38 @@
 {
   "name": "@ust-protocol/cli",
-  "version": "1.0.0-rc.16",
-  "description": "The reference `ust` CLI for UST (Universal State Transcript) 1.0 — verify a transcript, print canonical bytes for cross-language diffing, and run the HIGH genesis ceremony. One entrypoint; the Go binary reproduces this surface.",
+  "version": "1.0.0-rc.17",
+  "description": "The reference `ust` CLI for UST (Universal State Transcript) 1.0 \u2014 verify a transcript, print canonical bytes for cross-language diffing, and run the HIGH genesis ceremony. One entrypoint; the Go binary reproduces this surface.",
   "author": "THE LAB (https://thelab.md)",
   "type": "module",
-  "bin": { "ust": "./index.mjs" },
-  "files": ["index.mjs", "LICENSE", "README.md"],
-  "keywords": ["ust", "cli", "verify", "genesis", "trust-infrastructure"],
+  "bin": {
+    "ust": "./index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "ust",
+    "cli",
+    "verify",
+    "genesis",
+    "trust-infrastructure"
+  ],
   "license": "Apache-2.0",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "ust-protocol": "^1.0.0-rc.7",
     "@ust-protocol/web-signer": "^1.0.0-rc.3"
   },
-  "repository": { "type": "git", "url": "git+https://github.com/thelabmd/UST-Protocol.git", "directory": "packages/ust-cli" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thelabmd/UST-Protocol.git",
+    "directory": "packages/ust-cli"
+  },
   "homepage": "https://github.com/thelabmd/UST-Protocol/tree/main/packages/ust-cli#readme",
-  "bugs": "https://github.com/thelabmd/UST-Protocol/issues"
+  "bugs": "https://github.com/thelabmd/UST-Protocol/issues",
+  "exports": "./index.mjs"
 }

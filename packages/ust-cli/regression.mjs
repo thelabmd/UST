@@ -141,10 +141,12 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   const g = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
   const bytes = JSON.stringify(g.genesis);
   // a mock publisher: well-known + optional TXT + optional mirror; `busted` varies bytes per-query.
-  const mkPub = ({ txtHash, busted, mirrorBytes } = {}) => async (url) => {
+  const klArr9 = JSON.stringify([g.keylog0]);
+  const mkPub = ({ txtHash, busted, mirrorBytes, keylog = klArr9 } = {}) => async (url) => {
     const u = String(url);
     if (u.includes('cloudflare-dns.com')) return { ok: true, json: async () => (txtHash ? { Answer: [{ data: `"ust-genesis=${txtHash}"` }] } : {}) };
     if (u.includes('mirror.example')) return mirrorBytes ? { ok: true, text: async () => mirrorBytes } : { ok: false, status: 404, text: async () => '' };
+    if (u.includes('/.well-known/ust-keylog')) return keylog ? { ok: true, text: async () => keylog } : { ok: false, status: 404, text: async () => '' };
     if (u.includes('/.well-known/ust-genesis')) {
       const q = u.includes('?');
       return { ok: true, text: async () => (busted && q ? bytes + '\n' : bytes) };
@@ -165,8 +167,8 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   check('discovery_stale_txt_fails', stale.verdict === 'FAILED');
 
   // absent TXT + no mirror: no violation, but PARTIAL — unchecked properties never attest
-  const partial = await C.attestDiscovery({ domain: DOMAIN, fetchImpl: mkPub({}) });
-  check('discovery_partial_is_honest', partial.verdict === 'PARTIAL' && partial.checks.filter((c) => c.status === 'skip').length === 2);
+  const partial = await C.attestDiscovery({ domain: DOMAIN, fetchImpl: mkPub({ keylog: null }) });
+  check('discovery_partial_is_honest', partial.verdict === 'PARTIAL' && partial.checks.filter((c) => c.status === 'skip').length === 3);
 
   // mirror carrying a DIFFERENT genesis ⇒ FAILED (mirrors are availability, the hash decides)
   const other = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
@@ -424,6 +426,83 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   const putG = calls.find((c) => c.includes('-X PUT') && c.includes('ust-genesis'));
   const putK = calls.find((c) => c.includes('-X PUT') && c.includes('ust-keylog'));
   check('gh_mirror_update_carries_sha_create_does_not', putG.includes('sha=abc123') && !putK.includes('sha='));
+}
+
+// ── 17. external line-review of rc.15 — every reproduced finding frozen as a pin.
+{
+  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
+  const bytes = JSON.stringify(g.genesis);
+  const klArr = JSON.stringify([g.keylog0]);
+
+  // P0-1: a duplicate top-level member must be INVALID through the CLI path (it verified VALID before)
+  const dupDoc = '{"ust":"1.0","ust":"1.0"' + bytes.slice(bytes.indexOf(',"state"'));
+  const dupV = C.verifyRaw(dupDoc);
+  check('p0_duplicate_member_rejected_via_cli_path', !P.isValid(dupV.verdict) && dupV.verdict.error === 'E-CANON');
+  // cross-check: the CLI array-scanner agrees with the normative single-doc scanner — no silent drift
+  check('p0_scanner_cross_checks_verifyJson', C.scanDupes(dupDoc) !== null && C.scanDupes(bytes) === null && !P.isValid(P.verifyJson(dupDoc)));
+  // and a served duplicate-key genesis FAILS discovery outright
+  const dupServe = await C.attestDiscovery({ domain: DOMAIN, fetchImpl: async (u) => (String(u).includes('ust-genesis') ? { ok: true, text: async () => dupDoc } : { ok: false, status: 404, text: async () => '' }) });
+  check('p0_discovery_rejects_duplicate_member_serving', dupServe.verdict === 'FAILED');
+
+  // P0-2: a valid NON-genesis / FOREIGN-domain document at the well-known must FAIL discovery
+  const t = (iso) => ({ generated_at: iso, valid_from: iso, valid_to: iso });
+  const obs = await W.seal(P.buildState({ domain_shard: DOMAIN, ust_id: 'ust:20260712.16', key_id: g.op.key_id, class: 'observation' }, t('2026-07-12T16:00:00Z'), { probe: { kind: 'captured', value: { ok: 'true' } } }), g.op);
+  const serveDoc = (d) => async (u) => (String(u).includes('/.well-known/ust-genesis') ? { ok: true, text: async () => JSON.stringify(d) } : { ok: false, status: 404, text: async () => '' });
+  const wrongClass = await C.attestDiscovery({ domain: DOMAIN, fetchImpl: serveDoc(obs) });
+  check('p0_discovery_rejects_non_genesis', wrongClass.verdict === 'FAILED' && wrongClass.checks[0].detail.includes('not a genesis'));
+  const foreign = await C.buildCeremony({ domain: 'other-name.invalid', profile: 'silver' });
+  const wrongDomain = await C.attestDiscovery({ domain: DOMAIN, fetchImpl: serveDoc(foreign.genesis) });
+  check('p0_discovery_rejects_foreign_domain', wrongDomain.verdict === 'FAILED' && wrongDomain.checks[0].detail.includes('not ' + DOMAIN));
+
+  // P0-3: the API road publishes the key-log route too, and an unchained key log never reaches the network
+  const apiCalls = [];
+  const api = async (url, init) => {
+    const u = String(url), m = init?.method || 'GET';
+    apiCalls.push({ u, m });
+    if (u.includes('/zones?name=')) return { json: async () => ({ result: [{ id: 'z1', account: { id: 'a1' } }] }) };
+    if (u.includes('/workers/scripts/')) return { json: async () => ({ success: true }) };
+    if (u.includes('/workers/routes') && m === 'GET') return { json: async () => ({ result: [] }) };
+    if (u.includes('/workers/routes')) return { json: async () => ({ success: true }) };
+    if (u.includes('/dns_records?name=')) return { json: async () => ({ result: [{ id: 'd1', type: 'A', proxied: true }] }) };
+    if (u.includes('/settings/ssl')) return { json: async () => ({ result: { value: 'full' } }) };
+    return { json: async () => ({}) };
+  };
+  await C.cfPublish({ domain: DOMAIN, genesisText: bytes, keylogText: klArr, token: 'x', fetchImpl: api });
+  check('p0_api_road_publishes_keylog_route', apiCalls.filter((c) => c.u.endsWith('/workers/routes') && c.m === 'POST').length === 2);
+  const foreignKl = JSON.stringify([foreign.keylog0]);
+  const net2 = [];
+  check('p0_unchained_keylog_never_deploys', await threw(() => C.cfPublish({ domain: DOMAIN, genesisText: bytes, keylogText: foreignKl, token: 'x', fetchImpl: async (u) => { net2.push(u); return { json: async () => ({}) }; } })) && net2.length === 0);
+  check('keylog_chain_validator_bites', C.validateKeylogChain(g.genesis, [foreign.keylog0]) !== null && C.validateKeylogChain(g.genesis, [g.keylog0]) === null);
+
+  // P1: remint probe is three-state and fail-closed
+  const probe = (impl) => C.remintProbe({ domain: DOMAIN, fetchImpl: impl });
+  check('remint_404_is_absent', (await probe(async () => ({ ok: false, status: 404, text: async () => '' }))).status === 'absent');
+  check('remint_garbage_is_indeterminate', (await probe(async () => ({ ok: true, status: 200, text: async () => 'Payment required' }))).status === 'indeterminate');
+  check('remint_foreign_genesis_is_indeterminate', (await probe(async () => ({ ok: true, status: 200, text: async () => JSON.stringify(foreign.genesis) }))).status === 'indeterminate');
+  check('remint_network_error_is_indeterminate', (await probe(async () => { throw new Error('ETIMEDOUT'); })).status === 'indeterminate');
+  check('remint_live_carries_hash', (await probe(async () => ({ ok: true, status: 200, text: async () => bytes }))).status === 'live');
+
+  // P1: a matching TXT among CONFLICTING bindings must FAIL, not pass
+  const conflictNet = async (u) => {
+    const s2 = String(u);
+    if (s2.includes('cloudflare-dns.com')) return { ok: true, json: async () => ({ Answer: [{ data: `"ust-genesis=${g.genHash}"` }, { data: '"ust-genesis=sha256:' + 'ff'.repeat(32) + '"' }] }) };
+    if (s2.includes('/.well-known/ust-keylog')) return { ok: true, text: async () => klArr };
+    if (s2.includes('/.well-known/ust-genesis')) return { ok: true, text: async () => bytes };
+    return { ok: false, status: 404, text: async () => '' };
+  };
+  const conf = await C.attestDiscovery({ domain: DOMAIN, fetchImpl: conflictNet });
+  check('conflicting_dns_bindings_fail', conf.checks.some((c) => c.id.startsWith('DNS record') && c.status === 'fail' && c.detail.includes('CONFLICTING')));
+
+  // P1: custody + capacity + package exports (source/manifest pins)
+  const src = readFileSync(new URL('./index.mjs', import.meta.url), 'utf8');
+  check('key_files_are_0600_wx', src.includes('mode: 0o600, flag: \'wx\'') && src.includes('EEXIST'));
+  check('passphrase_input_is_hidden', src.includes('askHidden') && src.includes('setRawMode'));
+  const cap = await C.buildCeremony({ domain: DOMAIN, profile: 'silver', maxP: 256, maxBytes: 5000000 });
+  const capObs = await W.seal(P.buildState({ domain_shard: DOMAIN, ust_id: 'ust:20260712.17', key_id: cap.op.key_id, class: 'observation' }, t('2026-07-12T17:00:00Z'), { probe: { kind: 'captured', value: { ok: 'true' } } }), cap.op);
+  const grant = P.resolveAuthority(capObs, { genesis: cap.genesis, keylog: [cap.keylog0], noForkConfirmed: true });
+  check('capacity_is_two_dimensional', cap.genesis.state.data.genesis.value.max_transcript_bytes === '5000000' && grant.capacity?.maxTranscriptBytes === 5000000);
+  const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+  check('package_exports_the_core', pkg.exports === './index.mjs');
 }
 
 console.log(`\nPASS ${pass} FAIL ${fail} NOTES ${note}`);

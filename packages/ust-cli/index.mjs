@@ -16,18 +16,98 @@ import * as W from '@ust-protocol/web-signer';
 const arg = (name, def) => { const i = process.argv.indexOf('--' + name); return i > -1 ? (process.argv[i + 1] ?? true) : def; };
 const die = (msg) => { console.error('✗ ' + msg); process.exit(1); };
 const HEADER = 'UST/1.0; ref=pkg:npm/ust-protocol; web=https://thelabmd.github.io/UST-Protocol/; call=verify(doc,{context:"data"}); hash=domain-separated; trust=resolve-by-name; proves=bytes+key+time';
-export const decodeInput = (raw) => {
+// ─── THE RAW BOUNDARY (rc.17, external line-review P0-1): every untrusted byte source — file, stdin,
+// network, base64 blob — passes through the SAME raw path as the normative verifier. The old shape
+// (decodeInput → JSON.parse → P.verify) silently ERASED duplicate JSON members before verification: a
+// document the reference raw verifier rejects (E-CANON, duplicate member) verified VALID here. Parse
+// happens ONLY after the raw checks.
+export const rawTextOf = (raw) => {
   let s = raw.trim(); const m = '———UST(base64)———';
   if (s.includes(m)) s = s.slice(s.lastIndexOf(m) + m.length).trim();
-  // '[' admits the served key-log ARRAY shape (rc.16) — same decode path as single transcripts
-  return s.startsWith('{') || s.startsWith('[') ? JSON.parse(s) : JSON.parse(Buffer.from(s.replace(/\s+/g, ''), 'base64').toString('utf8'));
+  return s.startsWith('{') || s.startsWith('[') ? s : Buffer.from(s.replace(/\s+/g, ''), 'base64').toString('utf8');
 };
+// Minimal duplicate-member scanner for the ARRAY shape (a served key log), where verifyJson (single
+// document) does not apply directly. The regression suite CROSS-CHECKS it against P.verifyJson on single
+// documents so it can never drift silently.
+// TODO(protocol): export the scanner from ust-protocol at the next spec rc and delete this copy.
+export function scanDupes(text) {
+  const stack = []; let i = 0, inStr = false, esc = false, key = null, expectKey = false, buf = '';
+  while (i < text.length) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) { esc = false; buf += c; }
+      else if (c === '\\') { esc = true; buf += c; }
+      else if (c === '"') { inStr = false; if (expectKey && stack.length) key = buf; }
+      else buf += c;
+      i++; continue;
+    }
+    if (c === '"') { inStr = true; buf = ''; i++; continue; }
+    if (c === '{') { stack.push(new Set()); expectKey = true; i++; continue; }
+    if (c === '}') { stack.pop(); expectKey = false; i++; continue; }
+    if (c === ':' && key !== null && stack.length) {
+      let name; try { name = JSON.parse('"' + key + '"'); } catch { name = key; }
+      const top = stack[stack.length - 1];
+      if (top.has(name)) return 'duplicate member name: ' + name;
+      top.add(name); key = null; expectKey = false; i++; continue;
+    }
+    if (c === ',') { expectKey = stack.length > 0; key = null; i++; continue; }
+    if (c === '[' || c === ']') { expectKey = false; key = null; i++; continue; }
+    i++;
+  }
+  return null;
+}
+// Verify a SINGLE untrusted document through the normative raw path (admission + duplicate scan + parse
+// + verify). Returns { verdict, doc, text } — the caller uses doc ONLY on a valid verdict.
+export function verifyRaw(raw, opts = {}) {
+  const text = rawTextOf(raw);
+  const verdict = P.verifyJson(text, opts);
+  let doc = null; try { doc = JSON.parse(text); } catch { doc = null; }
+  return { verdict, doc, text };
+}
+// Parse an untrusted ARRAY (served key log) fail-closed: duplicate scan on the RAW text, then parse,
+// then each entry verifies in the key context. Returns { entries } or { err }.
+export function parseKeylogRaw(raw) {
+  const text = rawTextOf(raw);
+  const dup = scanDupes(text);
+  if (dup) return { err: 'E-CANON: ' + dup };
+  let arr; try { arr = JSON.parse(text); } catch { return { err: 'not valid JSON' }; }
+  if (!Array.isArray(arr)) return { err: 'a key log must be the JSON ARRAY shape' };
+  for (const [i, e] of arr.entries()) {
+    const v = P.verify(e, { context: 'key' });
+    if (!P.isValid(v)) return { err: `key-log entry ${i} does not VERIFY (${v.error ?? v.result})` };
+  }
+  return { entries: arr };
+}
+// Convenience parse (blob/base64 → object) for bytes this tool built ITSELF or already admitted through
+// verifyRaw/parseKeylogRaw. NEVER the entry point for untrusted verification input.
+export const decodeInput = (raw) => JSON.parse(rawTextOf(raw));
 const nowFrame = () => W.nowFrame();
 // The verify context follows the record's own class: a genesis/key-log frame verifies as 'key', everything
 // else as 'data'. This is why `ust verify ust-genesis` just works — no one should need to know the context.
 export const contextFor = (doc) => (doc?.state?.id?.class === 'genesis' || doc?.state?.id?.class === 'key') ? 'key' : 'data';
 
 // ─── ceremony CORE (pure, exported — a notary tool must be verifiable by tests, not just by eye) ─────────
+
+// Hidden passphrase input (line-review P1: readline echoed the root passphrase to the terminal). Raw-mode
+// character loop with '*' echo in a tty; falls back to the visible ask (with a loud warning) elsewhere.
+export async function askHidden(q, fallbackAsk) {
+  if (!process.stdin.isTTY) { console.log('  ⚠️  no tty — the passphrase WILL echo'); return fallbackAsk(q); }
+  process.stdout.write(q);
+  return await new Promise((resolve) => {
+    const chars = [];
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    stdin.setRawMode(true); stdin.resume();
+    const onData = (b) => {
+      const c = b.toString('utf8');
+      if (c === '\r' || c === '\n') { stdin.setRawMode(wasRaw); stdin.removeListener('data', onData); process.stdout.write('\n'); resolve(chars.join('')); }
+      else if (c === '\u0003') { stdin.setRawMode(wasRaw); process.stdout.write('\n'); process.exit(130); }
+      else if (c === '\u007f' || c === '\b') { if (chars.length) { chars.pop(); process.stdout.write('\b \b'); } }
+      else { chars.push(c); process.stdout.write('*'); }
+    };
+    stdin.on('data', onData);
+  });
+}
 
 // gold IS the hardware tier — one refusal text, used by the core AND the interview (single source).
 export const GOLD_REFUSAL = 'gold is a HARDWARE ceremony (pkcs11 / air-gapped signer). This CLI cannot drive one yet and will not pretend — run --profile silver (software root, encrypted backup), then re-root to hardware via a §12.1 supersession when ready.';
@@ -42,7 +122,7 @@ export const encryptKey = (pkcs8, pass) => {
 // Build genesis + key-log[0] (adds an operational key) and SELF-CHECK both (fail-closed, 9th audit #6):
 // a ceremony tool must never emit an output it hasn't verified. Throws before returning if either fails.
 // `warnings` carries the gold ASSURANCE LIMIT so the orchestrator (and the test) can assert it (9th audit #5).
-export async function buildCeremony({ domain, profile = 'silver', maxP, signerRef }) {
+export async function buildCeremony({ domain, profile = 'silver', maxP, maxBytes = null, signerRef }) {
   const warnings = [];
   // Each tier is about ITS OWN thing (owner 2026-07-12). gold IS the hardware ceremony — and this
   // reference CLI cannot drive a hardware signer yet, so it REFUSES instead of pretending: the old
@@ -55,7 +135,7 @@ export async function buildCeremony({ domain, profile = 'silver', maxP, signerRe
   const root = await W.generateSigner({ extractable: true });
   const pkcs8 = Buffer.from(await crypto.subtle.exportKey('pkcs8', root.privateKey));
   const { ust_id, time } = nowFrame();
-  const genValue = { pub: root.pub, role: 'name-binding-root', ...(maxP ? { max_partitions: String(maxP) } : {}) };
+  const genValue = { pub: root.pub, role: 'name-binding-root', ...(maxP ? { max_partitions: String(maxP) } : {}), ...(maxBytes ? { max_transcript_bytes: String(maxBytes) } : {}) };
   const genesis = await W.seal(P.buildState({ domain_shard: domain, ust_id, key_id: root.key_id, class: 'genesis' }, time, { genesis: { kind: 'captured', value: genValue } }), root);
   const genHash = P.contentHash(genesis);
   // operational key: extractable so its PKCS#8 can be exported for the daily signer
@@ -73,10 +153,25 @@ export async function buildCeremony({ domain, profile = 'silver', maxP, signerRe
 // Fail-closed check of the published well-known: it must VERIFY and its content_hash must MATCH the genesis
 // we built (a semantic UST match, not a transport byte-compare — 9th audit #1). Throws on any mismatch.
 export function checkPublished(liveText, genHash) {
-  const liveDoc = decodeInput(liveText);
-  if (!P.isValid(P.verify(liveDoc))) throw new Error('published document does not VERIFY');
-  if (P.contentHash(liveDoc) !== genHash) throw new Error('published document is not this genesis (content_hash differs) — republish exactly the ust-genesis file');
-  return liveDoc;
+  const { verdict, doc } = verifyRaw(liveText);   // the normative raw path — duplicates/admission included
+  if (!P.isValid(verdict)) throw new Error('published document does not VERIFY' + (verdict.error ? ` (${verdict.error}${verdict.detail ? ' — ' + verdict.detail : ''})` : ''));
+  if (P.contentHash(doc) !== genHash) throw new Error('published document is not this genesis (content_hash differs) — republish exactly the ust-genesis file');
+  return doc;
+}
+
+// Chain sanity for a key log against ITS genesis (fail-closed before any deploy): every entry verifies
+// in the key context, entry 0 chains to the genesis content_hash, each next entry chains to the previous.
+// (Full revocation/authority semantics live in P.resolveAuthority — this is the publishing gate.)
+export function validateKeylogChain(genesisDoc, entries) {
+  let prev = P.contentHash(genesisDoc);
+  for (const [i, e] of entries.entries()) {
+    const v = P.verify(e, { context: 'key' });
+    if (!P.isValid(v)) return `key-log entry ${i} does not VERIFY (${v.error ?? v.result})`;
+    if (e.state?.provenance?.prev !== prev) return `key-log entry ${i} does not chain (prev ≠ ${i === 0 ? 'genesis' : 'entry ' + (i - 1)} content_hash)`;
+    if (e.state?.id?.domain_shard !== genesisDoc.state?.id?.domain_shard) return `key-log entry ${i} belongs to a different domain_shard`;
+    prev = P.contentHash(e);
+  }
+  return null;
 }
 
 // Independent DoH readback of the _ust TXT — shared by the cf-api path AND the by-hand path, so BOTH
@@ -205,9 +300,27 @@ export const WRANGLER_LOGIN_CMD = 'npx wrangler login --scopes account:read user
 // OAuth half: deploy via `npx wrangler deploy` — wrangler owns the browser-login flow (the CF OAuth client
 // is wrangler-only; a third-party CLI cannot run that flow itself, so we DELEGATE instead of imitating).
 // stdio is inherited so the user SEES the login. execImpl/writeImpl injected — testable without a network.
+// The ONE publish gate (both adapters): the genesis passes the normative RAW path, must BE class:genesis
+// for THIS domain, and a key log (when given) must verify entry-by-entry AND chain from this genesis —
+// all BEFORE any network write. Line-review P0-2/P0-3: nothing untrusted rides to a deploy unverified.
+export function validatePublishInputs({ domain, genesisText, keylogText = null }) {
+  const { verdict, doc } = verifyRaw(genesisText);
+  if (!P.isValid(verdict)) throw new Error('refusing to publish: the genesis does not VERIFY' + (verdict.error ? ` (${verdict.error})` : ''));
+  if (doc.state?.id?.class !== 'genesis') throw new Error(`refusing to publish: class:${doc.state?.id?.class ?? '?'} is not a genesis`);
+  if (doc.state?.id?.domain_shard !== domain) throw new Error(`refusing to publish: genesis domain_shard ${doc.state?.id?.domain_shard ?? '?'} ≠ ${domain}`);
+  let entries = null;
+  if (keylogText !== null) {
+    const parsed = parseKeylogRaw(keylogText);
+    if (parsed.err) throw new Error('refusing to publish the key log: ' + parsed.err);
+    const chainErr = validateKeylogChain(doc, parsed.entries);
+    if (chainErr) throw new Error('refusing to publish the key log: ' + chainErr);
+    entries = parsed.entries;
+  }
+  return { doc, genHash: P.contentHash(doc), entries };
+}
+
 export async function wranglerDeploy({ domain, genesisText, keylogText = null, execImpl = null, writeImpl = null }) {
-  const doc = decodeInput(genesisText);
-  if (!P.isValid(P.verify(doc))) throw new Error('refusing to publish: the genesis does not VERIFY');
+  const { genHash } = validatePublishInputs({ domain, genesisText, keylogText });
   const files = buildWranglerProject({ domain, genesisText, keylogText });
   const { mkdtempSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
@@ -222,7 +335,7 @@ export async function wranglerDeploy({ domain, genesisText, keylogText = null, e
   });
   const code = await exec(dir);
   if (code !== 0) throw new Error('wrangler deploy failed (not logged in? run the MINIMAL-scope browser login and re-run):\n  ' + WRANGLER_LOGIN_CMD + '\n  (5 scopes — not wrangler\'s default 28; `wrangler logout` revokes the grant after the ceremony)');
-  return { genHash: P.contentHash(doc), script: `ust-genesis-${domain.replaceAll('.', '-')}`, route: `${domain}/.well-known/ust-genesis*`, dir };
+  return { genHash, script: `ust-genesis-${domain.replaceAll('.', '-')}`, route: `${domain}/.well-known/ust-genesis*`, dir };
 }
 
 // DNS half (small-token): apex proxy check/flip + SSL advisory. Scope needed: Zone.DNS:Edit only — the SSL
@@ -263,9 +376,7 @@ export async function cfApexSteps({ domain, token, flipProxy = false, fetchImpl 
 // write; success is never claimed without a live attestation by the caller).
 export async function cfPublish({ domain, genesisText, keylogText = null, token, flipProxy = false, fetchImpl = fetch }) {
   if (!token) throw new Error('cf adapter needs CF_TOKEN (Workers Scripts:Edit + Workers Routes:Edit + DNS:Edit for this zone) — or split the scopes: `--auth wrangler` + a DNS-only token (' + CF_DNS_TOKEN_URL + ')');
-  const doc = decodeInput(genesisText);
-  if (!P.isValid(P.verify(doc))) throw new Error('refusing to publish: the genesis does not VERIFY');
-  const genHash = P.contentHash(doc);
+  const { genHash } = validatePublishInputs({ domain, genesisText, keylogText });
   const cf = (path, init) => fetchImpl('https://api.cloudflare.com/client/v4' + path, { ...init, headers: { Authorization: 'Bearer ' + token, ...(init?.headers) } }).then((r) => r.json());
 
   const zone = (await cf(`/zones?name=${domain}`)).result?.[0];
@@ -290,6 +401,17 @@ export async function cfPublish({ domain, genesisText, keylogText = null, token,
     ? await cf(`/zones/${zone.id}/workers/routes/${existing.id}`, { method: 'PUT', body, headers: { 'content-type': 'application/json' } })
     : await cf(`/zones/${zone.id}/workers/routes`, { method: 'POST', body, headers: { 'content-type': 'application/json' } });
   if (!rt.success) throw new Error('route upsert failed: ' + (rt.errors?.[0]?.message || '?'));
+  // line-review P0-3: the wrangler road created BOTH routes, the API road only the genesis one — the
+  // worker could answer the key-log path that Cloudflare never routed to it. Same upsert, second pattern.
+  if (keylogText !== null) {
+    const kp = `${domain}/.well-known/ust-keylog*`;
+    const kExisting = routes.find((r) => r.pattern === kp);
+    const kBody = JSON.stringify({ pattern: kp, script });
+    const krt = kExisting
+      ? await cf(`/zones/${zone.id}/workers/routes/${kExisting.id}`, { method: 'PUT', body: kBody, headers: { 'content-type': 'application/json' } })
+      : await cf(`/zones/${zone.id}/workers/routes`, { method: 'POST', body: kBody, headers: { 'content-type': 'application/json' } });
+    if (!krt.success) throw new Error('key-log route upsert failed: ' + (krt.errors?.[0]?.message || '?'));
+  }
 
   // 3. apex steps (same helper as the split-auth path — ONE implementation of the blast-radius policy)
   const apex = await cfApexSteps({ domain, token, flipProxy, fetchImpl });
@@ -304,14 +426,18 @@ export async function attestDiscovery({ domain, mirrors = [], expectHash = null,
   const url = `https://${domain}/.well-known/ust-genesis`;
   const get = (u, init) => fetchImpl(u, { ...init, signal: AbortSignal.timeout(10000) });
 
-  // (1) well-known: fetch → VERIFY the transcript → content_hash (baseline bytes kept for probe 3)
+  // (1) well-known: fetch → the normative RAW path (duplicates/admission) → it must BE a genesis and it
+  // must be THIS domain's genesis (line-review P0-2: a valid observation from a foreign identity served
+  // at the well-known previously attested). content_hash pinned when --expect is given.
   let baseline = null, hash = null;
   try {
     const r = await get(url);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     baseline = await r.text();
-    const doc = decodeInput(baseline);
-    if (!P.isValid(P.verify(doc))) throw new Error('published document does not VERIFY');
+    const { verdict, doc } = verifyRaw(baseline);
+    if (!P.isValid(verdict)) throw new Error('published document does not VERIFY' + (verdict.error ? ` (${verdict.error})` : ''));
+    if (doc.state?.id?.class !== 'genesis') throw new Error(`well-known serves class:${doc.state?.id?.class ?? '?'} — not a genesis`);
+    if (doc.state?.id?.domain_shard !== domain) throw new Error(`genesis domain_shard is ${doc.state?.id?.domain_shard ?? '?'} — not ${domain}`);
     hash = P.contentHash(doc);
     if (expectHash && hash !== expectHash) throw new Error(`content_hash differs from --expect (${hash} ≠ ${expectHash})`);
     checks.push({ id: 'well-known verifies (§14, fail-closed)', status: 'pass', detail: hash });
@@ -320,15 +446,32 @@ export async function attestDiscovery({ domain, mirrors = [], expectHash = null,
     return { hash: null, checks, verdict: verdictOf(checks) }; // nothing downstream is meaningful without (1)
   }
 
-  // (2) DNS pair: _ust TXT must carry THIS hash when present; absent = NOT ATTESTED (the pair is standard,
-  // plain-DNS absence is reported, mismatch is a hard violation)
+  // (1b) key log: when served, it must be the ARRAY shape, every entry verifying and CHAINED to this
+  // genesis; absent = NOT ATTESTED (the HIGH path needs it). Never silently untested again.
+  try {
+    const kr = await get(`https://${domain}/.well-known/ust-keylog`);
+    if (!kr.ok) checks.push({ id: 'key log served (HIGH resolution input)', status: 'skip', detail: `HTTP ${kr.status} — not served; verifiers cannot resolve HIGH from the well-known alone` });
+    else {
+      const parsed = parseKeylogRaw(await kr.text());
+      if (parsed.err) throw new Error(parsed.err);
+      const chainErr = validateKeylogChain(decodeInput(baseline), parsed.entries);
+      if (chainErr) throw new Error(chainErr);
+      checks.push({ id: 'key log served (HIGH resolution input)', status: 'pass', detail: `${parsed.entries.length} entr${parsed.entries.length === 1 ? 'y' : 'ies'}, chained to this genesis` });
+    }
+  } catch (e) {
+    checks.push({ id: 'key log served (HIGH resolution input)', status: 'fail', detail: e.message });
+  }
+
+  // (2) DNS pair: _ust TXT must carry THIS hash — and NO CONFLICTING binding may exist (line-review:
+  // one matching record among conflicting ones previously passed; a forked/stale DNS state must surface)
   try {
     const doh = await get(`https://cloudflare-dns.com/dns-query?name=_ust.${domain}&type=TXT`, { headers: { accept: 'application/dns-json' } }).then((r) => r.json());
     const txts = (doh.Answer || []).map((a) => (a.data || '').replace(/"/g, ''));
     const ours = txts.filter((t) => t.startsWith('ust-genesis='));
+    const conflicting = ours.filter((t) => t !== 'ust-genesis=' + hash);
     if (!ours.length) checks.push({ id: 'DNS record (_ust TXT) matches', status: 'skip', detail: 'no _ust TXT found — pair NOT ATTESTED (publish ust-genesis=<content_hash>)' });
-    else if (ours.some((t) => t === 'ust-genesis=' + hash)) checks.push({ id: 'DNS record (_ust TXT) matches', status: 'pass', detail: '_ust.' + domain });
-    else checks.push({ id: 'DNS record (_ust TXT) matches', status: 'fail', detail: `TXT carries a DIFFERENT hash (${ours[0]}) — a stale or hijacked record` });
+    else if (conflicting.length) checks.push({ id: 'DNS record (_ust TXT) matches', status: 'fail', detail: `CONFLICTING binding${conflicting.length > 1 ? 's' : ''} present (${conflicting[0]}) — exactly one active ust-genesis binding is required` });
+    else checks.push({ id: 'DNS record (_ust TXT) matches', status: 'pass', detail: '_ust.' + domain });
   } catch (e) {
     checks.push({ id: 'DNS record (_ust TXT) matches', status: 'skip', detail: 'DoH unreachable: ' + e.message });
   }
@@ -349,8 +492,8 @@ export async function attestDiscovery({ domain, mirrors = [], expectHash = null,
   for (const m of mirrors) {
     try {
       const t = await get(m).then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))));
-      const d = decodeInput(t);
-      if (!P.isValid(P.verify(d))) throw new Error('mirror document does not VERIFY');
+      const { verdict: mv, doc: d } = verifyRaw(t);
+      if (!P.isValid(mv)) throw new Error('mirror document does not VERIFY' + (mv.error ? ` (${mv.error})` : ''));
       if (P.contentHash(d) !== hash) throw new Error('mirror carries a DIFFERENT genesis (content_hash differs)');
       checks.push({ id: 'mirror ' + m, status: 'pass', detail: 'content_hash matches' });
     } catch (e) {
@@ -449,20 +592,21 @@ export function ceremonySummary({ domain, genHash, opKeyId, maxP, outDir, encryp
 export async function attestMirror({ domain, genesisUrls = [], keylogUrls = [], fetchImpl = fetch }) {
   const get = (u) => fetchImpl(u, { signal: AbortSignal.timeout(10000) }).then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))));
   const canonical = await get(`https://${domain}/.well-known/ust-genesis`);
-  const canonDoc = decodeInput(canonical);
-  if (!P.isValid(P.verify(canonDoc))) throw new Error('the canonical well-known does not VERIFY — fix serving before mirroring');
+  const { verdict: cv, doc: canonDoc } = verifyRaw(canonical);
+  if (!P.isValid(cv)) throw new Error('the canonical well-known does not VERIFY — fix serving before mirroring' + (cv.error ? ` (${cv.error})` : ''));
+  if (canonDoc.state?.id?.class !== 'genesis' || canonDoc.state?.id?.domain_shard !== domain) throw new Error('the canonical well-known is not this domain\'s genesis — fix serving before mirroring');
   const canonHash = P.contentHash(canonDoc);
   let canonKeylogHashes = null; // entry hashes when the canonical key log is served
   try {
-    const kl = decodeInput(await get(`https://${domain}/.well-known/ust-keylog`));
-    if (Array.isArray(kl)) canonKeylogHashes = kl.map((e) => P.contentHash(e));
+    const klParsed = parseKeylogRaw(await get(`https://${domain}/.well-known/ust-keylog`));
+    if (!klParsed.err) canonKeylogHashes = klParsed.entries.map((e) => P.contentHash(e));
   } catch { /* canonical key log not served (yet) — keylog mirrors will be reported unverifiable */ }
 
   const results = [];
   for (const url of genesisUrls) {
     try {
-      const d = decodeInput(await get(url));
-      if (!P.isValid(P.verify(d))) throw new Error('mirror document does not VERIFY');
+      const { verdict: gv, doc: d } = verifyRaw(await get(url));
+      if (!P.isValid(gv)) throw new Error('mirror document does not VERIFY' + (gv.error ? ` (${gv.error})` : ''));
       if (P.contentHash(d) !== canonHash) throw new Error('mirror carries a DIFFERENT genesis (content_hash differs)');
       results.push({ kind: 'genesis', url, status: 'pass', detail: 'content_hash matches the canonical' });
     } catch (e) { results.push({ kind: 'genesis', url, status: 'fail', detail: e.message }); }
@@ -470,11 +614,11 @@ export async function attestMirror({ domain, genesisUrls = [], keylogUrls = [], 
   for (const url of keylogUrls) {
     try {
       if (!canonKeylogHashes) { results.push({ kind: 'keylog', url, status: 'skip', detail: 'canonical /.well-known/ust-keylog is not served — nothing to match against' }); continue; }
-      const d = decodeInput(await get(url));
-      if (!Array.isArray(d)) throw new Error('a key-log mirror must serve the JSON ARRAY shape');
-      const hashes = d.map((e) => P.contentHash(e));
+      const parsed = parseKeylogRaw(await get(url));
+      if (parsed.err) throw new Error(parsed.err);
+      const hashes = parsed.entries.map((e) => P.contentHash(e));
       if (JSON.stringify(hashes) !== JSON.stringify(canonKeylogHashes)) throw new Error('mirror key log DIFFERS from the canonical (entry hashes differ)');
-      results.push({ kind: 'keylog', url, status: 'pass', detail: `${d.length} entr${d.length === 1 ? 'y' : 'ies'}, hashes match` });
+      results.push({ kind: 'keylog', url, status: 'pass', detail: `${parsed.entries.length} entr${parsed.entries.length === 1 ? 'y' : 'ies'}, hashes match` });
     } catch (e) { results.push({ kind: 'keylog', url, status: 'fail', detail: e.message }); }
   }
   return { canonHash, results, failed: results.some((r) => r.status === 'fail') };
@@ -533,6 +677,25 @@ export function whatsNextSummary({ domain, genHash }) {
   ];
 }
 
+// REMINT probe (line-review P1: the guard was fail-open — timeout/garbage/TLS-error all proceeded to
+// mint). Three-state, fail-closed: 'absent' ONLY on a proven 404/410; a valid genesis for THIS domain =
+// 'live'; EVERYTHING else (network error, non-UST bytes, foreign/wrong-class document) = 'indeterminate'
+// — and an operation able to orphan an identity stops on indeterminate unless explicitly overridden.
+export async function remintProbe({ domain, fetchImpl = fetch }) {
+  let res;
+  try { res = await fetchImpl(`https://${domain}/.well-known/ust-genesis`, { signal: AbortSignal.timeout(8000) }); }
+  catch (e) { return { status: 'indeterminate', detail: 'well-known unreachable: ' + e.message }; }
+  if (res.status === 404 || res.status === 410) return { status: 'absent', detail: `HTTP ${res.status}` };
+  if (!res.ok) return { status: 'indeterminate', detail: `HTTP ${res.status} — neither a proven absence nor a readable identity` };
+  let text; try { text = await res.text(); } catch (e) { return { status: 'indeterminate', detail: 'body unreadable: ' + e.message }; }
+  try {
+    const { verdict, doc } = verifyRaw(text);
+    if (P.isValid(verdict) && doc.state?.id?.class === 'genesis' && doc.state?.id?.domain_shard === domain)
+      return { status: 'live', hash: P.contentHash(doc), detail: 'a verifiable genesis for ' + domain };
+    return { status: 'indeterminate', detail: 'the well-known serves bytes that are NOT this domain\'s genesis' };
+  } catch { return { status: 'indeterminate', detail: 'the well-known serves non-UST bytes' }; }
+}
+
 // The witness/anchor stage is PREPARED, never executed by this CLI (9th audit #2). Exported so the
 // regression suite asserts the wording can't silently regress to a false "witnesses verified / anchored".
 export function stageSummary({ genHash, witnesses = [], profile }) {
@@ -550,25 +713,36 @@ async function cmdVerify() {
   const src = process.argv[3];
   if (!src) die('usage: ust verify <file | - for stdin> [--context data|key] [--genesis <file> --keylog <file[,file…]> [--no-fork-confirmed]]');
   const raw = src === '-' ? readFileSync(0, 'utf8') : readFileSync(src, 'utf8');
+  // pre-parse ONLY to pick the context — the VERDICT below comes from the normative raw path
   let doc; try { doc = decodeInput(raw); } catch (e) { die('not a UST blob/base64/json: ' + e.message); }
 
-  // optional HIGH resolution: the capacity grant flows FROM authority resolution (rc.12), never raw
+  // optional HIGH resolution: every input passes the RAW boundary; the capacity grant flows FROM
+  // authority resolution (rc.12), never a raw caller-attached genesis
   let opts = { context: arg('context', null) || contextFor(doc) };
   const genesisPath = arg('genesis', null);
   const noFork = !!arg('no-fork-confirmed', false);
   if (genesisPath && genesisPath !== true) {
     let genesisDoc, keylogDocs;
     try {
-      genesisDoc = decodeInput(readFileSync(genesisPath, 'utf8'));
+      const g = verifyRaw(readFileSync(genesisPath, 'utf8'));
+      if (!P.isValid(g.verdict)) die('the --genesis file does not VERIFY (' + (g.verdict.error ?? g.verdict.result) + ')');
+      genesisDoc = g.doc;
       const kl = arg('keylog', null);
-      keylogDocs = (kl && kl !== true ? String(kl).split(",") : []).flatMap((p) => { const d = decodeInput(readFileSync(p, "utf8")); return Array.isArray(d) ? d : [d]; });
+      keylogDocs = (kl && kl !== true ? String(kl).split(",") : []).flatMap((pth) => {
+        const t = readFileSync(pth, "utf8");
+        const asArr = parseKeylogRaw(t);
+        if (!asArr.err) return asArr.entries;
+        const single = verifyRaw(t, { context: 'key' });
+        if (!P.isValid(single.verdict)) die('the --keylog file ' + pth + ' does not VERIFY (' + (single.verdict.error ?? single.verdict.result) + ')');
+        return [single.doc];
+      });
     } catch (e) { die('could not read the resolution inputs: ' + e.message); }
     const auth = P.resolveAuthority(doc, { genesis: genesisDoc, keylog: keylogDocs, noForkConfirmed: noFork });
     if (auth.error) die('authority resolution failed: ' + auth.error + (auth.detail ? ' — ' + auth.detail : ''));
     opts = { ...opts, genesis: genesisDoc, keylog: keylogDocs, noForkConfirmed: noFork, capacity: auth.capacity };
   }
 
-  const r = P.verify(doc, opts);
+  const r = P.verifyJson(rawTextOf(raw), opts);
   console.log(r.result + (r.error ? '  (' + r.error + (r.detail ? ' — ' + r.detail : '') + ')' : ''));
   if (P.isValid(r)) {
     const tier = r.result.split(':')[1] ?? 'LIGHT';
@@ -596,7 +770,9 @@ async function cmdCanon() {
   const src = process.argv[3];
   if (!src) die('usage: ust canon <file | - for stdin>   # prints canonical bytes + hash to diff cross-language');
   const raw = src === '-' ? readFileSync(0, 'utf8') : readFileSync(src, 'utf8');
-  let v; try { v = JSON.parse(raw); } catch (e) { die('not JSON: ' + e.message); }
+  const dup = scanDupes(rawTextOf(raw));
+  if (dup) die('E-CANON: ' + dup + '  (duplicate members are rejected at the RAW boundary — §6)');
+  let v; try { v = JSON.parse(rawTextOf(raw)); } catch (e) { die('not JSON: ' + e.message); }
   let canonical; try { canonical = P.canon(v); } catch (e) { die('E-CANON: ' + (e.detail || e.message) + '  (values must be NFC strings; no numbers/bools/nulls — §5)'); }
   console.log(canonical);
   console.error('# sha256: ' + P.H('ust:state', canonical).slice(7));
@@ -611,7 +787,7 @@ async function cmdDiscovery() {
   const { hash, checks, verdict } = await attestDiscovery({ domain, mirrors, expectHash });
   const mark = { pass: '✅', fail: '❌', skip: '⬜' };
   for (const c of checks) console.log(`  ${mark[c.status]}  ${c.id}${c.detail ? '  (' + c.detail + ')' : ''}`);
-  console.log(`\n  DISCOVERY CONFORMANCE (§20.1): ${verdict}${hash ? '   genesis ' + hash : ''}`);
+  console.log(`\n  DISCOVERY CONFORMANCE (§20.1): ${verdict}${hash ? '   genesis ' + hash : ''}   (exit: 0=ATTESTED · 2=PARTIAL · 1=FAILED)`);
   if (verdict === 'PARTIAL') {
     // targeted hints (rc.8): name ONLY what was actually skipped — never advise republishing what already passed
     console.log('  PARTIAL = no violation found, but unchecked properties remain:');
@@ -621,7 +797,7 @@ async function cmdDiscovery() {
       else console.log('    → ' + c.id + ' — ' + c.detail);
     }
   }
-  process.exit(verdict === 'FAILED' ? 1 : 0);
+  process.exit(verdict === 'FAILED' ? 1 : verdict === 'PARTIAL' ? 2 : 0);
 }
 
 // Resolve the DNS-scope token for the COMBINED flow: env first; interactively, open the PREFILLED
@@ -685,7 +861,7 @@ async function cmdPublish() {
   console.log(`\n  DISCOVERY CONFORMANCE (§20.1): ${a.verdict}${a.verdict === 'PARTIAL' ? '  — no violation; only undeclared properties left unattested (e.g. a mirror)' : ''}`);
   // the flow must never just STOP at a verdict — close the story: what happened, the path to HIGH, housekeeping
   if (a.verdict !== 'FAILED') for (const l of whatsNextSummary({ domain, genHash: r.genHash })) console.log(l);
-  process.exit(a.verdict === 'FAILED' ? 1 : 0);
+  process.exit(a.verdict === 'FAILED' ? 1 : a.verdict === 'PARTIAL' ? 2 : 0);
 }
 
 // ─── ust mirror <domain> — vendor-independence on a SECOND vendor, attested never claimed ─────────────
@@ -741,7 +917,7 @@ async function cmdMirror() {
     console.log('  keep the mirror URL(s) declared to your consumers (operator profile) and re-attest anytime:');
     console.log(`    npx @ust-protocol/cli discovery ${domain} --mirror ${genesisUrls[0]}`);
   }
-  process.exit(m.failed || a.verdict === 'FAILED' ? 1 : 0);
+  process.exit(m.failed || a.verdict === 'FAILED' ? 1 : a.verdict === 'PARTIAL' ? 2 : 0);
 }
 
 // ─── ust genesis --domain <d> [--profile] [--dns] — the ceremony (#37), orchestrating the core above ──
@@ -756,26 +932,29 @@ async function cmdGenesis() {
   console.log('      discoverable. Everything is verified fail-closed before it is claimed.\n');
   console.log(ceremonyMap(0));
 
-  // ── REMINT GUARD (owner minted three identities in one day believing he was "rotating keys"): if a
-  // verifiable genesis is ALREADY LIVE at this name, a re-run is a NEW IDENTITY (orphans the live one),
-  // NOT a rotation — rotation is a key-log APPEND under the same identity. Say so, require consent.
-  try {
-    const live = await fetch(`https://${domain}/.well-known/ust-genesis`, { signal: AbortSignal.timeout(8000) }).then((r) => (r.ok ? r.text() : null));
-    if (live) {
-      const liveDoc = decodeInput(live);
-      if (P.isValid(P.verify(liveDoc)) && liveDoc.state?.id?.class === 'genesis' && liveDoc.state?.id?.domain_shard === domain) {
-        console.log(`\n  ⚠️  an identity for ${domain} is ALREADY LIVE: ${P.contentHash(liveDoc).slice(0, 28)}…`);
-        console.log('     re-running the ceremony MINTS A NEW IDENTITY and orphans the live one.');
-        console.log('     KEY ROTATION is different: a key-log APPEND under the SAME identity (root stays,');
-        console.log('     old documents stay valid) — never a new ceremony.');
-        if (!arg('remint', false)) {
-          if (!tty) { rl.close(); die('an identity is already live — pass --remint to consciously replace it'); }
-          const a = (await ask('     type REMINT to replace it, anything else aborts: ')).trim();
-          if (a !== 'REMINT') { rl.close(); die('aborted — the live identity stays untouched'); }
-        }
+  // ── REMINT GUARD (fail-closed, rc.17): 'absent' is the ONLY state that proceeds silently. A live
+  // identity requires typed REMINT; an INDETERMINATE state (network error / garbage / foreign document)
+  // also STOPS — those were previously indistinguishable from absence, on an identity-orphaning op.
+  {
+    const probe = await remintProbe({ domain });
+    if (probe.status === 'live') {
+      console.log(`\n  ⚠️  an identity for ${domain} is ALREADY LIVE: ${probe.hash.slice(0, 28)}…`);
+      console.log('     re-running the ceremony MINTS A NEW IDENTITY and orphans the live one.');
+      console.log('     KEY ROTATION is different: a key-log APPEND under the SAME identity (root stays,');
+      console.log('     old documents stay valid) — never a new ceremony.');
+      if (!arg('remint', false)) {
+        if (!tty) { rl.close(); die('an identity is already live — pass --remint to consciously replace it'); }
+        const a = (await ask('     type REMINT to replace it, anything else aborts: ')).trim();
+        if (a !== 'REMINT') { rl.close(); die('aborted — the live identity stays untouched'); }
       }
+    } else if (probe.status === 'indeterminate' && !arg('remint-unchecked', false)) {
+      console.log(`\n  ⚠️  REMINT STATUS INDETERMINATE: ${probe.detail}`);
+      console.log('     I cannot PROVE no identity is live at ' + domain + ' — and minting over a live one orphans it.');
+      if (!tty) { rl.close(); die('remint status indeterminate — pass --remint-unchecked to proceed anyway'); }
+      const a = (await ask('     type UNCHECKED to proceed anyway, anything else aborts: ')).trim();
+      if (a !== 'UNCHECKED') { rl.close(); die('aborted — resolve the well-known state first (or --remint-unchecked)'); }
     }
-  } catch { /* unreachable or non-UST well-known ⇒ nothing live ⇒ proceed */ }
+  }
 
   // ── the INTERVIEW (rc.10, owner catch): every choice IS a choice — flags preselect, otherwise the
   // ceremony asks, each question carrying its meaning. A dangling value-flag is an ERROR headless and
@@ -819,14 +998,16 @@ async function cmdGenesis() {
     if (a === '2') { dnsMode = 'cf-api'; publishMode = 'cf'; authMode = authMode || 'wrangler'; }
   }
   dnsMode = dnsMode || 'manual';
-  console.log(`\n  ⚙️  profile ${profile} · max_partitions ${maxP ?? '(floor 64)'} · road ${publishMode === 'cf' ? 'cloudflare one-click' : 'by hand'}`);
+  console.log(`\n  ⚙️  profile ${profile} · max_partitions ${maxP ?? '(floor 64)'}${arg('max-transcript-bytes', null) && arg('max-transcript-bytes', null) !== true ? ' · max_transcript_bytes ' + arg('max-transcript-bytes', null) : ''} · road ${publishMode === 'cf' ? 'cloudflare one-click' : 'by hand'}`);
   console.log(`      files → ${outDir === '.' ? process.cwd() : outDir}  (override with --out)`);
   // one token, asked ONCE at first need — steps 3 and 4 share it (never a double paste-prompt)
   let dnsTokenMemo = null;
   const getDnsToken = async () => (dnsTokenMemo ??= await resolveDnsToken(ask));
 
   // 1–2. root key + genesis + key-log[0], all self-checked (fail-closed) inside buildCeremony
-  let built; try { built = await buildCeremony({ domain, profile, maxP, signerRef }); }
+  const maxBytes = arg('max-transcript-bytes', null);
+  if (maxBytes === true) { rl.close(); die('--max-transcript-bytes needs a value'); }
+  let built; try { built = await buildCeremony({ domain, profile, maxP, maxBytes, signerRef }); }
   catch (e) { rl.close(); die(e.message); }
   const { genesis, keylog0, genHash, op, opPkcs8, pkcs8, warnings } = built;
   for (const w of warnings) console.log('\n  ⚠️  ' + w);
@@ -842,16 +1023,27 @@ async function cmdGenesis() {
     console.log('\n  🧊 The root key is about to be written to disk ENCRYPTED. The passphrase you set now');
     console.log('     is the ONLY way to open that backup — store the file and the phrase in DIFFERENT');
     console.log('     places (split custody). You will need it roughly once a year (rotate/revoke).');
-    while (pass.length < 8) pass = await ask('     set the passphrase (≥8 chars): ');
+    while (pass.length < 8) pass = await askHidden('     set the passphrase (≥8 chars): ', ask);
   }
   const backup = pass ? encryptKey(pkcs8, pass) : pkcs8.toString('base64');
-  writeFileSync(`${outDir}/genesis-key${pass ? '.enc' : ''}.b64`, backup);
+  // custody hardening (line-review P1): key material is 0600 and NEVER silently overwritten ('wx') —
+  // a local re-run cannot clobber an existing root backup; public identity docs also refuse overwrite.
+  const writeSecret = (path, data) => writeFileSync(path, data, { mode: 0o600, flag: 'wx' });
+  const writePublic = (path, data) => writeFileSync(path, data, { flag: 'wx' });
+  try {
+    writeSecret(`${outDir}/genesis-key${pass ? '.enc' : ''}.b64`, backup);
   // operational key = the WARM daily signer. Written PLAIN base64 PKCS8 because the
   // producer loads it non-interactively from its signing-key env. It is NOT cold-store:
   // move it into the producer's secret store, then delete this file — never commit it.
-  writeFileSync(`${outDir}/operational-key.b64`, opPkcs8.toString('base64'));
-  writeFileSync(`${outDir}/ust-genesis`, JSON.stringify(genesis));
-  writeFileSync(`${outDir}/ust-keylog-0`, JSON.stringify(keylog0));
+    writeSecret(`${outDir}/operational-key.b64`, opPkcs8.toString('base64'));
+    writePublic(`${outDir}/ust-genesis`, JSON.stringify(genesis));
+    writePublic(`${outDir}/ust-keylog-0`, JSON.stringify(keylog0));
+  } catch (e) {
+    rl.close();
+    die(e.code === 'EEXIST'
+      ? `refusing to overwrite an existing ceremony file (${e.path}). Move the previous ceremony's files away (or run with --out <fresh dir>) and re-run — key material is never silently clobbered.`
+      : e.message);
+  }
   console.log('\n  📦 four files written to ' + outDir + ':');
   console.log('     ust-genesis + ust-keylog-0          → PUBLIC identity documents (verifiable by anyone)');
   console.log(`     genesis-key${pass ? '.enc' : ''}.b64${pass ? '' : '    '}                 → 🧊 COLD crown backup (file + passphrase apart)`);
