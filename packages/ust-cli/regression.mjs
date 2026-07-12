@@ -161,6 +161,69 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   check('discovery_dead_well_known_fails_closed', dead.verdict === 'FAILED' && dead.hash === null && dead.checks.length === 1);
 }
 
+// ── 10. CF publish adapter (§20.1 convenience path) — fail-closed before ANY write, idempotent route,
+// explicit proxy policy, and the worker embeds the EXACT genesis bytes with a path-keyed cache.
+{
+  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
+  const bytes = JSON.stringify(g.genesis);
+
+  // the generated worker: exact-bytes embedding + the two §20.1 serving properties in the source
+  const src = C.buildWorkerScript(bytes);
+  check('worker_embeds_exact_bytes', src.includes(JSON.stringify(bytes)));
+  check('worker_cache_key_is_path_only', src.includes('u.origin + u.pathname') && src.includes('caches.default'));
+  check('worker_is_immutable_get_head', src.includes('immutable') && src.includes("allow: 'GET, HEAD'"));
+
+  // a CF API mock: zone (with account), script PUT, routes list/POST/PUT, dns records, ssl setting
+  const mkApi = ({ proxied, routeExists, ssl = 'full' } = {}) => {
+    const calls = [];
+    const fetchImpl = async (url, init) => {
+      const u = String(url), m = init?.method || 'GET';
+      calls.push({ u, m });
+      if (u.includes('/zones?name=')) return { json: async () => ({ result: [{ id: 'z1', account: { id: 'acc1' } }] }) };
+      if (u.includes('/workers/scripts/')) return { json: async () => ({ success: true }) };
+      if (u.includes('/workers/routes') && m === 'GET') return { json: async () => ({ result: routeExists ? [{ id: 'r1', pattern: `${DOMAIN}/.well-known/ust-genesis*` }] : [] }) };
+      if (u.includes('/workers/routes')) return { json: async () => ({ success: true }) };
+      if (u.includes('/dns_records?name=')) return { json: async () => ({ result: [{ id: 'd1', type: 'A', proxied }] }) };
+      if (u.includes('/dns_records/')) return { json: async () => ({ success: true }) };
+      if (u.includes('/settings/ssl')) return { json: async () => ({ result: { value: ssl } }) };
+      return { json: async () => ({}) };
+    };
+    return { fetchImpl, calls };
+  };
+
+  // fail-closed: an invalid genesis never reaches the network
+  const tam = JSON.parse(bytes); tam.state.data.genesis.value.pub = 'AAAA' + tam.state.data.genesis.value.pub.slice(4);
+  const net = mkApi({ proxied: true });
+  check('cfpublish_invalid_genesis_never_touches_network', await threw(() => C.cfPublish({ domain: DOMAIN, genesisText: JSON.stringify(tam), token: 'x', fetchImpl: net.fetchImpl })) && net.calls.length === 0);
+  check('cfpublish_missing_token_fails', await threw(() => C.cfPublish({ domain: DOMAIN, genesisText: bytes, token: '', fetchImpl: net.fetchImpl })));
+
+  // proxied zone, no prior route → script PUT + route POST, proxied:true, no PATCH
+  const a = mkApi({ proxied: true });
+  const r1 = await C.cfPublish({ domain: DOMAIN, genesisText: bytes, token: 'x', fetchImpl: a.fetchImpl });
+  check('cfpublish_creates_route_when_absent', r1.routeAction === 'created' && r1.proxied && r1.flipped === 0);
+  check('cfpublish_uploads_module_worker', a.calls.some((c) => c.u.includes('/workers/scripts/ust-genesis-') && c.m === 'PUT'));
+
+  // existing route → PUT (update), idempotent — never a duplicate POST
+  const b = mkApi({ proxied: true, routeExists: true });
+  const r2 = await C.cfPublish({ domain: DOMAIN, genesisText: bytes, token: 'x', fetchImpl: b.fetchImpl });
+  check('cfpublish_updates_existing_route', r2.routeAction === 'updated' && !b.calls.some((c) => c.u.endsWith('/workers/routes') && c.m === 'POST'));
+
+  // grey apex WITHOUT --flip-proxy → warning + NOT proxied + NO dns mutation (explicit blast-radius policy)
+  const c1 = mkApi({ proxied: false });
+  const r3 = await C.cfPublish({ domain: DOMAIN, genesisText: bytes, token: 'x', fetchImpl: c1.fetchImpl });
+  check('cfpublish_grey_apex_reports_not_mutates', !r3.proxied && r3.warnings.some((w) => w.includes('--flip-proxy')) && !c1.calls.some((c) => c.m === 'PATCH'));
+
+  // grey apex WITH flipProxy → PATCH fired + proxied
+  const c2 = mkApi({ proxied: false });
+  const r4 = await C.cfPublish({ domain: DOMAIN, genesisText: bytes, token: 'x', flipProxy: true, fetchImpl: c2.fetchImpl });
+  check('cfpublish_flip_proxy_patches_apex', r4.proxied && r4.flipped === 1 && c2.calls.some((c) => c.m === 'PATCH'));
+
+  // flexible SSL on a live (proxied) zone → loud loop warning
+  const d1 = mkApi({ proxied: true, ssl: 'flexible' });
+  const r5 = await C.cfPublish({ domain: DOMAIN, genesisText: bytes, token: 'x', fetchImpl: d1.fetchImpl });
+  check('cfpublish_flexible_ssl_warns', r5.warnings.some((w) => w.toLowerCase().includes('flexible')));
+}
+
 console.log(`\nPASS ${pass} FAIL ${fail} NOTES ${note}`);
 if (fail) { console.error('\nFAILURES:\n  ' + fails.join('\n  ')); process.exit(1); }
 console.log('✓ 9th-audit regression holds — the seven points cannot silently regress');
