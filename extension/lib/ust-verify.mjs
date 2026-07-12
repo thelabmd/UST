@@ -89,7 +89,10 @@ export async function verify(doc, opts = {}) {
     // two conforming verifiers must never disagree; the 2026-07-12 boundary probe
     // caught this file admitting 65+ partitions the reference rejects).
     {
-      if (JSON.stringify(doc).length > 1_048_576) return bad('E-BOUNDS', 'transcript > 1 MiB');
+      // rc.12 P0-1: UTF-8 BYTES (TextEncoder), never UTF-16 .length — Cyrillic/CJK diverge 2×.
+      // Cheap DoS gate here; the NORMATIVE size decision moves to the canonical S below (same
+      // metric as the reference — transport formatting can never flip a verdict).
+      if (new TextEncoder().encode(JSON.stringify(doc)).byteLength > 67_108_864) return bad('E-BOUNDS', 'transcript > 64 MiB');
       const depthOf = (v, d = 0) => (v && typeof v === 'object'
         ? (d > 8 ? d : Math.max(d, ...Object.values(v).map((x) => depthOf(x, d + 1))))
         : d);
@@ -97,7 +100,14 @@ export async function verify(doc, opts = {}) {
       const arrTooLong = (v) => Array.isArray(v) ? (v.length > 4096 || v.some(arrTooLong))
         : (v && typeof v === 'object' ? Object.values(v).some(arrTooLong) : false);
       if (arrTooLong(st)) return bad('E-BOUNDS', 'array length > 4096');
-      if (Object.keys(st.data).length > 64) return bad('E-BOUNDS', 'partitions > 64');
+      const nParts = Object.keys(st.data).length;
+      if (nParts > 4096) return bad('E-BOUNDS', 'partitions > 4096');
+      if (nParts > 64) {
+        // §13 capacity ladder (rc.10) at LIGHT: this verifier holds no genesis, so above the
+        // anonymous floor a key-form shard fails closed and a name-form shard is UNDECIDABLE here.
+        if (/^sha256:[0-9a-f]{64}$/.test(st.id.domain_shard)) return bad('E-BOUNDS', `partitions ${nParts} > 64 anonymous floor (key-form)`);
+        return { result: 'INDETERMINATE', reason: 'unavailable', detail: `partitions ${nParts} > 64 floor — capacity is genesis-declared; supply the publisher genesis to a genesis-aware verifier` };
+      }
       const pr0 = st.provenance;
       for (const f of ['based_on', 'constituents'])
         if (pr0 && Array.isArray(pr0[f]) && pr0[f].length > 64) return bad('E-BOUNDS', f + ' breadth > 64');
@@ -138,6 +148,17 @@ export async function verify(doc, opts = {}) {
     if (id.class === 'attestation') { const isGap = pr?.prev !== undefined && (pr?.constituents === undefined || pr.constituents.length === 0); if (!isGap && (pr?.constituents === undefined || pr?.root === undefined)) return bad('E-MALFORMED', 'attestation MUST carry constituents + root'); }
     // step 4 — authenticity: closed sig schema + alg + key_id consistency + strict Ed25519 over canon({ust,state})
     const S = canon({ ust: doc.ust, state: st });
+    // §13 NORMATIVE size ladder at LIGHT (rc.12): metric = UTF-8 bytes of S. This verifier takes no
+    // capacity grants, so above the floor a key-form shard fails closed and a name-form shard is
+    // honestly UNDECIDABLE here (a genesis-aware verifier with a trusted grant can admit it).
+    {
+      const sBytes = new TextEncoder().encode(S).byteLength;
+      if (sBytes > 67_108_864) return bad('E-BOUNDS', `canonical transcript ${sBytes} B > 64 MiB ABS`);
+      if (sBytes > 1_048_576) {
+        if (/^sha256:[0-9a-f]{64}$/.test(st.id.domain_shard)) return bad('E-BOUNDS', `canonical size ${sBytes} B > 1 MiB anonymous floor (key-form)`);
+        return { result: 'INDETERMINATE', reason: 'unavailable', detail: `canonical size ${sBytes} B > 1 MiB floor — capacity requires a trusted grant this LIGHT verifier does not take` };
+      }
+    }
     if (!doc.sig || typeof doc.sig !== 'object') return bad('E-SIG', 'sig missing');
     for (const k of Object.keys(doc.sig)) if (!SIGK.includes(k)) return bad('E-SIG', 'unknown sig member: ' + k);
     if (doc.sig.alg !== 'Ed25519') return bad('E-SIG', 'sig.alg must be Ed25519');
