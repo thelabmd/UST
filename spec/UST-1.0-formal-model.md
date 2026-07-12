@@ -6,6 +6,14 @@
 > appendix and the normative spec appear to differ, **the normative spec wins** — this is a lens, not a rule.
 > Its purpose is rigor: to make the *meaning* of "verify," of the trust tiers, and of "fixation, not truth"
 > precise enough to outlive any single implementation, and to give reviewers a formal target.
+>
+> **Review status (honest, 2026-07-12).** This formal model has been reviewed iteratively by AI systems acting
+> as adversarial auditors (16 rounds to date, including a dedicated measure-theory red-team). It has **not**
+> been machine-checked in a proof assistant, and no professional human mathematician has refereed it yet. The
+> error-categories identified in §F.5 (document-as-data vs world-as-randomness) remain an active area of
+> refinement. **Users should treat the model as a conceptual framework, not a theorem.** The open assurance
+> gates — an independent measure-theory review and a machine-checked core — are tracked alongside the pending
+> human cryptographic audit.
 
 The right mathematical home for *time-ordered, append-only, verifiable-at-a-moment* records is the theory of
 **filtrations and adapted processes** (the same apparatus under stochastic processes and stopping times). UST is
