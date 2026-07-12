@@ -201,6 +201,103 @@ is the point, not a gap.
 - The σ-algebras of §F.5 are a *semantics* of the existing checks, not a new verification procedure — a conforming
   verifier is still defined by §14, not by this appendix.
 
+## F.9 Resource-bounded verification (non-normative; the numbers stay normative in §13)
+
+Information is not the only condition of decidability: a verifier also operates under a finite resource
+budget. Alongside its information set `ℐ_v`, give every verifier a budget `ρ_v = (M_v, T_v, S_v, N_v)` —
+memory, time, safe stack depth, and the provenance-node allowance. A verifier lives in the PAIR `(ℐ_v, ρ_v)`.
+For a transcript `R` define the size vector
+
+  `μ(R) = (B, P, D, A, F, W, K)`
+
+— canonical UTF-8 bytes of the signed content, partition count, nesting depth, max array length, direct
+reference breadth, per-call walk volume, and the examined key-log epoch length. Let `C_v(R)` be the cost of
+parsing, canonicalising, hashing, signature verification and the requested walk. A tier predicate is decidable
+by `v` only when BOTH hold: `𝒯_τ ⊆ ℐ_v` (information) and `C_v(R) ⪯ ρ_v` (computation). Missing information
+yields `INDETERMINATE(unavailable)`; insufficient local resources yield `INDETERMINATE(resource_limit)`
+(the wire reasons of §15). Neither makes a protocol-valid transcript INVALID.
+
+### F.9.1 Extensive and structural metrics
+
+A metric is a **VOLUME** metric when legitimate publisher data increases it extensively (≈ additively under
+union), growth leaves the verification CONTROL STRUCTURE unchanged (more of the same work, not different
+work), and excess payload admits a commitment-preserving externalization (content-address the bulk, keep the
+signed hash). `B` and `P` (and per-partition ciphertext bytes) are VOLUME metrics. A metric is a **STRUCTURE**
+metric when increasing it enlarges recursion, branching, traversal or resolution state for EVERY verifier
+regardless of publisher authority, and a protocol-native transformation can express the same data without the
+increase. `D, A, F, W, K` are STRUCTURE metrics. Hence the law:
+
+  **Authority may enlarge legitimate volume, but cannot make structure cheaper to verify.**
+
+That is why VOLUME bounds are ceremony-declarable and STRUCTURE bounds are protocol-wide laws (§13).
+
+### F.9.2 Capacity earned by authority
+
+Let `κ₀ = (B₀, P₀)` be the universal LIGHT floor, `κ_ABS = (B_ABS, P_ABS)` the protocol ceiling, and let an
+authoritative genesis declare `κ_G` subject to `κ₀ ⪯ κ_G ⪯ κ_ABS` (an out-of-range declaration is not a valid
+declaration — the floor applies). The declaration is EFFECTIVE only when its genesis binding lies in the
+verifier's authority information: `G_κ ∈ 𝒜` and `𝒜 ⊆ ℐ_v`. Effective capacity:
+
+  `κ(R, ℐ_v) = κ_G` if the authoritative genesis is verified and in range; `κ₀` otherwise.
+
+A self-signed declaration does not enlarge capacity because key possession alone never places it in the
+name-authority σ-algebra: `𝒜 ⊄ ℒ`. On the wire this is rc.12's TRUSTED GRANT: the grant flows FROM
+`resolveAuthority` (or the caller's pin/policy), never from a caller-attached genesis document.
+
+### F.9.3 Bounded-verification verdict
+
+With `S_ABS` the vector of absolute STRUCTURE bounds:
+
+  `V(R; ℐ_v, ρ_v) =`
+  `INVALID(E-BOUNDS)` if `μ_S(R) ⋠ S_ABS` — the document violates the protocol;
+  `INDETERMINATE(unavailable)` if `μ_V(R) ⋠ κ₀` and no authority capacity is in `ℐ_v` — evidence missing;
+  `INVALID(E-BOUNDS)` if `μ_V(R) ⋠ κ(R, ℐ_v)` — over the granted capacity;
+  `INDETERMINATE(resource_limit)` if `C_v(R) ⋠ ρ_v` — beyond THIS verifier;
+  `Valid_τ(R)` otherwise.
+
+Protocol invalidity, missing authority evidence and insufficient verifier resources are three distinct states.
+Transport admission (refusing an over-budget RAW input before decoding) is a fourth, pre-verdict state: a
+refusal to start, reported as `resource_limit`, never a statement about the document.
+
+### F.9.4 Portability of the LIGHT floor
+
+Let `𝓔₀` be the declared class of baseline environments and `ρ₀ = inf_{e∈𝓔₀} ρ_e`. The floor is PORTABLE
+exactly when `sup { C_e(R) : μ_V(R) ⪯ κ₀, μ_S(R) ⪯ S_ABS } ⪯ ρ₀` — every transcript inside the floor is both
+information-decidable from its own bytes and computationally decidable by every baseline implementation. This
+is the resource form of LIGHT self-containment.
+
+### F.9.5 Structural escape transformations
+
+An absolute STRUCTURE bound does not reduce expressive power when a protocol-native, commitment-preserving
+transformation exists: `4096 = 64²` (a two-level attestation tree carries the full constituent universe at
+breadth 64); oversized arrays chunk; deep data restructures; long key histories split into re-genesis epochs;
+long walks continue across bounded calls. Each transformation preserves the existence and hash-binding of the
+represented state while keeping every single verification inside a universal resource envelope.
+
+### F.9.6 Calibration of the numerical constants
+
+The model derives the INEQUALITIES the constants must satisfy; it cannot make one assignment uniquely
+necessary. Concrete values are calibration parameters with explicit, falsifiable premises:
+
+- `F_ABS = ⌈√P_ABS⌉ = ⌈√4096⌉ = 64` — the minimal uniform branching factor representing the full partition
+  universe in a two-level tree (the two-level requirement is the declared design premise; 64 then FOLLOWS).
+- `A_ABS = P_ABS = 4096` — one canonical operation can hold the full universe, no slack.
+- `B_ABS = η · P_ABS · s̄ = 4 × 4096 × 4 KiB = 64 MiB` — declared premises: target partition payload
+  `s̄ = 4 KiB`, encoding-and-safety factor `η = 4`. Falsifiable by vectors and memory benchmarks.
+- `B₀ = 1 MiB` — the power-of-two floor of `min` over the baseline environment class 𝓔₀ (browser, agent tool,
+  CLI, message/file transport, serverless) of each environment's transport cap, `(M_e − r_e)/α_e` and
+  `T_e/β_e`. The benchmark matrix that pins this minimum is an OPEN calibration item; until published, 1 MiB
+  is a declared engineering premise, not a derivation.
+- `D_ABS = 8` — bounded by the worst-case recursive canonicalization frame against the smallest baseline
+  stack; premise pending the same matrix.
+- `K_ABS = 256` — a linear resolution-cost budget `⌊(T_K − c₀)/c₁⌋` rounded to a power of two; the re-genesis
+  epoch means it bounds one resolution epoch, never a publisher's history.
+- `W_default = 32` — a per-call walk depth (a caller budget), not a cap on how long a provenance chain may
+  exist (rc.12 naming).
+
+**The model derives the law; benchmarks calibrate the constants.** A change in the target environment class or
+the measured amplification requires recalibration — not a reinterpretation of the mathematics.
+
 ---
 
 ### One-paragraph summary

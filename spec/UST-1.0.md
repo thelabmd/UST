@@ -800,7 +800,9 @@ bytes — a per-partition ciphertext cap keeps one encrypted shard from consumin
 publisher's legitimate data and are ceremony-declarable — floor / declared / ABS; STRUCTURE bounds (nesting
 depth, array length, breadth, per-call walk depth, key-log length) protect EVERY verifier's implementation
 regardless of trust and are absolute laws — their escapes are structural: chunking, attestation TREES
-(64² = 4096 in two levels), re-genesis epochs — never declarations.
+(64² = 4096 in two levels), re-genesis epochs — never declarations. The DERIVATION of this law (volume vs structure as extensive vs
+control-structure metrics), the capacity algebra, and the calibration doctrine for the concrete numbers live in
+the formal model (F.9): *the model derives the law; benchmarks calibrate the constants.*
 
 ---
 
