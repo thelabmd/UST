@@ -28,17 +28,18 @@ export const tools = [
       const o = { pinnedKeys, genesis, keylog, disclosures, noForkConfirmed, requireAuthoritative, capacity, maxSupportedBytes, context: 'data' };
       // `json` (raw text) = the safe conformance boundary — duplicate-key + NFC scan BEFORE parse (F7).
       const ro = { ...o, offline };
+      let substrateVerify; try { ({ substrateVerify } = await import('@ust-protocol/ots-verify')); } catch { /* opt-in absent → witness anchor stays unproven, honest HIGH-pending */ }
       if (json !== undefined) {
         const raw = P.verifyJson(json, o);
         if (offline || genesis !== undefined || !(raw.result === 'VALID:LIGHT' || (raw.result === 'INDETERMINATE' && raw.reason === 'unavailable'))) return raw;
         let parsed; try { parsed = JSON.parse(json); } catch { return raw; }
-        const { verdict, resolution } = await P.resolveByDiscovery(parsed, ro);
+        const { verdict, resolution } = await P.resolveByDiscovery(parsed, ro, { substrateVerify });
         return resolution ? { ...verdict, resolution } : verdict;
       }
       // an embedded doc.proof is verified INSIDE verify (present-bad ⇒ E-ANCHOR); a separately-passed proof merges in.
       const d = (proof !== undefined && doc && doc.proof === undefined) ? { ...doc, proof } : doc;
       if (offline || genesis !== undefined) return P.verify(d, o);
-      const { verdict, resolution } = await P.resolveByDiscovery(d, ro);
+      const { verdict, resolution } = await P.resolveByDiscovery(d, ro, { substrateVerify });
       return resolution ? { ...verdict, resolution } : verdict;
     },
   },

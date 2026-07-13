@@ -1,0 +1,15 @@
+{
+  "name": "@ust-protocol/ots-verify",
+  "version": "1.0.0-rc.2",
+  "description": "Opt-in Bitcoin (OpenTimestamps) substrateVerify for UST anchors — the cross-check ust-protocol takes as an injection, so the zero-dep verifier never embeds a blockchain. #68 witness / TOP time.",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": "./index.mjs",
+  "files": ["index.mjs", "LICENSE", "README.md"],
+  "keywords": ["ust", "opentimestamps", "bitcoin", "anchor", "substrate-verify", "witness"],
+  "license": "Apache-2.0",
+  "engines": { "node": ">=20" },
+  "dependencies": { "opentimestamps": "^0.4.9" },
+  "repository": { "type": "git", "url": "git+https://github.com/thelabmd/UST-Protocol.git", "directory": "packages/ust-ots-verify" },
+  "homepage": "https://github.com/thelabmd/UST-Protocol/tree/main/packages/ust-ots-verify#readme"
+}

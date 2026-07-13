@@ -804,13 +804,19 @@ async function cmdVerify() {
   let resolution = null;
   if (!genesisPath) {
     // the SINGLE resolver (ust-protocol resolveByDiscovery, rc.13) — SSRF guard + one-copy flow live there
+    // opt-in Bitcoin cross-check: if @ust-protocol/ots-verify is installed, the witness genesis anchor is
+    // verified against Bitcoin (→ live HIGH); if not, the anchor stays unproven (→ honest HIGH pending).
+    let substrateVerify;
+    try { ({ substrateVerify } = await import('@ust-protocol/ots-verify')); } catch { /* opt-in absent */ }
     const rd = await P.resolveByDiscovery(doc, { context: opts.context, offline: !!arg('offline', false), noForkConfirmed: noFork },
-      { fetchImpl: async (u, init) => { console.error(`  ⏳ resolving identity from ${new URL(u).origin} … (--offline to skip)`); return fetch(u, init); } });
+      { substrateVerify, fetchImpl: async (u, init) => { console.error(`  ⏳ resolving identity from ${new URL(u).origin} … (--offline to skip)`); return fetch(u, init); } });
+    if (!substrateVerify && rd.resolution && String(rd.resolution.noFork || '').startsWith('HIGH pending')) console.error('  ℹ️  Bitcoin anchor not cross-checked — `npm i @ust-protocol/ots-verify` for automatic HIGH');
     if (rd.resolution) {
       r = rd.verdict;
       resolution = rd.resolution.skipped ? { error: rd.resolution.skipped }
                  : rd.resolution.error ? { error: rd.resolution.error }
-                 : { publisher: rd.resolution.publisher, capacity: rd.resolution.capacity, noFork: noFork ? 'asserted by you (--no-fork-confirmed)' : 'unconfirmed' };
+                 : rd.resolution.fork ? { error: rd.resolution.detail }
+                 : { publisher: rd.resolution.publisher, capacity: rd.resolution.capacity, noFork: noFork ? 'asserted by you (--no-fork-confirmed)' : rd.resolution.noFork };
     }
   }
   console.log(r.result + (r.error ? '  (' + r.error + (r.detail ? ' — ' + r.detail : '') + ')' : ''));
