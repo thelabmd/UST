@@ -139,7 +139,7 @@ export const encryptKey = (pkcs8, pass) => {
 // Build genesis + key-log[0] (adds an operational key) and SELF-CHECK both (fail-closed, 9th audit #6):
 // a ceremony tool must never emit an output it hasn't verified. Throws before returning if either fails.
 // `warnings` carries the gold ASSURANCE LIMIT so the orchestrator (and the test) can assert it (9th audit #5).
-export async function buildCeremony({ domain, profile = 'silver', maxP, maxBytes = null, signerRef }) {
+export async function buildCeremony({ domain, profile = 'silver', maxP, maxBytes = null, cadence = null, signerRef }) {
   const warnings = [];
   // Each tier is about ITS OWN thing (owner 2026-07-12). gold IS the hardware ceremony — and this
   // reference CLI cannot drive a hardware signer yet, so it REFUSES instead of pretending: the old
@@ -152,7 +152,7 @@ export async function buildCeremony({ domain, profile = 'silver', maxP, maxBytes
   const root = await W.generateSigner({ extractable: true });
   const pkcs8 = Buffer.from(await crypto.subtle.exportKey('pkcs8', root.privateKey));
   const { ust_id, time } = nowFrame();
-  const genValue = { pub: root.pub, role: 'name-binding-root', ...(maxP ? { max_partitions: String(maxP) } : {}), ...(maxBytes ? { max_transcript_bytes: String(maxBytes) } : {}) };
+  const genValue = { pub: root.pub, role: 'name-binding-root', ...(maxP ? { max_partitions: String(maxP) } : {}), ...(maxBytes ? { max_transcript_bytes: String(maxBytes) } : {}), ...(cadence ? { cadence: String(cadence) } : {}) };
   const genesis = await W.seal(P.buildState({ domain_shard: domain, ust_id, key_id: root.key_id, class: 'genesis' }, time, { genesis: { kind: 'captured', value: genValue } }), root);
   const genHash = P.contentHash(genesis);
   // operational key: extractable so its PKCS#8 can be exported for the daily signer
@@ -612,7 +612,7 @@ export async function confirmLive({ domain, genHash, fetchImpl = fetch, sleep = 
 
 // The closing picture: WHAT exists now, WHO holds which key, WHERE you are on the tier ladder, and the
 // exact next moves. Exported so the regression suite pins custody classes and the no-overclaim wording.
-export function ceremonySummary({ domain, genHash, opKeyId, maxP, outDir, encrypted }) {
+export function ceremonySummary({ domain, genHash, opKeyId, maxP, cadence, outDir, encrypted }) {
   return [
     '',
     '  ══════════════════════════════════════════════',
@@ -621,6 +621,7 @@ export function ceremonySummary({ domain, genHash, opKeyId, maxP, outDir, encryp
     `  identity      ${genHash}`,
     `  operational   ${opKeyId}  (warm daily signer)`,
     `  capacity      max_partitions ${maxP ?? '(floor 64)'}`,
+    '  cadence       ' + (cadence ? cadence + 's  (streams can reach complete; a lossy tier stays chain-consistent)' : '(none — completeness stays chain-consistent)'),
     '',
     '  📦 files & custody',
     `  ${outDir}/ust-genesis + ust-keylog-0    → PUBLIC — anyone can \`ust verify\` them`,
@@ -1108,7 +1109,7 @@ async function cmdWitness() {
 
 // ─── ust genesis --domain <d> [--profile] [--dns] — the ceremony (#37), orchestrating the core above ──
 async function cmdGenesis() {
-  const domain = arg('domain'); if (!domain || domain === true) die('usage: ust genesis --domain <name> [--profile bronze|silver|gold] [--dns manual|cf-api] [--publish cf [--auth wrangler] [--flip-proxy]] [--signer <ref>] [--witness url,url] [--max-partitions N] [--out .]\n  every option is also asked INTERACTIVELY — the flags only preselect');
+  const domain = arg('domain'); if (!domain || domain === true) die('usage: ust genesis --domain <name> [--profile bronze|silver|gold] [--dns manual|cf-api] [--publish cf [--auth wrangler] [--flip-proxy]] [--signer <ref>] [--witness url,url] [--max-partitions N] [--cadence SECONDS] [--out .]\n  every option is also asked INTERACTIVELY — the flags only preselect');
   const signerRef = arg('signer', null);
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q) => rl.question(q);
@@ -1166,6 +1167,14 @@ async function cmdGenesis() {
   const defP = profile === 'gold' ? 256 : profile === 'silver' ? 64 : null;
   const maxP = await askOr('max-partitions', `  max_partitions [${defP ?? 'floor 64'}]: `, defP, (v) => v === null || (Number(v) > 0 && Number(v) <= 4096));
 
+  // §11.3 C — the SIGNED stream cadence (seconds). Bakes into the genesis so a range verdict can reach
+  // `complete` (no-omission): every expected grid slot must be a frame or a signed gap. Optional — an operator
+  // that makes no completeness claim leaves it unset (its streams verify at `chain-consistent`, honest).
+  console.log('\n  📐  CADENCE (optional) — the stream slot interval in SECONDS. Signed here so the completeness');
+  console.log('  verdict is grid-checked (`complete`), not just no-deletion (`chain-consistent`). Leave blank if');
+  console.log('  you make no completeness claim (e.g. a lossy free tier). noosphere: 30.');
+  const cadence = await askOr('cadence', '  cadence [none]: ', null, (v) => v === null || (Number.isInteger(Number(v)) && Number(v) > 0));
+
   // NOT a question (owner: you already chose your directory by standing in it) — the files go to the
   // current dir; --out exists for scripted/special cases and is simply SHOWN, never asked.
   let outDir = arg('out', '.');
@@ -1193,7 +1202,7 @@ async function cmdGenesis() {
   // 1–2. root key + genesis + key-log[0], all self-checked (fail-closed) inside buildCeremony
   const maxBytes = arg('max-transcript-bytes', null);
   if (maxBytes === true) { rl.close(); die('--max-transcript-bytes needs a value'); }
-  let built; try { built = await buildCeremony({ domain, profile, maxP, maxBytes, signerRef }); }
+  let built; try { built = await buildCeremony({ domain, profile, maxP, maxBytes, cadence, signerRef }); }
   catch (e) { rl.close(); die(e.message); }
   const { genesis, keylog0, genHash, op, opPkcs8, pkcs8, warnings } = built;
   for (const w of warnings) console.log('\n  ⚠️  ' + w);
@@ -1320,7 +1329,7 @@ async function cmdGenesis() {
   console.log('\n  ▶️  5/5 ⚓ ' + head);
   for (const line of rest) console.log('       ' + line);
 
-  for (const line of ceremonySummary({ domain, genHash, opKeyId: op.key_id, maxP, outDir, encrypted: !!pass })) console.log(line);
+  for (const line of ceremonySummary({ domain, genHash, opKeyId: op.key_id, maxP, cadence, outDir, encrypted: !!pass })) console.log(line);
   rl.close();
 }
 
