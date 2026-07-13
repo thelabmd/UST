@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.28' };
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.29', revision: 40 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -87,6 +87,31 @@ const pubKeyObj = (b64url) => createPublicKey({ key: Buffer.concat([Buffer.from(
 export function edVerifyStrict(pubB64url, msgUtf8, sigB64url) {
   try { return edVerify(null, Buffer.from(msgUtf8, 'utf8'), pubKeyObj(pubB64url), Buffer.from(sigB64url, 'base64url')); }
   catch { return false; }
+}
+
+// ─── #75 STRICT ENCODERS — Node's permissive decoders make DISTINCT byte-strings verify identically, breaking
+//     I4 raw-byte determinism + cross-language agreement. Each of these is EXACT: decode is only accepted if the
+//     canonical re-encode reproduces the input byte-for-byte (P1-01/02/03).
+// Strict UNPADDED base64url of EXACTLY `bytes` bytes → Buffer, or null (padding, non-alphabet char, wrong length,
+// or a non-canonical trailing-bit encoding all fail: decode → re-encode → require identity).
+export function strictB64url(s, bytes) {
+  if (typeof s !== 'string' || !/^[A-Za-z0-9_-]+$/.test(s)) return null;   // unpadded base64url alphabet only ('=' rejected)
+  let buf; try { buf = Buffer.from(s, 'base64url'); } catch { return null; }
+  if (buf.length !== bytes) return null;                                   // exact length (Ed25519 pub=32, sig=64)
+  if (buf.toString('base64url') !== s) return null;                        // canonical: no non-zero trailing bits, no alias
+  return buf;
+}
+// A cadence is SECONDS as a canonical positive integer STRING — no fraction, no leading zero, no sign, bounded.
+export function parseCadenceInt(s) {
+  if (typeof s !== 'string' || !/^[1-9][0-9]*$/.test(s)) return null;      // "1.5", "030", "-1", "1e2", 30(number) all fail
+  const n = Number(s);
+  return (Number.isSafeInteger(n) && n > 0 && n <= BOUNDS.cadenceMax) ? n : null;
+}
+// Strict UTF-8 decode: Node's Buffer.toString('utf8') silently maps invalid bytes to U+FFFD, so 0xFF and the real
+// 3-byte U+FFFD collapse to one string. fatal:true rejects invalid UTF-8 instead (P1-01). → string | null.
+function strictUtf8(bytes) {
+  try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes)); }
+  catch { return null; }
 }
 
 // ─── producer: §7 seal — sign canon({ust,state}) with an Ed25519 private key ─────────────────────────
@@ -181,7 +206,7 @@ const ustIdCalendarOk = (u) => calendarValid(u.slice(4, 8), u.slice(8, 10), u.sl
 const KEYID_FORM = /^sha256:[0-9a-f]{64}$/;
 
 // ─── §13 structural bounds — hard ceilings; exceed ⇒ E-BOUNDS ─────────────────────────────────────────
-const BOUNDS = { depth: 8, array: 4096, partitions: 4096, floorPartitions: 64, breadth: 64, sizeBytes: 67108864, floorSizeBytes: 1048576 };
+const BOUNDS = { depth: 8, array: 4096, partitions: 4096, floorPartitions: 64, breadth: 64, sizeBytes: 67108864, floorSizeBytes: 1048576, cadenceMax: 31622400 };  // cadenceMax = 366 d in seconds (#75: bounded integer cadence)
 export function checkBounds(doc) {
   // #69 E3 — the normative VOLUME metric is the signed content canon({ust, state}), NOT the transport object:
   // sig/proof are bounded by transport admission (verifyJson maxInputBytes), never by the signed-content ABS.
@@ -338,6 +363,10 @@ export function verify(doc, opts = {}) {
     if (doc.sig.alg !== 'Ed25519') return bad('E-SIG', 'sig.alg must be Ed25519');
     if (doc.sig.key_id !== st.id.key_id) return bad('E-SIG', 'sig.key_id != state.id.key_id');
     if (doc.sig.pub === undefined) return bad('E-KEY', 'no carried pub (LIGHT)');
+    // #75 P1-02 — STRICT unpadded base64url of EXACT length: Node's base64url decode ignores padding / stray chars,
+    // so `sig + '='` or non-alphabet bytes verify identically. Reject anything whose canonical re-encode differs.
+    if (strictB64url(doc.sig.pub, 32) === null) return bad('E-SIG', 'sig.pub is not canonical unpadded base64url of a 32-byte Ed25519 key', { obligation: '§14.4 sig encoding' });
+    if (strictB64url(doc.sig.sig, 64) === null) return bad('E-SIG', 'sig.sig is not canonical unpadded base64url of a 64-byte Ed25519 signature', { obligation: '§14.4 sig encoding' });
     if (keyId(doc.sig.pub) !== st.id.key_id) return bad('E-SIG', 'key_id != H(ust:keylog, pub)', { obligation: '§4.2 key_id-binding', expected: st.id.key_id, actual: keyId(doc.sig.pub) });
     if (!edVerifyStrict(doc.sig.pub, S, doc.sig.sig)) return bad('E-SIG', 'Ed25519 verify failed', { obligation: '§14.2 whole-state-signature' });
     // step 3 — name authority (§14.3): HIGH resolves genesis+key-log; else a PINNED key (TOFU, §3.1) if the caller
@@ -718,7 +747,10 @@ export function ustGrid(from, to, cadenceSec) {
 // cadence signed for ITS time, so an operator changing cadence NEVER retroactively invalidates history. Each
 // entry is a normal transcript, verified by §14; the log is genesis-rooted and prev-chained. → {cadence}|{error}.
 export function resolveCadence(genesis, cadenceLog = [], atTime, { keylog } = {}) {
-  let cadence = Number(genesis?.state?.data?.genesis?.value?.cadence) || null;     // the genesis value is authorized by construction (self-signed)
+  // #75 P1-03 — cadence is a canonical positive-integer STRING of seconds ("1.5" / "030" / 1e2 rejected).
+  const gCad = genesis?.state?.data?.genesis?.value?.cadence;
+  if (gCad !== undefined && parseCadenceInt(gCad) === null) return { error: 'E-MALFORMED', detail: 'genesis cadence not a canonical positive integer of seconds (§11.3)' };
+  let cadence = gCad !== undefined ? parseCadenceInt(gCad) : null;                 // the genesis value is authorized by construction (self-signed)
   if (!Array.isArray(cadenceLog) || !cadenceLog.length) return { cadence };
   if (cadenceLog.length > 256) return { error: 'E-BOUNDS', detail: 'cadence-log > 256 (§13)' };
   // #71-followup P0 — a cadence CHANGE is an OPERATOR AUTHORITY parameter, not "any LIGHT doc with the same
@@ -742,8 +774,8 @@ export function resolveCadence(genesis, cadenceLog = [], atTime, { keylog } = {}
     const effE = ustToEpoch(op.effective_from);
     if (effE === null) return { error: 'E-MALFORMED', detail: 'cadence entry ' + i + ' bad effective_from' };
     if (lastEff !== null && effE < lastEff) return { error: 'E-PREV', detail: 'cadence effective_from not monotonic (entry ' + i + ')' };
-    if (!(Number(op.cadence) > 0)) return { error: 'E-MALFORMED', detail: 'cadence entry ' + i + ' cadence not a positive integer' };
-    if (atE !== null && effE <= atE) cadence = Number(op.cadence);                 // latest change in force at atTime wins
+    if (parseCadenceInt(op.cadence) === null) return { error: 'E-MALFORMED', detail: 'cadence entry ' + i + ' cadence not a canonical positive integer of seconds' };
+    if (atE !== null && effE <= atE) cadence = parseCadenceInt(op.cadence);        // latest change in force at atTime wins
     lastEff = effE; prev = contentHash(e);
   }
   return { cadence };
@@ -842,7 +874,11 @@ export function verifyJson(rawBytes, opts = {}) {
   const inputBudget = Number(opts.maxInputBytes ?? BOUNDS.sizeBytes);
   if (byteLen > inputBudget)
     return { result: 'INDETERMINATE', reason: 'resource_limit', detail: `raw input ${byteLen} B > input budget ${inputBudget} B — transport admission refused, verification not started` };
-  const raw = isStr ? rawBytes : Buffer.from(rawBytes).toString('utf8');
+  // #75 P1-01 — STRICT UTF-8 on the raw path: Buffer.toString('utf8') maps invalid bytes to U+FFFD, so 0xFF and
+  // the real 3-byte U+FFFD collapse to ONE string ⇒ distinct byte-strings, one verdict (breaks I4). fatal reject.
+  let raw;
+  if (isStr) raw = rawBytes;
+  else { raw = strictUtf8(rawBytes); if (raw === null) return bad('E-CANON', 'raw input is not valid UTF-8 (invalid byte sequence)', { obligation: '§6 canonical UTF-8' }); }
   const dup = scanDuplicateKeys(raw);
   if (dup) return bad('E-CANON', dup);
   let obj; try { obj = JSON.parse(raw); } catch { return bad('E-MALFORMED', 'not valid JSON'); }

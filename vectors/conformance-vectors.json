@@ -1,5 +1,5 @@
 {
-  "version": "UST 1.0 conformance vectors (rc.28 \u2014 self-audit fix: freshness:attested now requires a VERIFIED keylogHeadAnchor (inclusion + substrate-final), a raw self-computed head hash proves nothing = overclaim closed. Prior: #41 canon arbiter, #40 identity hardening, #44 agent-safety, #45 downgrade + fork-choice)",
+  "version": "UST 1.0 conformance vectors (rc.29 - #75 strict encoders P1-01/02/03 (utf8-reject, b64url, cadence); prior: \u2014 self-audit fix: freshness:attested now requires a VERIFIED keylogHeadAnchor (inclusion + substrate-final), a raw self-computed head hash proves nothing = overclaim closed. Prior: #41 canon arbiter, #40 identity hardening, #44 agent-safety, #45 downgrade + fork-choice)",
   "note": "Deterministic + reproducible. Keypairs from fixed seeds (A=0011..eeff, B=ffee..1100). canon=JCS tightened; H(tag,x)=sha256(ascii(tag)||0x00||x); content_hash=H(\"ust:state\",canon({ust,state})); key_id=H(\"ust:keylog\",raw_pub); partition_hash=H(\"ust:shard\",canon({domain_shard,ust_id,partition,value})) \u2014 UNIFORM, every partition binds domain_shard, name is a VALUE (non-colliding), no domain-less computed. Each vector states the SPEC rule it pins. Signature-type vectors use expect: 'VALID' | 'E-SIG' for the Ed25519 PRIMITIVE check (strict, canonical-S); this is not a document verdict \u2014 a conforming verifier's document verdict is always tier-qualified (VALID:LIGHT/HIGH/TOP), never a bare VALID. Partition names inside hash/commit inputs (e.g. 'secret') are arbitrary sample names, not protocol features.",
   "seeds": {
     "A": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
@@ -318,6 +318,21 @@
       "pub_b64url": "PM0kHP_Js2GARLl9A22GFFk9iwF8NA8d7odzOFUXZUs",
       "expect": "E-SIG",
       "note": "S+L non-canonical; a STRICT verifier MUST reject. node/OpenSSL strict? true"
-    }
+    },
+    { "kind": "utf8-reject", "id": "utf8-01-invalid-byte", "rule": "#75 P1-01 raw bytes MUST be valid UTF-8 (no U+FFFD replacement)", "input_hex": "ff", "expect_error": "E-CANON" },
+    { "kind": "utf8-reject", "id": "utf8-02-lone-surrogate", "rule": "#75 P1-01 lone surrogate ED A0 80 is invalid UTF-8", "input_hex": "eda080", "expect_error": "E-CANON" },
+    { "kind": "utf8-reject", "id": "utf8-03-truncated-seq", "rule": "#75 P1-01 truncated multibyte sequence is invalid UTF-8", "input_hex": "e4b8", "expect_error": "E-CANON" },
+    { "kind": "b64url", "id": "b64-01-valid-32", "rule": "#75 P1-02 canonical unpadded base64url of 32 bytes", "value": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc", "bytes": 32, "expect": true },
+    { "kind": "b64url", "id": "b64-02-valid-64", "rule": "#75 P1-02 canonical unpadded base64url of 64 bytes", "value": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQ", "bytes": 64, "expect": true },
+    { "kind": "b64url", "id": "b64-03-padding", "rule": "#75 P1-02 padding '=' is not unpadded base64url", "value": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=", "bytes": 32, "expect": false },
+    { "kind": "b64url", "id": "b64-04-wrong-length", "rule": "#75 P1-02 decodes to 31 != 32 bytes", "value": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBw", "bytes": 32, "expect": false },
+    { "kind": "b64url", "id": "b64-05-non-alphabet", "rule": "#75 P1-02 '!' is outside the base64url alphabet", "value": "!wcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc", "bytes": 32, "expect": false },
+    { "kind": "b64url", "id": "b64-06-standard-b64-plus", "rule": "#75 P1-02 standard base64 (+/, padded) is not base64url", "value": "+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/s=", "bytes": 32, "expect": false },
+    { "kind": "cadence", "id": "cad-01-integer", "rule": "#75 P1-03 canonical positive integer seconds", "value": "30", "expect": 30 },
+    { "kind": "cadence", "id": "cad-02-fraction", "rule": "#75 P1-03 fractional cadence rejected", "value": "1.5", "expect": null },
+    { "kind": "cadence", "id": "cad-03-leading-zero", "rule": "#75 P1-03 leading zero not canonical", "value": "030", "expect": null },
+    { "kind": "cadence", "id": "cad-04-exponent", "rule": "#75 P1-03 exponent form rejected", "value": "1e2", "expect": null },
+    { "kind": "cadence", "id": "cad-05-zero", "rule": "#75 P1-03 zero cadence rejected", "value": "0", "expect": null },
+    { "kind": "cadence", "id": "cad-06-over-bound", "rule": "#75 P1-03 cadence over the 366d bound rejected", "value": "99999999", "expect": null }
   ]
 }

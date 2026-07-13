@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.28`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.29`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -18,7 +18,7 @@ graduated tiers (LIGHT / HIGH / TOP, §3.1). Every mechanism below serves that s
 judged by ONE question — *how much trust does this actually earn, and does the protocol say so honestly?* A
 tier must never let a consumer read "signed" as "true," "anchored" as "correct," or "agreeing" as "independent."
 
-Status: **Normative specification — 1.0 REV 34 (2026-07-13).** The SECURELY-STRUCTURED (namespaced) base that
+Status: **Normative specification — 1.0 REV 40 (2026-07-13).** The SECURELY-STRUCTURED (namespaced) base that
 closed all red-team findings STRUCTURALLY (I3 collision unrepresentable, I1 whole-State signature by
 construction, no stored-hash footgun), with ALL v0.29 FEATURES merged IN (not a flat-wire revert): per-partition
 captured/computed hashing (cross-engine corroboration for computed parts), `parent_ust` (hour-close timing),
@@ -411,9 +411,17 @@ publisher-bound values a layer up.)
   //  pub — the signing public key, carried so LIGHT verification is self-contained; key_id = H_keylog(pub).
   //  At HIGH/TOP the key is ALSO resolvable via the key log (§12), which adds name authority.
   ```
-  The signing input is EXACTLY `S = canon({ "ust": <top>, "state": State })` — the whole transcript MINUS `sig`
-  and `proof` (I1: everything asserted, incl. the protocol version, is signed; only the signature and the
-  detachable time-proof are outside), nothing more, nothing less. `Signature.key_id`
+  **Strict encodings (normative, #75 — I4 raw-byte determinism).** Every binary value MUST be EXACT so that
+  distinct byte-strings can NEVER verify identically (a permissive decoder that ignores padding or maps invalid
+  bytes to U+FFFD would let two encodings collapse to one verdict): (1) `sig.pub` and `sig.sig` are UNPADDED
+  base64url (`[A-Za-z0-9_-]`, no `=`) that decode to EXACTLY 32 and 64 bytes respectively AND whose canonical
+  re-encode reproduces the input byte-for-byte (a non-canonical trailing-bit encoding ⇒ E-SIG); (2) the raw
+  transcript bytes MUST be valid UTF-8 — an invalid byte sequence is E-CANON, never silently replaced (§6); (3) a
+  signed `cadence` (§11.3) is a canonical positive-integer STRING of seconds (`[1-9][0-9]*`, bounded; `"1.5"` /
+  `"030"` / `1e2` ⇒ E-MALFORMED). These are the language-portable encoding rules a second implementation MUST match
+  on the vectors. The signing input is EXACTLY `S = canon({ "ust": <top>, "state": State })` — the whole transcript
+  MINUS `sig` and `proof` (I1: everything asserted, incl. the protocol version, is signed; only the signature and
+  the detachable time-proof are outside), nothing more, nothing less. `Signature.key_id`
   MUST equal `State.id.key_id` (mismatch ⇒ E-SIG). **Ed25519 verification MUST be STRICT (N6):** per RFC 8032,
   reject a non-canonical scalar `S ≥ L`, reject small-order / non-canonical `A` and `R` encodings, and use
   cofactorless verification. "One algorithm" (I4) includes ONE acceptance rule — signature-malleability vectors
@@ -1689,6 +1697,17 @@ provenance and will be lifted into this ledger when the spec is published.
   homographs but NOT ASCII-only confusables (`paypaI.com`); that needs a confusables table, deliberately not at
   the floor — a consumer/registrar policy concern. Stated so the guarantee is not over-read. Other Group-I
   mechanisms (requireAnchored, forkChoice, verifyOrThrow/structured verdict, canon arbiter) probed clean.
+- **REV 40 (2026-07-13)** — an EXTERNAL red-team of rc.28 (two independent audits, all findings empirically
+  reproduced) opened UST-Protocol#75. This revision lands the first, lowest-risk slice — **strict encoders +
+  metadata (P1-01/02/03/09)**, each captured as a LANGUAGE-NEUTRAL vector so a second implementation must match:
+  (1) raw transcript bytes MUST be valid UTF-8 (`fatal` decode; an invalid byte that Node would map to U+FFFD is
+  now E-CANON — two byte-strings could otherwise share one verdict, breaking I4); (2) `sig.pub`/`sig.sig` MUST be
+  unpadded base64url decoding to exactly 32/64 bytes with a canonical re-encode (padding / stray chars / non-
+  canonical trailing bits ⇒ E-SIG); (3) signed `cadence` MUST be a canonical bounded positive-integer string
+  (`"1.5"` ⇒ E-MALFORMED); (4) `VERSION` now carries `{wire, spec, revision}` and the Status line tracks the
+  appendix (was frozen at REV 34). The heavier ROOTS (key-log temporal state machine, two-phase verify, the
+  authority-signed HourManifest, attested latest-head) follow in #75, each with its own model-clause + spec-clause
+  + language-neutral vectors landing together (model↔code lockstep is an acceptance gate).
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the
