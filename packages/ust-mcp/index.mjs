@@ -101,7 +101,7 @@ export const tools = [
   },
   {
     name: 'ust_verify_stream',
-    description: 'VERIFY A RANGE as one authority\'s complete stream — e.g. you fetched ust(001)…ust(007) from an archive: every frame LIGHT-verifies, they are prev-chained with no gaps, all belong to ONE publisher (mixed publishers → E-AUTHORITY), and with a covering checkpoint the interval is provably complete. Returns { complete: "proven" | "provisional" | "none" } or an error (E-PREV broken/forked chain · E-AUTHORITY mixed authority · E-SIG bad frame). Retrieval is NOT the protocol\'s job — pass the records you already have.',
+    description: 'VERIFY A RANGE as one authority\'s stream — e.g. you fetched ust(001)…ust(007) from an archive: every frame LIGHT-verifies, they are prev-chained, all belong to ONE publisher (mixed publishers → E-AUTHORITY), and a covering checkpoint closes the interval. Returns { complete: "chain-consistent" | "provisional" | "none" } or an error (E-PREV broken/forked chain · E-AUTHORITY mixed authority · E-SIG bad frame). NOTE (#69 C): "chain-consistent" proves NO-DELETION over the shown chain, NOT no-omission — a never-emitted slot leaves a self-consistent chain with a hole; full "complete" (no-omission) needs the operator\'s signed cadence grid, a future rung. Retrieval is NOT the protocol\'s job — pass the records you already have.',
     inputSchema: { type: 'object', required: ['frames'], properties: { frames: { type: 'array' }, genesis: { type: 'object' }, checkpoint: { type: 'object' } } },
     handler: ({ frames, genesis, checkpoint }) => P.verifyStream(frames, { genesis, checkpoint }),
   },

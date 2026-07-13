@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.18`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.19`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -18,7 +18,7 @@ graduated tiers (LIGHT / HIGH / TOP, §3.1). Every mechanism below serves that s
 judged by ONE question — *how much trust does this actually earn, and does the protocol say so honestly?* A
 tier must never let a consumer read "signed" as "true," "anchored" as "correct," or "agreeing" as "independent."
 
-Status: **Normative specification — 1.0 REV 29 (2026-07-13).** The SECURELY-STRUCTURED (namespaced) base that
+Status: **Normative specification — 1.0 REV 30 (2026-07-13).** The SECURELY-STRUCTURED (namespaced) base that
 closed all red-team findings STRUCTURALLY (I3 collision unrepresentable, I1 whole-State signature by
 construction, no stored-hash footgun), with ALL v0.29 FEATURES merged IN (not a flat-wire revert): per-partition
 captured/computed hashing (cross-engine corroboration for computed parts), `parent_ust` (hour-close timing),
@@ -646,12 +646,27 @@ delays proof but cannot hide frames (an absent frame breaks `prev`). The operato
 consumer requiring completeness MUST have a covering checkpoint whose asserted head hash-links to the frames it
 sees — a missing or contradicting checkpoint ⇒ E-PREV (fail closed).
 
-**Completeness scope (P5).** Completeness is PROVEN only for CLOSED intervals (those with a covering
+**Completeness scope (P5).** The range verdict is defined only for CLOSED intervals (those with a covering
 checkpoint). The open tail after the last checkpoint is provable only up to `head`; the profile declares a
 MAXIMUM checkpoint LAG, so the unprovable tail is bounded in time and a consumer treats post-last-checkpoint
 frames as PROVISIONAL. Withholding a checkpoint past the max lag is itself a detectable violation. The range VERDICT consumes ONLY
 signed inputs (the frames + the covering checkpoint); declared cadence/max-lag are accountability expectations
 for consumers — a profile change can never change any verdict (I4).
+
+**No-deletion vs no-omission — `chain-consistent` ⊊ `complete` (#69 C, formal model F.4).** The `prev`-chain plus
+a covering checkpoint prove **`chain-consistent`**: no frame was DELETED from the shown chain (removing frame
+`t` orphans `t+1`'s `prev`). They do NOT prove **`complete`** (no OMISSION): a publisher that never emits `t`
+and links `t+1.prev = t-1` yields a self-consistent chain WITH A HOLE — the checkpoint's cumulative
+`frame_count` counts what WAS emitted, which the verifier cannot compare to what was EXPECTED without knowing
+the grid. `complete` is therefore decidable ONLY against the EXPECTED GRID `G` = the `ust_id` grid points at the
+operator's cadence over the interval, and the cadence MUST be a SIGNED, time-resolved parameter (resolved like
+the active key at `t`, §12.2, so it cannot be shrunk post-hoc to hide slots). Then `complete` requires every
+`g ∈ G` be either a frame with `ust_id = g` OR a signed gap record; `expected_slot_count = |G|` is DERIVED
+(never stored) and the checkpoint additionally commits the interval bounds `(from, to)` — no new document shape,
+the checkpoint is the existing `class:"attestation"` value plus two bounds, and the gap record already exists.
+Absent a signed cadence in the verifier's information set the range verdict is `chain-consistent`, NEVER
+`complete`. The signed-cadence grid is a FUTURE revision; until it is served the reference verifier emits
+`chain-consistent` (the honest ceiling), never `complete`.
 
 **Cross-tier & resumption (P6).** Each declared tier `(domain_shard, tier)` has its own `prev` stream; the
 SET of tiers a publisher runs is declared in the profile, so a silently-absent tier is detectable against the
@@ -739,15 +754,31 @@ collecting witness evidence MUST decide as follows. Let ACTIVE = entries without
 is ANCHORED iff at least one of its anchors passes BOTH the §11.2 inclusion check AND its substrate's
 finality check (§17). A substrate the verifier does not implement contributes NOTHING (never a pass, never
 a failure — `INDETERMINATE(unsupported)` discipline, §17):
-- EXACTLY ONE anchored active entry, and it equals the resolved genesis ⇒ **positive no-fork confirmation**
-  (§12.1 M2 satisfied) — `authoritative` MAY be granted.
+- EXACTLY ONE anchored active entry, and it equals the resolved genesis ⇒ the served log **CORROBORATES**
+  no-fork. This is strength `corroborated` — a real, bounded fact (the published set shows no rival) that
+  reaches **HIGH** — but it is NOT independent non-membership: the publisher can OMIT a rival from its OWN
+  list, so `authoritative` is NOT granted on the served list alone. Membership does not entail non-membership —
+  the same theorem as un-backdatable time (formal model F.3.1), now on the NAME axis (F.5a).
 - TWO OR MORE anchored active entries — or one that DIFFERS from the resolved genesis ⇒ a rival
   name-binding root is visible ⇒ `conflict` ⇒ **E-GENESIS** (a failure, not unavailability).
 - ZERO anchored active entries (endpoint unreachable, log malformed, no anchor verifiable here) ⇒
-  `unavailable` ⇒ `authoritative` is DENIED and the LIGHT floor stands (INDETERMINATE discipline, §15) —
+  `unavailable` ⇒ the name-authority tier is DENIED and the LIGHT floor stands (INDETERMINATE discipline, §15) —
   reported explicitly (e.g. "HIGH pending witness"), NEVER silently dropped, NEVER guessed (W1).
-An explicit out-of-band caller assertion of no-fork MAY substitute for the query (air-gapped verification);
-it MUST be reported as caller-asserted, distinguishable from collected evidence.
+
+**`authoritative` requires INDEPENDENT non-membership**, one of: (a) an out-of-band caller assertion of no-fork
+(air-gapped verification), reported as `caller-asserted`; or (b) an **anchored name-keyed verifiable-map
+inclusion** — an authenticated dictionary `domain_shard ↦ activeGenesis` whose signed root is committed to the
+anchor substrate (§11), where prefix-uniqueness makes an inclusion proof for the name the non-membership proof
+for every rival (F.5a). Mechanism (b)'s wire format is a FUTURE revision (roadmap: an independent witness that
+is not the publisher); until it is served, the honest ceiling from the publisher's own surfaces is
+`corroborated`.
+
+**Strength ladder (normative verdict values).** `self-asserted` / `pinned` (LIGHT) ⊊ `corroborated` (HIGH —
+served-list no-fork) ⊊ `authoritative` (HIGH — independent non-membership). Only `authoritative` surfaces the
+definitive `publisher` field and may compose to **TOP** (an anchored-but-only-corroborated name never
+overclaims TOP); `corroborated` surfaces `publisher_claimed` and a `no_fork` basis (`served-list` /
+`caller-asserted` / `map-inclusion`). A consumer needing independent authority sets `requireAuthoritative`,
+which rejects `corroborated`.
 
 ### 12.2 Key log — a genesis-rooted, self-signed chain (M1)
 - A publisher's key log is a **sequenced stream (§11.3) of UST transcripts** — the SAME `{ust, state, sig,
@@ -1403,6 +1434,21 @@ provenance and will be lifted into this ledger when the spec is published.
   `verify()` stays sync); the exact signed-content size metric in the producer guard (no estimate pad) and in
   `checkBounds` (signed content, not the transport object); and a Node-side SSRF resolution guard (a public
   NAME resolving to a private ADDRESS is refused) layered over the portable lexical floor of §18.21.
+- **REV 30 (2026-07-13)** — #69 B/C, the honest words (grounded in formal model F.4 + F.5a, added first). Both
+  findings are one theorem the model already proves for the time axis (F.3.1): proving a NEGATIVE — no rival
+  genesis, no missing slot — is authenticated NON-MEMBERSHIP, which never follows from positive membership
+  facts. Neither changes a document's wire shape. **B (§12.1a):** the publisher's OWN served witness list proves
+  only membership, so it yields strength **`corroborated`** (HIGH, honest — a real bounded fact), NOT
+  `authoritative`; `authoritative` requires INDEPENDENT non-membership — a caller air-gap assertion, or an
+  anchored name-keyed verifiable-map inclusion (prefix-uniqueness ⇒ the name's inclusion IS the rivals'
+  exclusion; format a future revision). Only `authoritative` surfaces `publisher` and composes to TOP;
+  `corroborated` surfaces `publisher_claimed` + a `no_fork` basis. **C (§11.3):** a covering checkpoint proves
+  **`chain-consistent`** (no-deletion), NOT **`complete`** (no-omission) — the latter needs the EXPECTED GRID,
+  decidable only against a SIGNED, time-resolved cadence (the key-log pattern applied to cadence); the checkpoint
+  gains two interval bounds in its existing attestation value, the grid is computed, gaps already exist. The
+  strong words are EARNED by bringing the missing non-membership coordinate into the information set, not
+  weakened. Reference verifier updated (served-list → corroborated; verifyStream → chain-consistent); the map +
+  signed-cadence mechanisms that RE-EARN `authoritative`/`complete` are the coordinated next step.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

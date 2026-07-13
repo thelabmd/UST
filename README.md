@@ -28,7 +28,7 @@ Trust is **graduated, and the verdict carries its tier** — a conforming verifi
 | verdict | what is proven |
 |---|---|
 | `VALID:LIGHT` | the exact bytes · the signing key · the claimed time frame. Identity is the key itself (a self-certifying `sha256:` shard) or a *claimed* name — never a verified name. |
-| `VALID:HIGH` | + the publisher's **name** is provably bound to the key (genesis + key log + no-fork witness). When the publisher serves the standard discovery + witness surfaces (§20.1/§12.1a), the reference verifiers collect this evidence **automatically** — HIGH is the zero-step default, not an expert dance. |
+| `VALID:HIGH` | + the publisher's **name** is provably bound to the key (genesis + key log). The reference verifiers collect this automatically from the standard surfaces (§20.1/§12.1a). Strength `corroborated` — the publisher's own witness shows no rival — or `authoritative` — **independent** non-membership (an anchored name-map inclusion, or a caller air-gap assertion); only `authoritative` names the definitive `publisher` and reaches TOP. |
 | `VALID:TOP` | + the document provably existed **by** a point in real time (anchor inclusion, e.g. Bitcoin/OTS). Stream *completeness* is a separate **range** verdict (`verifyStream`). |
 | `INVALID` | a definite, deterministic failure (specific `E-*` codes) |
 | `INDETERMINATE` | a dependency was unreachable, or an optional algorithm is unimplemented — *cannot decide* is never conflated with *forged* |

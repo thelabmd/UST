@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.18' };
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.19' };
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -397,16 +397,17 @@ export function verify(doc, opts = {}) {
     }
     // The verdict CARRIES ITS SCOPE: `VALID:LIGHT|HIGH|TOP`, so a consumer cannot read "valid" without reading
     // valid-AT-WHAT (a bare `=== 'VALID'` no longer matches — the same forcing function as publisher_claimed).
-    // tier = the highest fully-satisfied rung (monotonic, §3.1): TOP = authoritative + anchored; HIGH =
-    // authoritative; else LIGHT (self-asserted or pinned). Per-axis strengths stay below for detail.
-    const authoritative = identity.strength === 'authoritative' && identity.status === 'verified';
-    // §3.1/§15 — the DOCUMENT tier: TOP = authoritative identity + anchored time. Stream COMPLETENESS is a RANGE
-    // verdict (verifyStream → complete:'proven'), never a single-document claim (audit E, H-02/F-07).
-    const tier = authoritative ? (timeField.strength === 'anchored' ? 'TOP' : 'HIGH') : 'LIGHT';
-    // `completeness` is EXPLICIT and, for a single-document verify, always "not_evaluated": completeness is a
-    // RANGE property (§11.3 verifyStream → proven/provisional/none) — the field exists so VALID:TOP can never be
-    // read as "all possible properties verified" (audit E follow-up, P1-2).
+    // tier = the highest fully-satisfied rung (monotonic, §3.1). The NAME is bound to the key at both `corroborated`
+    // and `authoritative` (§12.1a F.5a) — both reach HIGH. The no-fork STRENGTH separates them: only `authoritative`
+    // (independent non-membership) reaches TOP, so an anchored-but-only-corroborated name never overclaims TOP.
+    const verified = identity.status === 'verified';
+    const authoritative = identity.strength === 'authoritative' && verified;
+    const nameBound = verified && (identity.strength === 'authoritative' || identity.strength === 'corroborated');
+    // §3.1/§15 — TOP = authoritative identity + anchored time. HIGH = name-bound (corroborated or authoritative).
+    // Stream COMPLETENESS is a separate RANGE verdict (verifyStream), never a single-document claim.
+    const tier = authoritative && timeField.strength === 'anchored' ? 'TOP' : nameBound ? 'HIGH' : 'LIGHT';
     return { result: 'VALID:' + tier, tier, identity: { ...identity, mode: shardMode }, disclosed, sources, ...nameField,
+      ...(identity.noFork ? { no_fork: identity.noFork } : {}),
       ust_id: st.id.ust_id, class: st.id.class, content_hash: ch, time: timeField, provenance: provenanceReport,
       completeness: 'not_evaluated' };
   } catch (e) {
@@ -443,7 +444,7 @@ function walkReferents(st, opts, depth, visited, budget) {
 
 // ─── §12 HIGH name-authority resolution. STATELESS: the caller (ustate/engine) supplies the genesis +
 //     key-log transcripts (retrieval is the stateful layer's job) and asserts no-fork from the witness (W1).
-export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, anchorTime } = {}) {
+export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, corroborated = false, mapInclusion = false, anchorTime } = {}) {
   if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
   const gv = verify(genesis);                                                     // genesis is itself a UST transcript
   if (!isValid(gv)) return { error: 'E-GENESIS', detail: 'genesis invalid: ' + gv.error };
@@ -495,10 +496,18 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
     } else if (rev.reason === 'retired' && U && U > rev.at)
       return { strength: 'self-asserted', status: 'expired', detail: 'signed after hygienic retirement (X1)' };
   }
-  // W1 — authoritative REQUIRES a positive no-fork confirmation (the witness), the caller/ustate's job.
-  if (!noForkConfirmed) return { strength: 'authoritative', status: 'unavailable', capacity,
-    detail: 'no-fork not confirmed (W1: witness check is the caller job) → authoritative DENIED, retry' };
-  return { strength: 'authoritative', status: suspect ? 'suspect' : 'verified', capacity };
+  // §12.1a / formal model F.5a — the name is now KEY-BOUND (K_n: doc key ∈ resolved set). The no-fork STRENGTH
+  // is a function of the BASIS of the non-membership evidence, and honesty forbids collapsing them:
+  //   · INDEPENDENT non-membership — an anchored verifiable-map inclusion (prefix-uniqueness ⇒ ¬∃rival) OR an
+  //     out-of-band caller assertion (air-gap) — ⇒ `authoritative`; the map/caller does not rely on the publisher.
+  //   · the publisher's OWN served witness list shows no rival ⇒ `corroborated` — a real, bounded fact (membership
+  //     of A in the published set), but NOT independent non-membership (the publisher can omit a rival, F.5a).
+  //   · no no-fork evidence at all ⇒ DENIED (status unavailable → the name-authority tier is not reached, W1).
+  const st2 = suspect ? 'suspect' : 'verified';
+  if (mapInclusion || noForkConfirmed) return { strength: 'authoritative', noFork: mapInclusion ? 'map-inclusion' : 'caller-asserted', status: st2, capacity };
+  if (corroborated) return { strength: 'corroborated', noFork: 'served-list', status: st2, capacity };
+  return { strength: 'corroborated', noFork: 'unconfirmed', status: 'unavailable', capacity,
+    detail: 'no independent no-fork evidence; a served witness only corroborates (§12.1a F.5a) → authority pending, retry' };
 }
 
 // ─── TOP §11.2 anchor-proof: recompute the Merkle inclusion path content_hash→root (RFC 6962, domain-sep
@@ -538,7 +547,8 @@ export async function verifyAsync(doc, opts = {}) {
 
 // ─── TOP §11.3 completeness: a sequenced stream is prev-chained; first frame's prev = genesis content_hash
 //     (M4); per-frame validity is verified too (X2 — completeness ≠ validity); duplicate ust_id / shared prev
-//     = a fork ⇒ E-PREV (Y1). 'proven' needs a covering checkpoint (M5); else the open tail is 'provisional'.
+//     = a fork ⇒ E-PREV (Y1). A covering checkpoint (M5) proves 'chain-consistent' (no-deletion); the open tail
+//     is 'provisional'. 'complete' (no-omission, needs the signed-cadence grid, F.4) is a future rung (#69 C).
 export function verifyStream(frames, { genesis, checkpoint, requirePerFrameValid = true } = {}) {
   if (!Array.isArray(frames) || !frames.length) return { complete: 'none' };
   let prevHash = genesis ? contentHash(genesis) : null;
@@ -556,17 +566,20 @@ export function verifyStream(frames, { genesis, checkpoint, requirePerFrameValid
     if (p) seenPrev.add(p);
     prevHash = contentHash(f);
   }
-  // M5 — a COVERING checkpoint closes the interval → 'proven', but ONLY over a genesis-BOUND origin (TOP is built
-  // over HIGH). Without a genesis the first frame's origin is unbound → 'provisional', never 'proven' (F2).
+  // M5 — a COVERING checkpoint over a genesis-BOUND origin closes the interval. Without a genesis the origin is
+  // unbound → 'provisional'. #69 C / F.4 — even WITH the checkpoint, the chain + count prove NO-DELETION over the
+  // SHOWN chain, NOT no-omission: a never-emitted slot leaves a self-consistent chain with a hole (link t+1→t-1).
+  // So the honest ceiling here is 'chain-consistent'; 'complete' (no-omission) is decidable only against the
+  // EXPECTED GRID, which needs the operator's SIGNED CADENCE in ℐ — §11.3's next mechanism, not asserted yet.
   if (checkpoint) {
-    if (!genesis) return { complete: 'provisional', head: prevHash, reason: 'origin-unbound: no genesis, cannot prove completeness (TOP needs a HIGH origin)' };
+    if (!genesis) return { complete: 'provisional', head: prevHash, reason: 'origin-unbound: no genesis, cannot bound completeness (TOP needs a HIGH origin)' };
     const cv = verify(checkpoint, { context: 'data' });
     if (!isValid(cv) || checkpoint.state.id.class !== 'attestation') return { error: 'E-PREV', detail: 'invalid checkpoint' };
     if (checkpoint.state.id.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'checkpoint not from the stream authority (' + authority + ') — TOP completeness cannot cross authority' };
     const a = checkpoint.state.data.checkpoint?.value;
     if (!a || a.head !== prevHash || String(a.frame_count) !== String(frames.length))
       return { error: 'E-PREV', detail: 'checkpoint contradicts observed set (M5)' };
-    return { complete: 'proven', head: prevHash };
+    return { complete: 'chain-consistent', head: prevHash };
   }
   return { complete: 'provisional', head: prevHash };                  // no checkpoint → open tail (P5)
 }
@@ -699,19 +712,22 @@ export async function resolveByDiscovery(doc, opts = {}, { fetchImpl = fetch, su
     keylog = k;
   }
 
-  // no-fork EVIDENCE (default): query the witness UNLESS the caller already asserts it (--no-fork-confirmed
-  // = an air-gap override) or forbids the network. Witness-confirmed lifts to HIGH automatically & honestly.
-  let noFork = opts.noForkConfirmed ? 'asserted-by-caller' : 'unconfirmed';
+  // no-fork EVIDENCE (default): query the witness UNLESS the caller air-gap-asserts it or forbids the network.
+  // #69 B / F.5a — the publisher's OWN served witness list is CORROBORATION, not independent non-membership: a
+  // confirmed served list ⇒ `corroborated` (HIGH, honest), NOT `authoritative`. Only a caller air-gap assertion
+  // (out-of-band responsibility) or a future anchored map-inclusion reaches `authoritative`. A fork ⇒ E-GENESIS.
+  let witnessConfirmed = false, noFork = opts.noForkConfirmed ? 'caller-asserted (authoritative)' : 'unconfirmed';
   if (!opts.noForkConfirmed && !opts.offline) {
     const w = await witnessNoFork(shard, genesisHash, { fetchImpl, substrateVerify });
     if (w.status === 'fork') return { verdict: bad('E-GENESIS', w.detail), resolution: { publisher: shard, fork: true, detail: w.detail } };
-    noFork = w.status === 'confirmed' ? 'witness-confirmed' : (w.status === 'pending' ? 'HIGH pending — ' + w.detail : 'HIGH pending — ' + w.detail);
+    witnessConfirmed = w.status === 'confirmed';
+    noFork = witnessConfirmed ? 'served-list (corroborated)' : 'HIGH pending — ' + w.detail;
   }
-  const grant = noFork === 'witness-confirmed' || opts.noForkConfirmed;
-  const auth = resolveAuthority(doc, { genesis, keylog, noForkConfirmed: grant });
+  const authOpts = { genesis, keylog, noForkConfirmed: opts.noForkConfirmed, corroborated: witnessConfirmed };
+  const auth = resolveAuthority(doc, authOpts);
   if (auth.error) return { verdict: base, resolution: { error: auth.error + (auth.detail ? ' — ' + auth.detail : '') } };
-  const verdict = await verifyAsync(doc, { ...opts, genesis, keylog, noForkConfirmed: grant, capacity: auth.capacity, substrateVerify });   // #69 E1 — await the doc's own anchor substrate (TOP)
-  return { verdict, resolution: { publisher: auth.publisher ?? shard, capacity: auth.capacity, noFork, source: `https://${shard}/.well-known/ (§20.1 discovery + §12.1 witness)` } };
+  const verdict = await verifyAsync(doc, { ...opts, genesis, keylog, noForkConfirmed: opts.noForkConfirmed, corroborated: witnessConfirmed, capacity: auth.capacity, substrateVerify });   // #69 E1 — await the doc's own anchor substrate (TOP)
+  return { verdict, resolution: { publisher: auth.publisher ?? shard, strength: auth.strength, capacity: auth.capacity, noFork, source: `https://${shard}/.well-known/ (§20.1 discovery + §12.1a witness)` } };
 }
 
 // minimal duplicate-key-detecting JSON scanner (zero-dep). Returns an error string or null. Keys are parsed

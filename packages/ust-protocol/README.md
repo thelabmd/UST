@@ -47,8 +47,8 @@ and **that nothing was tampered** — a real, bounded guarantee, not an oracle o
 | Tier | You also supply | You learn |
 |------|-----------------|-----------|
 | **LIGHT** | nothing (the document alone) | integrity + a *claimed* publisher (`self-asserted`) |
-| **HIGH** | the publisher's genesis + key-log | the key is *provably bound* to the publisher's name (`authoritative`) |
-| **TOP** | an anchor proof | the document provably existed by a point in time; a stream is provably complete |
+| **HIGH** | the publisher's genesis + key-log (+ witness) | the key is *provably bound* to the publisher's name. Strength `corroborated` (the publisher's own witness shows no rival) or `authoritative` (**independent** non-membership: an anchored name-map inclusion, or a caller air-gap assertion) — only `authoritative` surfaces the definitive `publisher` and reaches TOP |
+| **TOP** | an anchor proof | the document provably existed by a point in time (a stream range is `chain-consistent` — no-deletion; full `complete` needs the signed-cadence grid) |
 
 ```js
 // HIGH — resolve name authority
@@ -72,11 +72,15 @@ import { substrateVerify as rekor } from '@ust-protocol/rekor-verify';  // Sigst
 
 const { verdict, resolution } = await resolveByDiscovery(doc, { context: 'data' },
   { substrateVerify: combineSubstrates([ots, rekor]) });
-// verdict.result === 'VALID:HIGH' when the witness confirms no-fork (one anchored active genesis);
-// resolution.noFork = 'witness-confirmed' | 'HIGH pending' | 'unconfirmed'.  offline:true forbids the network.
+// verdict.result === 'VALID:HIGH', identity.strength === 'corroborated' when the publisher's witness shows one
+// anchored active genesis. That is CORROBORATION, not independent no-fork: the publisher could omit a rival from
+// its own list, so `authoritative` needs an INDEPENDENT anchored name-map (or an air-gap noForkConfirmed:true).
+// resolution.noFork = 'served-list (corroborated)' | 'caller-asserted (authoritative)' | 'HIGH pending — …'.
 ```
 
-- **no-fork is EVIDENCE, not a flag** (§12.1): the witness anchor is cross-checked against its substrate
+- **corroborated ≠ authoritative** (§12.1a, formal model F.5a): a served witness proves *membership* (this
+  genesis is anchored), never *non-membership* (no rival exists). The honest verdict is `corroborated`;
+  `authoritative` requires independent non-membership. The witness anchor is still cross-checked against its substrate
   (Bitcoin via `@ust-protocol/ots-verify`, Rekor via `@ust-protocol/rekor-verify`) — the endpoint is only an
   index, the anchor is the independent truth. Two anchored genesis roots ⇒ `E-GENESIS` (fork).
 - **the verifier embeds no blockchain.** Substrate checks are an *injection* (`combineSubstrates` routes by

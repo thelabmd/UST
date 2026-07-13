@@ -112,7 +112,7 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const s1 = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.2002', key_id: G.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { n: '2' } } }, { prev: P.contentHash(s0) }), G.priv, G.pubB64);
   const head = P.contentHash(s1);
   const cp = signG(P.buildCheckpoint({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.2003', key_id: G.key_id }, T, head, 2, head));
-  check('TOP stream+checkpoint→proven', P.verifyStream([s0, s1], { genesis: gen, checkpoint: cp }).complete === 'proven');
+  check('TOP stream+checkpoint→chain-consistent (no-deletion; complete needs signed cadence, #69 C)', P.verifyStream([s0, s1], { genesis: gen, checkpoint: cp }).complete === 'chain-consistent');
   // TOP anchor inclusion (2-leaf tree, audit path)
   const leaf = P.contentHash(s0), other = P.contentHash(s1);
   const sorted = [leaf, other].slice().sort();
@@ -138,7 +138,7 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const C = '2026-06-28T15:00:00Z';
   const rev = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1902', key_id: G.key_id }, T, { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: C }, P.contentHash(add)));
   check('revocation boundary U == C → E-KEY (X1: VALID only if U < C)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], anchorTime: C }).error === 'E-KEY');
-  check('revocation U < C → pre-compromise accepted', P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], anchorTime: '2026-06-28T14:59:59Z' }).strength === 'authoritative');
+  check('revocation U < C → pre-compromise accepted (suspect)', (r => r.strength === 'authoritative' && r.status === 'suspect')(P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], noForkConfirmed: true, anchorTime: '2026-06-28T14:59:59Z' })));
   const revBad = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1903', key_id: G.key_id }, T, { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: '2026-06-28T15:00:00.5Z' }, P.contentHash(add)));
   check('fractional compromised_since → E-MALFORMED (strict-Z, §12.2)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, revBad], anchorTime: C }).error === 'E-MALFORMED');
 }
@@ -347,7 +347,12 @@ console.log('\n═════════════════════�
 
   const okLog = wlog([{ content_hash: gHash, superseded_by: null, anchor: anchorOf(gHash) }], gHash);
   const r1 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog), substrateVerify: final });
-  check('witness-confirmed lifts to HIGH automatically', r1.verdict.result === 'VALID:HIGH' && r1.resolution.noFork === 'witness-confirmed' && r1.verdict.publisher === 'wit-test.example');
+  // #69 B / F.5a — the publisher's OWN served list is CORROBORATION, not independent no-fork: HIGH, but strength
+  // `corroborated` (never `authoritative`), and the name stays `publisher_claimed` (not the definitive `publisher`).
+  check('witness served-list → HIGH but CORROBORATED not authoritative (#69 B)', r1.verdict.result === 'VALID:HIGH' && r1.verdict.identity.strength === 'corroborated' && r1.verdict.no_fork === 'served-list' && r1.verdict.publisher_claimed === 'wit-test.example' && r1.verdict.publisher === undefined);
+  // an out-of-band caller assertion (air-gap) IS independent → authoritative + the name surfaced as `publisher`.
+  const r1b = await P.resolveByDiscovery(doc, { context: 'data', noForkConfirmed: true }, { fetchImpl: mk(okLog), substrateVerify: final });
+  check('caller air-gap assertion → HIGH AUTHORITATIVE + publisher surfaced (#69 B)', r1b.verdict.result === 'VALID:HIGH' && r1b.verdict.identity.strength === 'authoritative' && r1b.verdict.publisher === 'wit-test.example');
 
   const r2 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(null), substrateVerify: final });
   check('witness unreachable = LIGHT + HIGH pending (never forged, W1)', r2.verdict.result === 'VALID:LIGHT' && r2.resolution.noFork.startsWith('HIGH pending'));

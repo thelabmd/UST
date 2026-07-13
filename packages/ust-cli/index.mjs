@@ -987,7 +987,7 @@ async function cmdPublish() {
 // Completeness is NEVER a single document's property — this command is where it legitimately lives.
 async function cmdStream() {
   const files = process.argv.slice(3).filter((a) => !a.startsWith('--'));
-  if (!files.length) die('usage: ust stream <frame.json…> [--genesis <f>] [--checkpoint <f>]   # range verdict: chain · forks · completeness\n  exit: 0=proven · 2=provisional/none · 1=broken');
+  if (!files.length) die('usage: ust stream <frame.json…> [--genesis <f>] [--checkpoint <f>]   # range verdict: chain · forks · completeness\n  exit: 0=chain-consistent/complete · 2=provisional/none · 1=broken');
   const frames = [];
   for (const f of files) {
     const { verdict, doc } = verifyRaw(readFileSync(f));   // every frame passes the RAW boundary
@@ -1002,9 +1002,9 @@ async function cmdStream() {
   if (r.error) { console.log(`  ❌ stream BROKEN: ${r.error}${r.detail ? ' — ' + r.detail : ''}`); process.exit(1); }
   console.log('  frames      ' + frames.length);
   console.log('  authority   ' + (frames[0]?.state?.id?.domain_shard ?? '?') + (genesis ? '  (origin: genesis-bound)' : '  (origin: unbound — no --genesis)'));
-  console.log('  completeness ' + r.complete + (checkpoint ? '' : '   (no --checkpoint — proven is unreachable without one)'));
+  console.log('  completeness ' + r.complete + (checkpoint ? '' : '   (no --checkpoint — chain-consistent is unreachable without one)'));
   console.log('\n  completeness is a RANGE verdict over THESE frames — it never upgrades any single document\'s tier');
-  process.exit(r.complete === 'proven' ? 0 : 2);
+  process.exit((r.complete === 'chain-consistent' || r.complete === 'complete') ? 0 : 2);
 }
 
 // ─── ust mirror <domain> — vendor-independence on a SECOND vendor, attested never claimed ─────────────
