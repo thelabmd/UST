@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.13' };
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.14' };
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -601,26 +601,62 @@ export function isPublicDnsShard(shard) {
 // capacity / noFork status / source (or an error/skip). Honest by construction: without an explicit
 // noForkConfirmed the name stays provisional (never silently authoritative). `offline` forbids the network.
 // fetchImpl injected for tests. This function performs the ONLY network egress in the verify path.
-export async function resolveByDiscovery(doc, opts = {}, { fetchImpl = fetch } = {}) {
+// Witness auto-query (§12.1 M2, #68) — fetch the publisher's genesis-log and turn no-fork from a manual
+// assertion into EVIDENCE. Every listed genesis's anchor is CROSS-CHECKED against its substrate (Bitcoin
+// via opts.substrateVerify — the endpoint is only an index, the anchor is the independent truth). The
+// honesty ladder is §12.1 exactly: one anchored active genesis (== the one we resolved) ⇒ confirmed;
+// ≥2 anchored active ⇒ fork; unreachable / unanchored ⇒ pending (W1 — never a forged HIGH, never silence).
+export async function witnessNoFork(shard, genesisHash, { fetchImpl = fetch, substrateVerify } = {}) {
+  let log;
+  try {
+    const r = await fetchImpl(`https://${shard}/.well-known/ust-witness`, { signal: AbortSignal.timeout(10000), redirect: 'error' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    log = JSON.parse(await r.text());
+  } catch (e) { return { status: 'unreachable', detail: 'witness endpoint unreachable: ' + (e && e.message || e) }; }
+  if (!log || log.domain_shard !== shard || !Array.isArray(log.genesis_log)) return { status: 'unreachable', detail: 'witness log malformed' };
+  const active = log.genesis_log.filter((g) => g && !g.superseded_by && /^sha256:[0-9a-f]{64}$/.test(g.content_hash || ''));
+  const anchoredActive = active.filter((g) => {
+    const v = verifyAnchor(g.content_hash, g.anchor, { substrateVerify });
+    return v.inclusion && v.time === 'anchored';
+  });
+  if (anchoredActive.length >= 2) return { status: 'fork', detail: `${anchoredActive.length} anchored active genesis roots for ${shard} — a rival name-binding root exists` };
+  if (anchoredActive.length === 1) {
+    if (anchoredActive[0].content_hash !== genesisHash) return { status: 'fork', detail: `the anchored active genesis (${anchoredActive[0].content_hash.slice(0, 20)}…) differs from the one served at /.well-known/ust-genesis` };
+    return { status: 'confirmed', detail: 'a single Bitcoin-anchored active genesis — no rival root' };
+  }
+  return { status: 'pending', detail: active.length ? 'genesis present in the witness log but its anchor is not final (Bitcoin) — no-fork not yet evidence' : 'no active genesis in the witness log' };
+}
+
+export async function resolveByDiscovery(doc, opts = {}, { fetchImpl = fetch, substrateVerify } = {}) {
   const base = verify(doc, opts);
   const shard = doc?.state?.id?.domain_shard || '';
   const worth = !opts.offline && !opts.genesis &&
     (base.result === 'VALID:LIGHT' || (base.result === 'INDETERMINATE' && base.reason === 'unavailable'));
   if (!worth) return { verdict: base, resolution: null };
   if (!isPublicDnsShard(shard)) return { verdict: base, resolution: { skipped: 'domain_shard is not a public DNS name — discovery refused (SSRF guard)' } };
-  let genesis, keylog = [];
+  let genesis, keylog = [], genesisHash;
   try {
     const get = async (p) => { const r = await fetchImpl(`https://${shard}${p}`, { signal: AbortSignal.timeout(10000), redirect: 'error' }); if (!r.ok) throw new Error(`HTTP ${r.status} at ${p}`); return r.text(); };
     const gRaw = await get('/.well-known/ust-genesis');
     const gv = verifyJson(gRaw, {});
     if (!isValid(gv)) throw new Error('published genesis does not VERIFY');
-    genesis = JSON.parse(gRaw);
+    genesis = JSON.parse(gRaw); genesisHash = contentHash(genesis);
     try { const kRaw = await get('/.well-known/ust-keylog'); const k = JSON.parse(kRaw); if (Array.isArray(k)) keylog = k; } catch { /* not served */ }
   } catch (e) { return { verdict: base, resolution: { error: 'discovery fetch failed: ' + (e && e.message || e) } }; }
-  const auth = resolveAuthority(doc, { genesis, keylog, noForkConfirmed: !!opts.noForkConfirmed });
+
+  // no-fork EVIDENCE (default): query the witness UNLESS the caller already asserts it (--no-fork-confirmed
+  // = an air-gap override) or forbids the network. Witness-confirmed lifts to HIGH automatically & honestly.
+  let noFork = opts.noForkConfirmed ? 'asserted-by-caller' : 'unconfirmed';
+  if (!opts.noForkConfirmed && !opts.offline) {
+    const w = await witnessNoFork(shard, genesisHash, { fetchImpl, substrateVerify });
+    if (w.status === 'fork') return { verdict: bad('E-GENESIS', w.detail), resolution: { publisher: shard, fork: true, detail: w.detail } };
+    noFork = w.status === 'confirmed' ? 'witness-confirmed' : (w.status === 'pending' ? 'HIGH pending — ' + w.detail : 'HIGH pending — ' + w.detail);
+  }
+  const grant = noFork === 'witness-confirmed' || opts.noForkConfirmed;
+  const auth = resolveAuthority(doc, { genesis, keylog, noForkConfirmed: grant });
   if (auth.error) return { verdict: base, resolution: { error: auth.error + (auth.detail ? ' — ' + auth.detail : '') } };
-  const verdict = verify(doc, { ...opts, genesis, keylog, capacity: auth.capacity });
-  return { verdict, resolution: { publisher: auth.publisher ?? shard, capacity: auth.capacity, noFork: opts.noForkConfirmed ? 'asserted-by-caller' : 'unconfirmed', source: `https://${shard}/.well-known/ (§20.1 discovery)` } };
+  const verdict = verify(doc, { ...opts, genesis, keylog, noForkConfirmed: grant, capacity: auth.capacity });
+  return { verdict, resolution: { publisher: auth.publisher ?? shard, capacity: auth.capacity, noFork, source: `https://${shard}/.well-known/ (§20.1 discovery + §12.1 witness)` } };
 }
 
 // minimal duplicate-key-detecting JSON scanner (zero-dep). Returns an error string or null. Keys are parsed

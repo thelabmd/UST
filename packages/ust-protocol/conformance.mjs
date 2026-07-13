@@ -308,6 +308,46 @@ console.log('\n═════════════════════�
   check('resolveByDiscovery: public LIGHT resolves (fetch fires, honest error on failure)', touched > 0 && !!r3.resolution?.error);
 }
 
+// ─── rc.14: witness auto-query (§12.1 M2, #68) — no-fork becomes EVIDENCE, so HIGH is the honest default.
+{
+  const rootW = kp('bb'.repeat(32)), opW = kp('cc'.repeat(32));
+  const gen = P.seal(P.buildGenesis({ domain_shard: 'wit-test.example', ust_id: 'ust:20260713.14', key_id: rootW.key_id }, T, rootW.pubB64, 256), rootW.priv, rootW.pubB64);
+  const kl0 = P.seal(P.buildKeyLogEntry({ domain_shard: 'wit-test.example', ust_id: 'ust:20260713.14', key_id: rootW.key_id }, T, { op: 'add', pub: opW.pubB64, new_key_id: opW.key_id }, P.contentHash(gen)), rootW.priv, rootW.pubB64);
+  const gHash = P.contentHash(gen);
+  const data = {}; for (let i = 0; i < 146; i++) data['s' + i] = { kind: 'captured', value: { v: String(i) } };
+  const doc = P.seal(P.buildState({ domain_shard: 'wit-test.example', ust_id: 'ust:20260713.140030', key_id: opW.key_id, class: 'observation' }, T, data, undefined, { maxPartitions: 256 }), opW.priv, opW.pubB64);
+  const anchorOf = (h) => ({ root: P.Hbytes('ust:leaf', Buffer.from(h, 'utf8')), path: [], anchor: { substrate: 'bitcoin-ots', block_height: 900000 } });
+  const wlog = (entries, active) => ({ domain_shard: 'wit-test.example', active, genesis_log: entries });
+  const mk = (log, extra = {}) => async (u) => {
+    u = String(u);
+    if (u.endsWith('/.well-known/ust-genesis')) return { ok: true, text: async () => JSON.stringify(gen) };
+    if (u.endsWith('/.well-known/ust-keylog')) return { ok: true, text: async () => JSON.stringify([kl0]) };
+    if (u.endsWith('/.well-known/ust-witness')) return log ? { ok: true, text: async () => JSON.stringify(log) } : { ok: false, status: 404, text: async () => '' };
+    return { ok: false, status: 404, text: async () => '' };
+  };
+  const final = () => ({ final: true, time: '2026-07-13T14:05:00Z' });
+
+  const okLog = wlog([{ content_hash: gHash, superseded_by: null, anchor: anchorOf(gHash) }], gHash);
+  const r1 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog), substrateVerify: final });
+  check('witness-confirmed lifts to HIGH automatically', r1.verdict.result === 'VALID:HIGH' && r1.resolution.noFork === 'witness-confirmed' && r1.verdict.publisher === 'wit-test.example');
+
+  const r2 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(null), substrateVerify: final });
+  check('witness unreachable = LIGHT + HIGH pending (never forged, W1)', r2.verdict.result === 'VALID:LIGHT' && r2.resolution.noFork.startsWith('HIGH pending'));
+
+  const forkLog = wlog([{ content_hash: gHash, superseded_by: null, anchor: anchorOf(gHash) }, { content_hash: 'sha256:' + 'ab'.repeat(32), superseded_by: null, anchor: anchorOf('sha256:' + 'ab'.repeat(32)) }], gHash);
+  const r3 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(forkLog), substrateVerify: final });
+  check('two anchored active genesis = fork = E-GENESIS', r3.verdict.result === 'INVALID' && r3.verdict.error === 'E-GENESIS');
+
+  const r4 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog), substrateVerify: () => ({ final: false }) });
+  check('anchor not final (Bitcoin pending) = no HIGH, honest pending', r4.verdict.result === 'VALID:LIGHT' && r4.resolution.noFork.startsWith('HIGH pending'));
+
+  const r5 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog) });   // no substrateVerify
+  check('no substrate cross-check = never witness-confirmed (anchor unproven)', r5.verdict.result === 'VALID:LIGHT');
+
+  const r6 = await P.resolveByDiscovery(doc, { context: 'data', noForkConfirmed: true }, { fetchImpl: mk(null) });
+  check('explicit --no-fork-confirmed still overrides (air-gap) without witness', r6.verdict.result === 'VALID:HIGH');
+}
+
 console.log('  ust-protocol ' + P.VERSION.spec + ' conformance vs ' + V.version);
 console.log('  PASS ' + pass + '   FAIL ' + fail + '   NOTES ' + note);
 if (fails.length) { console.log('\n  FAILURES:'); fails.forEach(f => console.log('    ✗ ' + f)); }
