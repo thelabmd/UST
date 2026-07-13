@@ -553,8 +553,8 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   const parsed = JSON.parse(wlog);
   check('witness_log_shape', parsed.domain_shard === DOMAIN && parsed.active === g.genHash && parsed.genesis_log[0].content_hash === g.genHash && parsed.genesis_log[0].superseded_by === null);
   check('witness_log_no_anchor_until_final', parsed.genesis_log[0].anchor === undefined);   // Ф1b attaches it
-  const wlogAnchored = JSON.parse(C.buildWitnessLog(bytes, { root: 'sha256:' + '11'.repeat(32), path: [], anchor: { substrate: 'bitcoin-ots' } }));
-  check('witness_log_carries_anchor_when_given', !!wlogAnchored.genesis_log[0].anchor);
+  const wlogAnchored = JSON.parse(C.buildWitnessLog(bytes, [{ root: 'sha256:' + '11'.repeat(32), path: [], anchor: { substrate: 'bitcoin-ots' } }]));
+  check('witness_log_carries_anchor_when_given', Array.isArray(wlogAnchored.genesis_log[0].anchors) && wlogAnchored.genesis_log[0].anchors.length === 1);
 
   const src = C.buildWorkerScript(bytes, JSON.stringify([g.keylog0]), wlog);
   check('worker_serves_witness_route', src.includes('/.well-known/ust-witness') && src.includes('const WITNESS ='));
@@ -568,6 +568,33 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   const liveLog = { domain_shard: DOMAIN, active: g.genHash, genesis_log: [{ content_hash: g.genHash, superseded_by: null, anchor: { root: anchorRoot, path: [], anchor: { substrate: 'bitcoin-ots' } } }] };
   const w = await P.witnessNoFork(DOMAIN, g.genHash, { fetchImpl: async () => ({ ok: true, text: async () => JSON.stringify(liveLog) }), substrateVerify: () => ({ final: true, time: '2026-07-13T14:05:00Z' }) });
   check('served_witness_log_confirms_via_protocol', w.status === 'confirmed');
+}
+
+// ── 21. Rekor witness (#68): the command shape + the RFC6962 right-edge fix (a fresh Rekor entry sits at
+// the tree's right edge — the naive inclusion check passed a deep entry by luck and FAILED the live one).
+{
+  const g = await C.buildCeremony({ domain: DOMAIN, profile: 'silver' });
+  const bytes = JSON.stringify(g.genesis);
+  // buildWitnessLog now takes anchors[] (several substrates accumulate)
+  const wl = JSON.parse(C.buildWitnessLog(bytes, [{ root: 'sha256:' + '11'.repeat(32), path: [], anchor: { substrate: 'rekor' } }, { root: 'sha256:' + '11'.repeat(32), path: [], anchor: { substrate: 'bitcoin-ots' } }]));
+  check('witness_log_carries_anchors_array', Array.isArray(wl.genesis_log[0].anchors) && wl.genesis_log[0].anchors.length === 2);
+  check('logToRekor_exported', typeof C.logToRekor === 'function');
+  const src = readFileSync(new URL('./index.mjs', import.meta.url), 'utf8');
+  check('witness_command_wired', src.includes('cmdWitness') && src.includes("witness: cmdWitness"));
+
+  // RFC6962 right-edge: synthetic 3-leaf tree, prove leaf 2 (index 2, size 3 → fn==sn edge case).
+  const { verifyInclusion } = await import('@ust-protocol/rekor-verify').catch(() => import('../ust-rekor-verify/index.mjs'));
+  const crypto = await import('node:crypto');
+  const H = (pfx, ...b) => crypto.createHash('sha256').update(Buffer.concat([Buffer.from([pfx]), ...b])).digest();
+  const l = [0, 1, 2].map((i) => H(0x00, Buffer.from([i])));
+  const n01 = H(0x01, l[0], l[1]);
+  const root = H(0x01, n01, l[2]);
+  const okEdge = verifyInclusion({ leafHash: l[2], index: 2, treeSize: 3, hashes: [n01.toString('hex')], rootHash: root.toString('hex') });
+  check('rfc6962_right_edge_inclusion_correct', okEdge === true);
+  // a left leaf (index 0) still verifies, and a wrong root fails
+  const okLeft = verifyInclusion({ leafHash: l[0], index: 0, treeSize: 3, hashes: [l[1].toString('hex'), l[2].toString('hex')], rootHash: root.toString('hex') });
+  check('rfc6962_left_leaf_inclusion_correct', okLeft === true);
+  check('rfc6962_wrong_root_fails', verifyInclusion({ leafHash: l[2], index: 2, treeSize: 3, hashes: [n01.toString('hex')], rootHash: 'aa'.repeat(32) }) === false);
 }
 
 console.log(`\nPASS ${pass} FAIL ${fail} NOTES ${note}`);

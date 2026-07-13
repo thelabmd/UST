@@ -21,22 +21,22 @@ const REKOR = 'https://rekor.sigstore.dev';
 const sha256 = (buf) => createHash('sha256').update(buf).digest();
 const hexToBytes = (h) => Buffer.from(h.replace(/^sha256:/, ''), 'hex');
 
-// RFC 6962 §2.1.1 inclusion-proof verification: recompute the tree root from the leaf + audit path.
-// leaf hash = SHA256(0x00 || entry_bytes); interior = SHA256(0x01 || left || right).
-function verifyInclusion({ leafHash, index, treeSize, hashes, rootHash }) {
+// RFC 6962 §2.1.1 inclusion-proof verification (canonical, incl. the right-edge while-shift — a naive
+// left/right test is WRONG for a leaf near the tree's right edge, where fn==sn). leaf = SHA256(0x00||entry),
+// interior = SHA256(0x01||left||right).
+export function verifyInclusion({ leafHash, index, treeSize, hashes, rootHash }) {
   if (index >= treeSize || index < 0) return false;
-  let hash = leafHash, fn = index, sn = treeSize - 1, i = 0;
+  let hash = leafHash, fn = index, sn = treeSize - 1;
   for (const sib of hashes.map(hexToBytes)) {
-    if (fn === sn && (fn & 1) === 0) { // last node at this level and left child → carry up
-      hash = sha256(Buffer.concat([Buffer.from([0x01]), hash, sib]));
-    } else if ((fn & 1) === 1) {       // right child
+    if (fn === sn || (fn & 1) === 1) {                 // right child, OR at the right edge → sibling on LEFT
       hash = sha256(Buffer.concat([Buffer.from([0x01]), sib, hash]));
-    } else {                            // left child
+      while (fn !== 0 && (fn & 1) === 0) { fn >>= 1; sn >>= 1; }   // climb past the right-edge run
+    } else {                                            // left child → sibling on RIGHT
       hash = sha256(Buffer.concat([Buffer.from([0x01]), hash, sib]));
     }
-    fn >>= 1; sn >>= 1; i++;
+    fn >>= 1; sn >>= 1;
   }
-  return hash.equals(hexToBytes(rootHash));
+  return fn === 0 && hash.equals(hexToBytes(rootHash));
 }
 
 export function makeSubstrateVerify({ fetchImpl = fetch, api = REKOR } = {}) {
@@ -60,10 +60,13 @@ export function makeSubstrateVerify({ fetchImpl = fetch, api = REKOR } = {}) {
     }
     if (!proof || !bodyB64) return { final: false, time: 'unproven' };
 
-    // the logged entry MUST attest THIS root — the genesis leaf-root must appear in the entry body
+    // the logged entry MUST attest THIS root. Convention (§17 rekor Locator): the artifact logged is the
+    // root's hex string (utf8); Rekor stores sha256(artifact) in the entry. Recompute and match — so an
+    // entry about someone else's digest cannot pass (claim ≠ proof).
     let body; try { body = Buffer.from(bodyB64, 'base64').toString('utf8'); } catch { return null; }
     const rootHex = root.replace(/^sha256:/, '');
-    if (!body.includes(rootHex)) return null;   // this Rekor entry is about someone else's digest
+    const artifactHash = createHash('sha256').update(Buffer.from(rootHex, 'utf8')).digest('hex');
+    if (!body.includes(artifactHash)) return null;   // this Rekor entry is not about our root
 
     const leafHash = sha256(Buffer.concat([Buffer.from([0x00]), Buffer.from(bodyB64, 'base64')]));
     const ok = verifyInclusion({ leafHash, index: proof.logIndex, treeSize: proof.treeSize, hashes: proof.hashes || [], rootHash: proof.rootHash });

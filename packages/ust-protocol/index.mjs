@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.15' };
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.16' };
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -606,6 +606,20 @@ export function isPublicDnsShard(shard) {
 // via opts.substrateVerify — the endpoint is only an index, the anchor is the independent truth). The
 // honesty ladder is §12.1 exactly: one anchored active genesis (== the one we resolved) ⇒ confirmed;
 // ≥2 anchored active ⇒ fork; unreachable / unanchored ⇒ pending (W1 — never a forged HIGH, never silence).
+// A genesis is "anchored" iff AT LEAST ONE of its anchors verifies: inclusion (sync Merkle) AND substrate
+// finality (async — Bitcoin/Rekor, so it MUST be awaited; the earlier sync path silently dropped every
+// real async plugin). `anchors[]` (several substrates) is the norm; a single `anchor` is accepted too.
+async function genesisAnchored(g, substrateVerify) {
+  const proofs = Array.isArray(g.anchors) ? g.anchors : (g.anchor ? [g.anchor] : []);
+  for (const proof of proofs) {
+    const incl = verifyAnchor(g.content_hash, proof);   // inclusion only (no substrateVerify → sync)
+    if (!incl.inclusion || !substrateVerify) continue;
+    const sub = await substrateVerify(proof.anchor, proof.root);
+    if (sub && sub.final) return true;                  // one independent substrate confirming is enough
+  }
+  return false;
+}
+
 export async function witnessNoFork(shard, genesisHash, { fetchImpl = fetch, substrateVerify } = {}) {
   let log;
   try {
@@ -615,16 +629,14 @@ export async function witnessNoFork(shard, genesisHash, { fetchImpl = fetch, sub
   } catch (e) { return { status: 'unreachable', detail: 'witness endpoint unreachable: ' + (e && e.message || e) }; }
   if (!log || log.domain_shard !== shard || !Array.isArray(log.genesis_log)) return { status: 'unreachable', detail: 'witness log malformed' };
   const active = log.genesis_log.filter((g) => g && !g.superseded_by && /^sha256:[0-9a-f]{64}$/.test(g.content_hash || ''));
-  const anchoredActive = active.filter((g) => {
-    const v = verifyAnchor(g.content_hash, g.anchor, { substrateVerify });
-    return v.inclusion && v.time === 'anchored';
-  });
+  const anchoredActive = [];
+  for (const g of active) if (await genesisAnchored(g, substrateVerify)) anchoredActive.push(g);
   if (anchoredActive.length >= 2) return { status: 'fork', detail: `${anchoredActive.length} anchored active genesis roots for ${shard} — a rival name-binding root exists` };
   if (anchoredActive.length === 1) {
     if (anchoredActive[0].content_hash !== genesisHash) return { status: 'fork', detail: `the anchored active genesis (${anchoredActive[0].content_hash.slice(0, 20)}…) differs from the one served at /.well-known/ust-genesis` };
-    return { status: 'confirmed', detail: 'a single Bitcoin-anchored active genesis — no rival root' };
+    return { status: 'confirmed', detail: 'a single anchored active genesis, cross-checked against its substrate — no rival root' };
   }
-  return { status: 'pending', detail: active.length ? 'genesis present in the witness log but its anchor is not final (Bitcoin) — no-fork not yet evidence' : 'no active genesis in the witness log' };
+  return { status: 'pending', detail: active.length ? 'genesis present in the witness log but no anchor is final yet (substrate) — no-fork not yet evidence' : 'no active genesis in the witness log' };
 }
 
 // Multi-substrate router (#68): a verifier may understand SEVERAL anchor substrates (Bitcoin-OTS, Rekor,

@@ -9,7 +9,7 @@
 import { createInterface } from 'node:readline/promises';
 import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createCipheriv, scryptSync, randomBytes } from 'node:crypto';
+import { createCipheriv, scryptSync, randomBytes, createHash, generateKeyPairSync, sign as edsign } from 'node:crypto';
 import * as P from 'ust-protocol';
 import * as W from '@ust-protocol/web-signer';
 
@@ -261,11 +261,30 @@ export function manualServingGuide(domain, outDir) {
 // The genesis-log for the witness endpoint (#68): the publisher's OWN append-only record of every genesis
 // for this name. Phase 1 carries the single active genesis; an anchor (Bitcoin OTS) is attached once its
 // stamp is final — until then a verifier honestly reports "HIGH pending" (it cannot cross-check yet).
-export function buildWitnessLog(genesisText, anchor = null) {
+export function buildWitnessLog(genesisText, anchors = null) {
   const g = JSON.parse(genesisText);
   const genHash = P.contentHash(g);
+  const list = anchors == null ? [] : (Array.isArray(anchors) ? anchors : [anchors]);
   return JSON.stringify({ domain_shard: g.state.id.domain_shard, active: genHash,
-    genesis_log: [{ content_hash: genHash, superseded_by: null, ...(anchor ? { anchor } : {}) }] });
+    genesis_log: [{ content_hash: genHash, superseded_by: null, ...(list.length ? { anchors: list } : {}) }] });
+}
+
+// Log a genesis leaf-root into Sigstore Rekor (a public transparency log) and return the rekor anchor.
+// The Rekor entry is signed by an EPHEMERAL key: the witness value is the immutable, timestamped INCLUSION
+// of the genesis leaf-root in a public log — NOT the identity of who logged it (that is the genesis's own
+// signature, resolved separately). Convention: the artifact is the root's hex string; Rekor stores its
+// sha256. Seconds, not Bitcoin's hours.
+export async function logToRekor(rootHex, { fetchImpl = fetch, api = 'https://rekor.sigstore.dev' } = {}) {
+  const artifact = Buffer.from(rootHex.replace(/^sha256:/, ''), 'utf8');
+  const hash = createHash('sha256').update(artifact).digest('hex');
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  const signature = edsign('sha256', artifact, privateKey).toString('base64');
+  const pem = publicKey.export({ type: 'spki', format: 'pem' });
+  const body = { apiVersion: '0.0.1', kind: 'hashedrekord', spec: { data: { hash: { algorithm: 'sha256', value: hash } }, signature: { content: signature, publicKey: { content: Buffer.from(pem).toString('base64') } } } };
+  const r = await fetchImpl(`${api}/api/v1/log/entries`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error('Rekor POST failed: HTTP ' + r.status + ' ' + (await r.text()).slice(0, 120));
+  const entry = Object.values(await r.json())[0];
+  return { substrate: 'rekor', logIndex: entry.logIndex, body: entry.body, inclusionProof: entry.verification.inclusionProof, integratedTime: entry.integratedTime };
 }
 
 export function buildWorkerScript(genesisText, keylogText = null, witnessText = null) {
@@ -1044,6 +1063,45 @@ async function cmdMirror() {
   process.exit(m.failed || a.verdict === 'FAILED' ? 1 : a.verdict === 'PARTIAL' ? 2 : 0);
 }
 
+// ─── ust witness rekor <domain> — register the genesis in a transparency log (no-fork evidence, #68) ──
+async function cmdWitness() {
+  const provider = process.argv[3];
+  if (provider !== 'rekor') die('usage: ust witness rekor --domain <d> [--deploy]\n  logs your genesis leaf-root into Sigstore Rekor (a public transparency log) so a verifier can confirm\n  no-fork automatically — seconds, not Bitcoin hours. --deploy also updates the live witness endpoint (CF).');
+  const domain = arg('domain'); if (!domain || domain === true) die('--domain is required');
+
+  console.log('\n  🔭 witness (rekor) for ' + domain);
+  let genesisText; try { genesisText = await fetch(`https://${domain}/.well-known/ust-genesis`, { signal: AbortSignal.timeout(10000) }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); }); }
+  catch (e) { die('could not fetch the live genesis: ' + e.message + ' — run `ust genesis` / `ust publish cf` first'); }
+  const { verdict, doc: genesis } = verifyRaw(genesisText);
+  if (!P.isValid(verdict) || genesis.state?.id?.class !== 'genesis') die('the served well-known is not a valid genesis');
+  const genHash = P.contentHash(genesis);
+  const leafRoot = P.Hbytes('ust:leaf', Buffer.from(genHash, 'utf8'));
+  console.log('  genesis ' + genHash);
+
+  console.log('  ⏳ logging the genesis leaf-root into Sigstore Rekor…');
+  let rekor; try { rekor = await logToRekor(leafRoot); } catch (e) { die(e.message); }
+  console.log('  ✅ Rekor logIndex ' + rekor.logIndex + '  ·  integratedTime ' + new Date(rekor.integratedTime * 1000).toISOString().slice(0, 19) + 'Z');
+  const anchor = { root: leafRoot, path: [], anchor: rekor };
+
+  // merge with any anchors already served (e.g. a Bitcoin one) so substrates ACCUMULATE, never replace
+  let existing = [];
+  try { const wl = await fetch(`https://${domain}/.well-known/ust-witness`, { signal: AbortSignal.timeout(8000) }).then((r) => r.ok ? r.json() : null); const g0 = wl?.genesis_log?.find((x) => x.content_hash === genHash); existing = g0?.anchors ?? (g0?.anchor ? [g0.anchor] : []); } catch { /* none yet */ }
+  const merged = [...existing.filter((a) => (a.anchor?.substrate ?? a.substrate) !== 'rekor'), anchor];
+  const witness = buildWitnessLog(genesisText, merged);
+
+  if (arg('deploy', false)) {
+    console.log('  ⏳ updating the live witness endpoint (CF worker)…');
+    let keylogText = null; try { keylogText = await fetch(`https://${domain}/.well-known/ust-keylog`, { signal: AbortSignal.timeout(8000) }).then((r) => r.ok ? r.text() : null); } catch { /* ok */ }
+    try { await wranglerDeploy({ domain, genesisText, keylogText, witnessText: witness }); } catch (e) { die('deploy failed: ' + e.message + '\n  (the anchor is logged in Rekor; re-run --deploy or update the endpoint by hand)'); }
+    console.log('  ✅ witness endpoint updated — verifiers with @ust-protocol/rekor-verify now confirm no-fork automatically');
+    console.log('     re-attest:  npx @ust-protocol/cli verify <slot>   (install ots-verify + rekor-verify)');
+  } else {
+    console.log('\n  witness-log built (NOT deployed — pass --deploy to update the CF endpoint, or publish it yourself):');
+    console.log('  ' + witness);
+  }
+  process.exit(0);
+}
+
 // ─── ust genesis --domain <d> [--profile] [--dns] — the ceremony (#37), orchestrating the core above ──
 async function cmdGenesis() {
   const domain = arg('domain'); if (!domain || domain === true) die('usage: ust genesis --domain <name> [--profile bronze|silver|gold] [--dns manual|cf-api] [--publish cf [--auth wrangler] [--flip-proxy]] [--signer <ref>] [--witness url,url] [--max-partitions N] [--out .]\n  every option is also asked INTERACTIVELY — the flags only preselect');
@@ -1267,7 +1325,7 @@ async function cmdGenesis() {
 const isMain = (() => { try { return process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; } })();
 if (isMain) {
   const cmd = process.argv[2];
-  const run = { verify: cmdVerify, canon: cmdCanon, genesis: cmdGenesis, discovery: cmdDiscovery, publish: cmdPublish, mirror: cmdMirror, stream: cmdStream }[cmd];
-  if (!run) { console.error('ust — verify machine-readable state\n\n  ust verify <file|->        verify a transcript (exit 0 = VALID, 1 = not)\n  ust canon  <file|->        print canonical bytes + hash (cross-language diff)\n  ust genesis --domain <d>   run the HIGH genesis ceremony (add --publish cf for one-click serving)\n  ust discovery <domain>     attest the §20.1 serving contract (any infra)\n  ust publish cf --domain <d> --genesis <f>   deploy the CF serving adapter for an existing genesis\n  ust mirror <domain>        publish + attest a SECOND-vendor mirror (§20.1 vendor-independence)\n  ust stream <frames…>       RANGE verdict: chain · forks · completeness (needs --checkpoint for proven)\n'); process.exit(cmd ? 1 : 0); }
+  const run = { verify: cmdVerify, canon: cmdCanon, genesis: cmdGenesis, discovery: cmdDiscovery, publish: cmdPublish, mirror: cmdMirror, stream: cmdStream, witness: cmdWitness }[cmd];
+  if (!run) { console.error('ust — verify machine-readable state\n\n  ust verify <file|->        verify a transcript (exit 0 = VALID, 1 = not)\n  ust canon  <file|->        print canonical bytes + hash (cross-language diff)\n  ust genesis --domain <d>   run the HIGH genesis ceremony (add --publish cf for one-click serving)\n  ust discovery <domain>     attest the §20.1 serving contract (any infra)\n  ust publish cf --domain <d> --genesis <f>   deploy the CF serving adapter for an existing genesis\n  ust mirror <domain>        publish + attest a SECOND-vendor mirror (§20.1 vendor-independence)\n  ust stream <frames…>       RANGE verdict: chain · forks · completeness (needs --checkpoint for proven)\n  ust witness rekor --domain <d>   log the genesis in a transparency log → automatic no-fork (#68)\n'); process.exit(cmd ? 1 : 0); }
   run().catch((e) => die(e.message || String(e)));
 }
