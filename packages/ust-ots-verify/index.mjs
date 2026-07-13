@@ -79,6 +79,10 @@ export function makeSubstrateVerify({ upgrade = true, fetchImpl = fetch, explore
     // seam. This plugin is honest about its ceiling; a reachable explorer that DISAGREES on the merkle root is a
     // definitive NO.
     const need = Math.max(1, Math.min(quorum, explorers.length));
+    // #71-followup P1 — query ALL configured explorers BEFORE deciding: a disagreement by a LATER source must
+    // still count (early-returning on quorum could miss it). ANY reachable source that disagrees on the merkle
+    // root is a DEFINITIVE NO, even if others agree. And a quorum of ONE is NOT `corroborated` — it is a single
+    // trusted oracle, honestly labelled `explorer-single`.
     let agree = 0, time = null, conflict = false;
     for (const base of explorers) {
       try {
@@ -86,16 +90,16 @@ export function makeSubstrateVerify({ upgrade = true, fetchImpl = fetch, explore
         if (!/^[0-9a-f]{64}$/.test(hash)) continue;
         const blk = await (await fetchImpl(`${base}/block/${hash}`, { signal: AbortSignal.timeout(10000) })).json();
         if (!blk || typeof blk.merkle_root !== 'string') continue;
-        if (blk.merkle_root !== wantMerkle) { conflict = true; break; }        // an independent source DISAGREES → NO
+        if (blk.merkle_root !== wantMerkle) { conflict = true; continue; }     // an independent source DISAGREES — keep querying, but this is a NO
         const tip = Number((await (await fetchImpl(`${base}/blocks/tip/height`, { signal: AbortSignal.timeout(10000) })).text()).trim());
         if (!Number.isFinite(tip) || tip - parsed.height + 1 < minConfirmations) continue;   // this source lags on burial → don't count
         agree++;
-        time = blk.timestamp ? new Date(blk.timestamp * 1000).toISOString().slice(0, 19) + 'Z' : 'bitcoin-block-' + parsed.height;
-        if (agree >= need) return { final: true, time, assurance: 'explorer-corroborated', explorers: agree };
+        time = time || (blk.timestamp ? new Date(blk.timestamp * 1000).toISOString().slice(0, 19) + 'Z' : 'bitcoin-block-' + parsed.height);
       } catch { /* explorer unreachable — try the next */ }
     }
-    if (conflict) return { final: false, time: 'unproven' };                   // a real merkle conflict
-    return { final: false, time: 'unproven', detail: `only ${agree}/${need} independent explorers corroborated` };
+    if (conflict) return { final: false, time: 'unproven' };                   // ANY reachable disagreement → definitive NO
+    if (agree < need) return { final: false, time: 'unproven', detail: `only ${agree}/${need} independent explorers corroborated` };
+    return { final: true, time, assurance: need >= 2 ? 'explorer-corroborated' : 'explorer-single', explorers: agree };
   };
 }
 

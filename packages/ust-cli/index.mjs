@@ -1014,7 +1014,10 @@ async function cmdStream() {
   // force at the interval; without it the genesis cadence (if any) is used.
   const clRaw = arg('cadence-log', null);
   const cadenceLog = (clRaw && clRaw !== true) ? clRaw.split(',').map((f) => { const { verdict, doc } = verifyRaw(readFileSync(f.trim())); if (!P.isValid(verdict)) die(`--cadence-log entry ${f} does not VERIFY (${verdict.error ?? verdict.result})`); return doc; }) : undefined;
-  const r = P.verifyStream(frames, { ...(genesis ? { genesis } : {}), ...(checkpoint ? { checkpoint } : {}), ...(cadenceLog ? { cadenceLog } : {}) });
+  // the key-log AUTHORIZES the cadence-log (a cadence change must be signed by a genesis/key-log key). Comma-sep.
+  const klsRaw = arg('keylog', null);
+  const keylog = (klsRaw && klsRaw !== true) ? klsRaw.split(',').map((f) => { const { verdict, doc } = verifyRaw(readFileSync(f.trim())); if (!P.isValid(verdict)) die(`--keylog entry ${f} does not VERIFY (${verdict.error ?? verdict.result})`); return doc; }) : undefined;
+  const r = P.verifyStream(frames, { ...(genesis ? { genesis } : {}), ...(keylog ? { keylog } : {}), ...(checkpoint ? { checkpoint } : {}), ...(cadenceLog ? { cadenceLog } : {}) });
   if (r.error) { console.log(`  ❌ stream BROKEN: ${r.error}${r.detail ? ' — ' + r.detail : ''}`); process.exit(1); }
   console.log('  frames      ' + frames.length);
   console.log('  authority   ' + (frames[0]?.state?.id?.domain_shard ?? '?') + (genesis ? '  (origin: genesis-bound)' : '  (origin: unbound — no --genesis)'));

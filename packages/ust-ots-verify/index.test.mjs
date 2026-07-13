@@ -17,11 +17,11 @@ const mockExplorer = ({ merkle = F.merkle_root, tip = F.height + 100 } = {}) =>
     throw new Error('unexpected ' + u);
   });
 
-test('real genesis .ots + honest explorer → final:true, labelled explorer-corroborated (not trustless)', async () => {
+test('real genesis .ots + a SINGLE explorer → final:true but labelled explorer-single (#71-followup: 1 ≠ corroborated)', async () => {
   const sv = makeSubstrateVerify({ fetchImpl: mockExplorer(), explorers: ['x'] });
   const r = await sv({ substrate: 'bitcoin-ots', ots: F.ots }, F.root);
   assert.equal(r.final, true);
-  assert.equal(r.assurance, 'explorer-corroborated');   // #71 — honest about the trust model
+  assert.equal(r.assurance, 'explorer-single');   // one source is a trusted oracle, honestly labelled
 });
 
 // a per-base mock: explorer A honest, explorer B configurable (merkle mismatch / unreachable).
@@ -35,9 +35,33 @@ const mock2 = ({ bMerkle = F.merkle_root, bDown = false } = {}) => (async (url) 
   throw new Error('unexpected ' + u);
 });
 
-test('#71 — 2-of-2 independent explorers AGREE → final (quorum met)', async () => {
+test('#71 — 2-of-2 independent explorers AGREE → final, labelled explorer-corroborated', async () => {
   const sv = makeSubstrateVerify({ fetchImpl: mock2(), explorers: ['A', 'B'], quorum: 2 });
-  assert.equal((await sv({ substrate: 'bitcoin-ots', ots: F.ots }, F.root)).final, true);
+  const r = await sv({ substrate: 'bitcoin-ots', ots: F.ots }, F.root);
+  assert.equal(r.final, true);
+  assert.equal(r.assurance, 'explorer-corroborated');
+});
+
+// a per-base mock for THREE explorers — A/B honest, C configurable (a LATE disagreement).
+const mock3 = ({ cMerkle = F.merkle_root } = {}) => (async (url) => {
+  const u = String(url), isC = u.startsWith('C/');
+  const merkle = isC ? cMerkle : F.merkle_root;
+  if (u.endsWith(`/block-height/${F.height}`)) return { text: async () => F.hash };
+  if (u.endsWith(`/block/${F.hash}`)) return { json: async () => ({ merkle_root: merkle, timestamp: F.timestamp }) };
+  if (u.endsWith('/blocks/tip/height')) return { text: async () => String(F.height + 100) };
+  throw new Error('unexpected ' + u);
+});
+
+test('#71-followup P1 — A agree, B agree, C DISAGREE → NOT final (a late conflict is queried, not skipped)', async () => {
+  const sv = makeSubstrateVerify({ fetchImpl: mock3({ cMerkle: '22'.repeat(32) }), explorers: ['A', 'B', 'C'], quorum: 2 });
+  assert.equal((await sv({ substrate: 'bitcoin-ots', ots: F.ots }, F.root)).final, false);   // quorum met by A+B, but C's conflict is definitive
+});
+
+test('#71-followup P1 — quorum:1 → assurance explorer-single (never corroborated for one source)', async () => {
+  const sv = makeSubstrateVerify({ fetchImpl: mock2(), explorers: ['A', 'B'], quorum: 1 });
+  const r = await sv({ substrate: 'bitcoin-ots', ots: F.ots }, F.root);
+  assert.equal(r.final, true);
+  assert.equal(r.assurance, 'explorer-single');
 });
 
 test('#71 — a second explorer DISAGREES on the merkle root → NOT final (definitive conflict)', async () => {

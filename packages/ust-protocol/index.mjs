@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.22' };
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.23' };
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -461,23 +461,17 @@ function walkReferents(st, opts, depth, visited, budget) {
   return { depth: reached, referents: sawUnresolved ? 'partial' : 'verified' };
 }
 
-// ─── §12 HIGH name-authority resolution. STATELESS: the caller (ustate/engine) supplies the genesis +
-//     key-log transcripts (retrieval is the stateful layer's job) and asserts no-fork from the witness (W1).
-export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, corroborated = false, anchorTime } = {}) {
-  if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
+// §12.2 — the SHARED key-log walk (genesis self-signed root + prev-chained entries each signed by a CURRENT
+// valid key). Returns { validKeys: Map<key_id,pub>, revoked: Map } or { error, detail }. Used by BOTH
+// resolveAuthority (name authority) AND resolveCadence — a cadence-log entry MUST be signed by an AUTHORIZED
+// key (not any LIGHT doc with the same domain_shard), the P0 the cadence-log missed.
+export function resolveKeys(genesis, keylog = []) {
+  if (!genesis) return { error: 'E-GENESIS', detail: 'no genesis' };
   const gv = verify(genesis);                                                     // genesis is itself a UST transcript
   if (!isValid(gv)) return { error: 'E-GENESIS', detail: 'genesis invalid: ' + gv.error };
   if (genesis.state.id.class !== 'genesis') return { error: 'E-GENESIS', detail: 'not class:genesis' };
   if (genesis.sig.key_id !== genesis.state.id.key_id) return { error: 'E-GENESIS', detail: 'genesis not self-signed' };
-  if (genesis.state.id.domain_shard !== doc.state.id.domain_shard) return { error: 'E-GENESIS', detail: 'genesis domain mismatch' };
   if (keylog.length > 256) return { error: 'E-BOUNDS', detail: 'key-log > 256 (§13)' };
-  // rc.12: surface the ceremony-declared CAPACITY so callers can pass it as opts.capacity to verify()
-  // once authority is established — the grant flows FROM resolution, never from a raw genesis.
-  const gvCap = genesis.state?.data?.genesis?.value ?? {};
-  const capacity = {
-    ...(gvCap.max_partitions !== undefined ? { maxPartitions: Number(gvCap.max_partitions) } : {}),
-    ...(gvCap.max_transcript_bytes !== undefined ? { maxTranscriptBytes: Number(gvCap.max_transcript_bytes) } : {}),
-  };
   let prevHash = contentHash(genesis);
   // key_id is DERIVED from the pub (H(ust:keylog,pub)), never a free string — authority binds the KEY, not a label.
   const validKeys = new Map([[genesis.state.id.key_id, genesis.sig.pub]]);         // key_id → pub
@@ -500,6 +494,24 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
     }
     prevHash = contentHash(e);
   }
+  return { validKeys, revoked };
+}
+
+// ─── §12 HIGH name-authority resolution. STATELESS: the caller (ustate/engine) supplies the genesis +
+//     key-log transcripts (retrieval is the stateful layer's job) and asserts no-fork from the witness (W1).
+export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, corroborated = false, anchorTime } = {}) {
+  if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
+  if (genesis.state?.id?.domain_shard !== doc.state.id.domain_shard) return { error: 'E-GENESIS', detail: 'genesis domain mismatch' };
+  const rk = resolveKeys(genesis, keylog);
+  if (rk.error) return { error: rk.error, detail: rk.detail };
+  const { validKeys, revoked } = rk;
+  // rc.12: surface the ceremony-declared CAPACITY so callers can pass it as opts.capacity to verify()
+  // once authority is established — the grant flows FROM resolution, never from a raw genesis.
+  const gvCap = genesis.state?.data?.genesis?.value ?? {};
+  const capacity = {
+    ...(gvCap.max_partitions !== undefined ? { maxPartitions: Number(gvCap.max_partitions) } : {}),
+    ...(gvCap.max_transcript_bytes !== undefined ? { maxTranscriptBytes: Number(gvCap.max_transcript_bytes) } : {}),
+  };
   // authority is granted ONLY if the doc's key_id maps to the doc's ACTUAL signing pub (binding, not membership).
   if (validKeys.get(doc.state.id.key_id) !== doc.sig.pub)
     return { strength: 'self-asserted', status: 'verified', detail: 'doc key not bound in this key-log' };
@@ -599,22 +611,34 @@ export function ustGrid(from, to, cadenceSec) {
 // key-log pattern applied to cadence: a signed, prev-chained sequence of changes). Old data verifies under the
 // cadence signed for ITS time, so an operator changing cadence NEVER retroactively invalidates history. Each
 // entry is a normal transcript, verified by §14; the log is genesis-rooted and prev-chained. → {cadence}|{error}.
-export function resolveCadence(genesis, cadenceLog = [], atTime) {
-  let cadence = Number(genesis?.state?.data?.genesis?.value?.cadence) || null;
+export function resolveCadence(genesis, cadenceLog = [], atTime, { keylog } = {}) {
+  let cadence = Number(genesis?.state?.data?.genesis?.value?.cadence) || null;     // the genesis value is authorized by construction (self-signed)
   if (!Array.isArray(cadenceLog) || !cadenceLog.length) return { cadence };
   if (cadenceLog.length > 256) return { error: 'E-BOUNDS', detail: 'cadence-log > 256 (§13)' };
+  // #71-followup P0 — a cadence CHANGE is an OPERATOR AUTHORITY parameter, not "any LIGHT doc with the same
+  // domain_shard". Resolve the authorized key set ONCE (genesis + key-log) and reject an entry signed OUTSIDE
+  // it. Without the key-log only the genesis key can authorize a change (fail-closed, not fail-open).
+  const rk = resolveKeys(genesis, Array.isArray(keylog) ? keylog : []);
+  if (rk.error) return { error: rk.error, detail: 'cadence authority: ' + rk.detail };
+  const authorized = new Set(rk.validKeys.values());
   const atE = ustToEpoch(atTime);
-  let prev = contentHash(genesis);
+  let prev = contentHash(genesis), lastEff = null;
   for (const [i, e] of cadenceLog.entries()) {
     const ev = verify(e, { context: 'key' });
     if (!isValid(ev)) return { error: 'E-KEY', detail: 'cadence entry ' + i + ' invalid: ' + (ev.error || ev.result) };
     if (e.state.id.class !== 'cadence') return { error: 'E-MALFORMED', detail: 'cadence-log entry ' + i + ' not class:cadence' };
     if (e.state.id.domain_shard !== genesis.state.id.domain_shard) return { error: 'E-AUTHORITY', detail: 'cadence entry ' + i + ' domain mismatch' };
     if (e.state.provenance?.prev !== prev) return { error: 'E-PREV', detail: 'cadence entry ' + i + ' not chained' };
+    if (!authorized.has(e.sig.pub)) return { error: 'E-KEY', detail: 'cadence entry ' + i + ' NOT signed by an authorized key (§12.2)' };   // ← the P0 fix
+    const revd = rk.revoked.get(keyId(e.sig.pub));
+    if (revd && revd.reason === 'compromised') return { error: 'E-KEY', detail: 'cadence entry ' + i + ' signed by a COMPROMISED key' };
     const op = e.state.data.cadence_op.value;
     const effE = ustToEpoch(op.effective_from);
-    if (effE !== null && atE !== null && effE <= atE) cadence = Number(op.cadence);   // latest change in force at atTime wins
-    prev = contentHash(e);
+    if (effE === null) return { error: 'E-MALFORMED', detail: 'cadence entry ' + i + ' bad effective_from' };
+    if (lastEff !== null && effE < lastEff) return { error: 'E-PREV', detail: 'cadence effective_from not monotonic (entry ' + i + ')' };
+    if (!(Number(op.cadence) > 0)) return { error: 'E-MALFORMED', detail: 'cadence entry ' + i + ' cadence not a positive integer' };
+    if (atE !== null && effE <= atE) cadence = Number(op.cadence);                 // latest change in force at atTime wins
+    lastEff = effE; prev = contentHash(e);
   }
   return { cadence };
 }
@@ -623,7 +647,7 @@ export function resolveCadence(genesis, cadenceLog = [], atTime) {
 //     (M4); per-frame validity is verified too (X2 — completeness ≠ validity); duplicate ust_id / shared prev
 //     = a fork ⇒ E-PREV (Y1). A covering checkpoint (M5) proves 'chain-consistent' (no-deletion); the open tail
 //     is 'provisional'. 'complete' (no-omission, needs the signed-cadence grid, F.4) is a future rung (#69 C).
-export function verifyStream(frames, { genesis, checkpoint, cadenceLog, requirePerFrameValid = true } = {}) {
+export function verifyStream(frames, { genesis, keylog, checkpoint, cadenceLog, requirePerFrameValid = true } = {}) {
   if (!Array.isArray(frames) || !frames.length) return { complete: 'none' };
   let prevHash = genesis ? contentHash(genesis) : null;
   const authority = frames[0].state.id.domain_shard;                   // §11.3: a stream belongs to ONE authority
@@ -658,6 +682,11 @@ export function verifyStream(frames, { genesis, checkpoint, cadenceLog, requireP
     if (!isValid(cv) || checkpoint.state.id.class !== 'attestation') return { error: 'E-PREV', detail: 'invalid checkpoint' };
     if (checkpoint.state.id.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'checkpoint not from the stream authority (' + authority + ') — TOP completeness cannot cross authority' };
     const a = checkpoint.state.data.checkpoint?.value;
+    // NOTE (honest scope) — with a genesis, `frame_count === frames.length` + `first frame.prev === genesis`
+    // means this verifies the ORIGIN-TO-CHECKPOINT PREFIX (the interval's `from` MUST be the stream's first
+    // frame), not an arbitrary middle `[from,to]`. A true middle-range verdict needs a PREVIOUS checkpoint and a
+    // cumulative-count DELTA (currentCount − previousCount === frames.length) — a tracked follow-up, not silently
+    // assumed here. The `complete`/`chain-consistent` verdict below is over this prefix.
     if (!a || a.head !== prevHash || String(a.frame_count) !== String(frames.length))
       return { error: 'E-PREV', detail: 'checkpoint contradicts observed set (M5)' };
     // #69 C — no-deletion is proven. no-OMISSION needs the EXPECTED GRID: the operator's SIGNED cadence
@@ -672,7 +701,7 @@ export function verifyStream(frames, { genesis, checkpoint, cadenceLog, requireP
       for (const f of frames) { const e = ustToEpoch(f.state.id.ust_id); if (e === null || fromE === null || toE === null || e < fromE || e > toE) return { error: 'E-PREV', detail: 'frame ' + f.state.id.ust_id + ' outside the checkpoint interval [' + a.from + ',' + a.to + ']' }; }
       // continuity — resolve the cadence at BOTH ends; a change inside the interval means the grid is not uniform,
       // so the interval must be SPLIT at the boundary (old data stays complete under its own cadence). Never invalidate.
-      const cF = resolveCadence(genesis, cadenceLog, a.from), cT = resolveCadence(genesis, cadenceLog, a.to);
+      const cF = resolveCadence(genesis, cadenceLog, a.from, { keylog }), cT = resolveCadence(genesis, cadenceLog, a.to, { keylog });
       if (cF.error) return { error: cF.error, detail: 'cadence: ' + cF.detail };
       if (cT.error) return { error: cT.error, detail: 'cadence: ' + cT.detail };
       if (cF.cadence !== cT.cadence) return { complete: 'chain-consistent', head: prevHash, detail: 'interval crosses a cadence change — split it at the boundary; each side is `complete` under its own cadence (continuity)' };

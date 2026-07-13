@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.22`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.23`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -18,7 +18,7 @@ graduated tiers (LIGHT / HIGH / TOP, §3.1). Every mechanism below serves that s
 judged by ONE question — *how much trust does this actually earn, and does the protocol say so honestly?* A
 tier must never let a consumer read "signed" as "true," "anchored" as "correct," or "agreeing" as "independent."
 
-Status: **Normative specification — 1.0 REV 33 (2026-07-13).** The SECURELY-STRUCTURED (namespaced) base that
+Status: **Normative specification — 1.0 REV 34 (2026-07-13).** The SECURELY-STRUCTURED (namespaced) base that
 closed all red-team findings STRUCTURALLY (I3 collision unrepresentable, I1 whole-State signature by
 construction, no stored-hash footgun), with ALL v0.29 FEATURES merged IN (not a flat-wire revert): per-partition
 captured/computed hashing (cross-engine corroboration for computed parts), `parent_ust` (hour-close timing),
@@ -671,8 +671,14 @@ Absent a signed cadence in the verifier's information set the range verdict is `
 **Concrete format (normative).** The cadence is a string integer of SECONDS, RESOLVED at a slot's time from
 `genesis.value.cadence` (the initial value) plus an optional **cadence-log** — a genesis-rooted, `prev`-chained
 sequence of `class:"cadence"` transcripts, each carrying `cadence_op {cadence, effective_from}`, exactly the
-key-log pattern (§12.2) applied to the stream cadence. `resolveCadence(genesis, cadence_log, t)` returns the
-cadence in force at `t` (the latest `effective_from ≤ t`). The checkpoint carries `from` and `to` (the
+key-log pattern (§12.2) applied to the stream cadence. `resolveCadence(genesis, cadence_log, t, {keylog})`
+returns the cadence in force at `t` (the latest `effective_from ≤ t`). **A cadence entry is an OPERATOR
+AUTHORITY parameter, not "any signed document with the same `domain_shard`": each MUST be signed by an
+AUTHORIZED key — the genesis key or a key resolved from the key-log (the SAME `AuthorizedKeySet` as §12.2), with
+`effective_from` monotonic and `cadence` a positive integer.** An entry signed OUTSIDE the key set ⇒ E-KEY (else
+a transport/caller could inject a self-signed cadence change and hide omitted slots — the whole point of a
+signed cadence is that ONLY the operator can move the grid). Without the key-log only the genesis key authorizes
+a change (fail-CLOSED). The checkpoint carries `from` and `to` (the
 interval's first and last `ust_id`) in its `checkpoint` value. The verifier computes `G` deterministically from
 `(from, to, cadence)` at the precision the cadence implies (a multiple of 3600 s ⇒ hour, of 60 s ⇒ minute, else
 second) and requires every `g ∈ G` be covered by a frame or a gap.
@@ -1518,6 +1524,17 @@ provenance and will be lifted into this ledger when the spec is published.
   `assurance` field on the time report says HOW it was verified (`explorer-corroborated` here; an operator's
   real-node/SPV plugin, injected through the SAME `substrateVerify` seam, would report `bitcoin-node`). The tier
   is never inflated by the trust model — the same claim=proof discipline as `corroborated` on the name axis.
+- **REV 34 (2026-07-13)** — a P0 in the JUST-shipped cadence-log (a fresh audit of rc.22 caught it): the
+  authority hole. `resolveCadence` verified an entry was LIGHT-valid + same domain + `prev`-chained, but NOT
+  that its SIGNER was an authorized key — so any self-signed doc with the right `domain_shard` could move the
+  grid and hide omitted slots. Fixed by a SHARED `resolveKeys` (the §12.2 key-log walk, now reused by both
+  `resolveAuthority` and `resolveCadence`): a cadence entry MUST be signed by the genesis key or a key-log key,
+  `effective_from` monotonic, `cadence` a positive integer; else E-KEY (reproduced). Two fresh-audit P1s too:
+  `@ust-protocol/ots-verify` now queries ALL configured explorers BEFORE deciding (a LATE disagreement is no
+  longer skipped by an early quorum return; any reachable disagreement is a definitive NO) and labels a
+  single-source result `explorer-single`, reserving `explorer-corroborated` for ≥2; and `verifyStream`'s
+  origin-to-checkpoint PREFIX scope is documented honestly (a true middle-`[from,to]` range needs a previous
+  checkpoint + cumulative-count delta — a tracked follow-up, not silently assumed).
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

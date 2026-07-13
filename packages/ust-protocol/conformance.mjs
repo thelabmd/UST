@@ -444,6 +444,12 @@ console.log('\n═════════════════════�
   const x0 = fr('ust:20260628.142900', gH), x1 = fr('ust:20260628.142930', P.contentHash(x0)), x2 = fr('ust:20260628.143000', P.contentHash(x1));
   check('continuity: interval crossing a cadence change → chain-consistent (split), never invalid', P.verifyStream([x0, x1, x2], { genesis: gen, checkpoint: cpI(P.contentHash(x2), 3, P.contentHash(x2), 'ust:20260628.142900', 'ust:20260628.143000'), cadenceLog: [ce] }).complete === 'chain-consistent');
   check('cadence entry is a valid class:cadence transcript (key context) but E-MALFORMED in data context (W3)', (() => { const v = P.verify(ce, { context: 'key' }); const d = P.verify(ce, { context: 'data' }); return v.result === 'VALID:LIGHT' && d.error === 'E-MALFORMED'; })());
+  // audit P0 (cadence authority) — a cadence entry signed by an UNAUTHORIZED key (LIGHT-valid, same domain, real
+  // prev) must be REJECTED, not accepted; else a transport/caller could change the grid and hide holes.
+  { const EV = kp('e7'.repeat(32)); const evilCad = P.seal(P.buildCadenceEntry({ domain_shard: dom, ust_id: 'ust:20260628.1429', key_id: EV.key_id }, Tc, 60, 'ust:20260628.143000', gH), EV.priv, EV.pubB64);
+    check('audit P0: cadence entry by an UNAUTHORIZED key → E-KEY (not a silent grid change)', P.resolveCadence(gen, [evilCad], 'ust:20260628.143000', { keylog: [] }).error === 'E-KEY');
+    check('audit P0: verifyStream with an unauthorized cadence-log → error, never complete', P.verifyStream([o0, o1], { genesis: gen, checkpoint: cpI(P.contentHash(o1), 2, P.contentHash(o1), 'ust:20260628.142900', 'ust:20260628.142930'), cadenceLog: [evilCad] }).error === 'E-KEY'); }
+  check('cadence by the GENESIS key is authorized without a key-log (self-signed authority)', P.resolveCadence(gen, [ce], 'ust:20260628.143000').cadence === 60);
   // rc.20-audit P1 — no `mapInclusion:true` boolean shortcut to authoritative (would be an unverified proof).
   check('audit P1: mapInclusion:true does NOT grant authoritative (no map verifier yet)', P.resolveAuthority(gen, { genesis: gen, keylog: [], mapInclusion: true }).strength !== 'authoritative');
 }
