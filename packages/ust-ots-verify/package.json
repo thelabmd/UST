@@ -1,15 +1,37 @@
 {
   "name": "@ust-protocol/ots-verify",
-  "version": "1.0.0-rc.3",
-  "description": "Opt-in Bitcoin (OpenTimestamps) substrateVerify for UST anchors — the cross-check ust-protocol takes as an injection, so the zero-dep verifier never embeds a blockchain. #68 witness / TOP time.",
+  "version": "1.0.0-rc.4",
+  "description": "Opt-in Bitcoin/OpenTimestamps substrateVerify for UST anchors — cross-checks a genesis/hour root against a REAL Bitcoin block header + >=6 confirmations. #68 witness / #69 A2.",
   "type": "module",
   "main": "index.mjs",
   "exports": "./index.mjs",
-  "files": ["index.mjs", "LICENSE", "README.md"],
-  "keywords": ["ust", "opentimestamps", "bitcoin", "anchor", "substrate-verify", "witness"],
+  "files": [
+    "index.mjs",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "ust",
+    "opentimestamps",
+    "bitcoin",
+    "anchor",
+    "substrate-verify",
+    "witness"
+  ],
   "license": "Apache-2.0",
-  "engines": { "node": ">=20" },
-  "dependencies": { "opentimestamps": "^0.4.9" },
-  "repository": { "type": "git", "url": "git+https://github.com/thelabmd/UST-Protocol.git", "directory": "packages/ust-ots-verify" },
-  "homepage": "https://github.com/thelabmd/UST-Protocol/tree/main/packages/ust-ots-verify#readme"
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "opentimestamps": "^0.4.9"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thelabmd/UST-Protocol.git",
+    "directory": "packages/ust-ots-verify"
+  },
+  "homepage": "https://github.com/thelabmd/UST-Protocol/tree/main/packages/ust-ots-verify#readme",
+  "scripts": {
+    "test": "node --test"
+  }
 }

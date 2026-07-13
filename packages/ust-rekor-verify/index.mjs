@@ -4,20 +4,26 @@
 // A SECOND witness substrate next to Bitcoin (@ust-protocol/ots-verify). Rekor is a public append-only
 // transparency log (Sigstore / Linux Foundation) — logging is seconds, not Bitcoin's hours, and it is
 // independent of the publisher. Trade-off vs Bitcoin: faster + independent, but you trust the Rekor
-// operator's log (its own witnesses co-sign the tree head); Bitcoin is trustless but slow. A verifier
-// can accept BOTH via ust-protocol's combineSubstrates — each answers the same question ("is this root
-// committed & final?") in its own dialect (§17 substrate registry).
+// operator's LOG KEY (which co-signs its tree head); Bitcoin is trustless but slow.
 //
-// substrateVerify(anchor, root) → { final, time } | null
-//   anchor = { substrate:'rekor', logIndex, treeID?, inclusionProof:{ logIndex, rootHash, treeSize,
-//              hashes:[...], checkpoint }, integratedTime }
-//   · null  → not a rekor anchor (router delegates onward) OR the entry does not attest THIS root
-//   · final → the root is included in the Rekor log AND the inclusion proof verifies to the tree root
-//   The proof is SELF-CONTAINED (embedded at anchor time); we re-verify the Merkle path — the Rekor API
-//   is only a fallback fetch, the math is what decides (claim ≠ proof, same discipline as everywhere).
-import { createHash } from 'node:crypto';
+// #69 Theme A1 (P0) — the anchor terminates at an EXTERNAL trust root, never a self-consistent object.
+// An inclusion proof alone proves nothing: an attacker can fabricate a treeSize=1 tree whose rootHash is
+// its own leaf. What binds the root to Rekor is the LOG's SIGNATURE over its checkpoint (signed tree head).
+// So `final` requires ALL of: (1) the entry attests THIS root; (2) the inclusion path reaches proof.rootHash
+// (RFC 6962); (3) the checkpoint is signed by Rekor's PINNED public key AND its root == proof.rootHash and
+// size == proof.treeSize. Drop any leg → not final. The pinned key is the trust anchor (like a CA root);
+// even the fallback API fetch is trustless because the signature — not the transport — decides.
+import { createHash, createPublicKey, verify as edVerify } from 'node:crypto';
 
 const REKOR = 'https://rekor.sigstore.dev';
+// Pinned rekor.sigstore.dev log public key (EC P-256). This is a TRUST ANCHOR: it is NOT fetched from the
+// same surface that serves the entry (that would be circular). Sigstore rotates keys via TUF; on a rotation
+// this constant is updated (or pass your own via makeSubstrateVerify for a private Rekor). key hint c0d23d6a.
+const REKOR_PUBKEY_PEM = `-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwr
+kBbmLSGtks4L3qX6yYY0zufBnhC8Ur/iy55GhWP/9A/bY2LhC30M9+RYtw==
+-----END PUBLIC KEY-----`;
+
 const sha256 = (buf) => createHash('sha256').update(buf).digest();
 const hexToBytes = (h) => Buffer.from(h.replace(/^sha256:/, ''), 'hex');
 
@@ -39,13 +45,38 @@ export function verifyInclusion({ leafHash, index, treeSize, hashes, rootHash })
   return fn === 0 && hash.equals(hexToBytes(rootHash));
 }
 
-export function makeSubstrateVerify({ fetchImpl = fetch, api = REKOR } = {}) {
+// Verify a Sigstore/Go signed-note checkpoint: the log's ECDSA signature over "origin\nsize\nroothash\n"
+// (the note text up to the blank separator), and that the signed root/size match the inclusion proof's.
+// Returns true ONLY if the PINNED log key signed a checkpoint committing to exactly proof.rootHash@treeSize.
+export function verifyCheckpoint(checkpoint, expectedRootHex, expectedTreeSize, pubKey) {
+  if (typeof checkpoint !== 'string' || checkpoint.indexOf('\n\n') < 0) return false;
+  const lines = checkpoint.split('\n');
+  if (lines.length < 5) return false;
+  const origin = lines[0].split(' ')[0];                       // "rekor.sigstore.dev"
+  if (lines[1] !== String(expectedTreeSize)) return false;     // signed size must match the proof's tree
+  let rootHex; try { rootHex = Buffer.from(lines[2], 'base64').toString('hex'); } catch { return false; }
+  if (rootHex !== expectedRootHex.replace(/^sha256:/, '')) return false;   // signed root must be the proof's
+  const body = Buffer.from(checkpoint.slice(0, checkpoint.indexOf('\n\n') + 1), 'utf8'); // note text
+  // signature block: one "— <keyname> <base64(keyhint4 || DER-ecdsa)>" line per cosigner; verify the LOG's.
+  for (const line of checkpoint.slice(checkpoint.indexOf('\n\n') + 2).split('\n')) {
+    const m = line.match(/^— (\S+) (\S+)$/);
+    if (!m || m[1] !== origin) continue;                       // only the log-origin's own signature
+    let sig; try { sig = Buffer.from(m[2], 'base64'); } catch { continue; }
+    if (sig.length <= 4) continue;
+    try { if (edVerify('sha256', body, pubKey, sig.subarray(4))) return true; } catch { /* wrong key/shape */ }
+  }
+  return false;
+}
+
+export function makeSubstrateVerify({ fetchImpl = fetch, api = REKOR, rekorPubKeyPem = REKOR_PUBKEY_PEM } = {}) {
+  const pubKey = createPublicKey(rekorPubKeyPem);
   return async function substrateVerify(anchor, root) {
     const a = anchor?.substrate === 'rekor' ? anchor : (anchor?.anchor?.substrate === 'rekor' ? anchor.anchor : null);
     if (!a || typeof root !== 'string') return null;   // not ours → let the router try the next plugin
 
     let proof = a.inclusionProof, integratedTime = a.integratedTime, bodyB64 = a.body;
-    // fetch the entry if the anchor only carries a pointer (logIndex) — the API is a fallback, the proof decides
+    // fetch the entry if the anchor only carries a pointer (logIndex) — the API is a fallback; the pinned-key
+    // signature (below) is what decides, so a MITM'd API response cannot forge finality.
     if ((!proof || !bodyB64) && (a.logIndex != null || a.uuid)) {
       try {
         const url = a.uuid ? `${api}/api/v1/log/entries/${a.uuid}` : `${api}/api/v1/log/entries?logIndex=${a.logIndex}`;
@@ -60,17 +91,23 @@ export function makeSubstrateVerify({ fetchImpl = fetch, api = REKOR } = {}) {
     }
     if (!proof || !bodyB64) return { final: false, time: 'unproven' };
 
-    // the logged entry MUST attest THIS root. Convention (§17 rekor Locator): the artifact logged is the
-    // root's hex string (utf8); Rekor stores sha256(artifact) in the entry. Recompute and match — so an
-    // entry about someone else's digest cannot pass (claim ≠ proof).
+    // (1) the logged entry MUST attest THIS root. Convention (§17 rekor Locator): the artifact logged is the
+    // root's hex string (utf8); Rekor stores sha256(artifact). Recompute and match (claim ≠ proof).
     let body; try { body = Buffer.from(bodyB64, 'base64').toString('utf8'); } catch { return null; }
     const rootHex = root.replace(/^sha256:/, '');
     const artifactHash = createHash('sha256').update(Buffer.from(rootHex, 'utf8')).digest('hex');
     if (!body.includes(artifactHash)) return null;   // this Rekor entry is not about our root
 
+    // (2) the inclusion path reaches proof.rootHash (RFC 6962).
     const leafHash = sha256(Buffer.concat([Buffer.from([0x00]), Buffer.from(bodyB64, 'base64')]));
-    const ok = verifyInclusion({ leafHash, index: proof.logIndex, treeSize: proof.treeSize, hashes: proof.hashes || [], rootHash: proof.rootHash });
-    if (!ok) return { final: false, time: 'unproven' };
+    if (!verifyInclusion({ leafHash, index: proof.logIndex, treeSize: proof.treeSize, hashes: proof.hashes || [], rootHash: proof.rootHash }))
+      return { final: false, time: 'unproven' };
+
+    // (3) #69 A1 — proof.rootHash MUST be a root the LOG signed. Without a valid checkpoint signature the
+    // inclusion proof is only a self-consistent Merkle object (a fabricated treeSize=1 tree passes (2)).
+    if (!verifyCheckpoint(proof.checkpoint, proof.rootHash, proof.treeSize, pubKey))
+      return { final: false, time: 'unproven' };
+
     return { final: true, time: integratedTime ? new Date(integratedTime * 1000).toISOString().slice(0, 19) + 'Z' : 'rekor-logged' };
   };
 }

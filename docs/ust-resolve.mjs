@@ -120,7 +120,45 @@ async function rekorInclusion({ leafHash, index, treeSize, hashes, rootHash }) {
 }
 const concatU8 = (arrs) => { const n = arrs.reduce((s, a) => s + a.length, 0); const o = new Uint8Array(n); let i = 0; for (const a of arrs) { o.set(a, i); i += a.length; } return o; };
 
-// Verify a rekor anchor (browser): the entry attests THIS root AND its inclusion proof verifies.
+// #69 A1 — the inclusion proof reaches proof.rootHash, but rootHash must be a root the LOG SIGNED, else a
+// fabricated treeSize=1 tree passes. rekor.sigstore.dev's checkpoint (signed tree head) is an ECDSA-P256
+// signature over "origin\nsize\nroothash\n". Pinned key (trust anchor, NOT fetched from the entry surface):
+const REKOR_SPKI_B64 = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE2G2Y+2tabdTV5BcGiBIx0a9fAFwrkBbmLSGtks4L3qX6yYY0zufBnhC8Ur/iy55GhWP/9A/bY2LhC30M9+RYtw==';
+const b64ToU8 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+let _rekorKey;
+const rekorKey = () => (_rekorKey ||= crypto.subtle.importKey('spki', b64ToU8(REKOR_SPKI_B64), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']));
+
+// ASN.1 DER ECDSA (SEQ{INT r, INT s}) → IEEE-P1363 raw r||s (64 B) that WebCrypto verify expects.
+function derToRaw(der) {
+  let p = 2; if (der[1] & 0x80) p += der[1] & 0x7f;            // skip SEQ tag+len (incl. long-form)
+  const readInt = () => { p++; let len = der[p++]; let s = p; p += len; while (der[s] === 0 && len > 32) { s++; len--; } const o = new Uint8Array(32); o.set(der.subarray(s, s + len), 32 - len); return o; };
+  const r = readInt(), s = readInt();
+  return concatU8([r, s]);
+}
+
+// Verify rekor.sigstore.dev's signed checkpoint: its ECDSA signature over the note text, and that the signed
+// root/size equal the inclusion proof's. Returns true ONLY if the pinned log key signed rootHex@treeSize.
+async function rekorCheckpoint(checkpoint, rootHex, treeSize) {
+  if (typeof checkpoint !== 'string' || checkpoint.indexOf('\n\n') < 0) return false;
+  const lines = checkpoint.split('\n');
+  if (lines.length < 5 || lines[1] !== String(treeSize)) return false;
+  let ckRootHex; try { ckRootHex = u8hex(b64ToU8(lines[2])); } catch { return false; }
+  if (ckRootHex !== rootHex.replace(/^sha256:/, '')) return false;
+  const origin = lines[0].split(' ')[0];
+  const body = teu(checkpoint.slice(0, checkpoint.indexOf('\n\n') + 1));
+  const key = await rekorKey();
+  for (const line of checkpoint.slice(checkpoint.indexOf('\n\n') + 2).split('\n')) {
+    const m = line.match(/^— (\S+) (\S+)$/);
+    if (!m || m[1] !== origin) continue;
+    let sig; try { sig = b64ToU8(m[2]); } catch { continue; }
+    if (sig.length <= 4) continue;
+    try { if (await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, derToRaw(sig.subarray(4)), body)) return true; } catch { /* shape */ }
+  }
+  return false;
+}
+
+// Verify a rekor anchor (browser): the entry attests THIS root, the inclusion proof reaches rootHash, AND
+// rootHash is a root Rekor signed (#69 A1). All three or it is not final.
 async function rekorFinal(anchorInner, rootSha) {
   const proof = anchorInner.inclusionProof, bodyB64 = anchorInner.body;
   if (!proof || !bodyB64) return false;
@@ -128,9 +166,9 @@ async function rekorFinal(anchorInner, rootSha) {
   const rootHex = rootSha.replace(/^sha256:/, '');
   const artifactHash = u8hex(await sha256raw(teu(rootHex)));   // Rekor stores sha256(root-hex)
   if (!body.includes(artifactHash)) return false;
-  const entryBytes = Uint8Array.from(body, (c) => c.charCodeAt(0));   // NB: atob → binary string
   const leafHash = await sha256raw(concatU8([new Uint8Array([0]), Uint8Array.from(atob(bodyB64), (c) => c.charCodeAt(0))]));
-  return rekorInclusion({ leafHash, index: proof.logIndex, treeSize: proof.treeSize, hashes: proof.hashes || [], rootHash: proof.rootHash });
+  if (!await rekorInclusion({ leafHash, index: proof.logIndex, treeSize: proof.treeSize, hashes: proof.hashes || [], rootHash: proof.rootHash })) return false;
+  return rekorCheckpoint(proof.checkpoint, proof.rootHash, proof.treeSize);   // #69 A1: bind root to the signed head
 }
 
 // ─── Bitcoin-OTS witness substrate (browser clean-room, #68) ─────────────────────────────────
