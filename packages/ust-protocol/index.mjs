@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.25' };
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.26' };
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -254,6 +254,13 @@ export function verify(doc, opts = {}) {
     // claiming ANOTHER key's shard is malformed (the identity IS the key; the equality is an obligation).
     const shardMode = KEYID_FORM.test(st.id.domain_shard) ? 'key' : 'name';
     if (shardMode === 'key' && st.id.domain_shard !== st.id.key_id) return bad('E-MALFORMED', 'key-form domain_shard != key_id (self-certifying identity must be the signing key)');
+    // §4.3a #40 HOMOGRAPH GUARD — a name-form domain_shard MUST be an A-label: ASCII only (punycode `xn--` for IDN),
+    // never raw Unicode. 'аpple.com' (Cyrillic а, U+0430) renders identically to 'apple.com' but is a DIFFERENT
+    // string — a homograph genesis would impersonate a name to a human reading the verdict. Rejecting U-labels means
+    // a consumer sees either plain ASCII or a visibly-distinct `xn--…`, never deceptive glyphs. (NFC alone does NOT
+    // catch this: U+0430 is a single, already-NFC code point.) The floor stays light — no confusables table needed.
+    if (shardMode === 'name' && /[^\x00-\x7f]/.test(st.id.domain_shard))
+      return bad('E-MALFORMED', 'name-form domain_shard must be an A-label (ASCII; punycode xn-- for IDN), not raw Unicode glyphs (homograph guard)', { obligation: '§4.3a name-form A-label' });
     // §13 capacity ladder (rc.10): ≤64 = the anonymous floor, admissible for everyone (LIGHT-anywhere).
     // Above it, capacity is EARNED BY CEREMONY: a name-form shard admits up to its genesis-declared
     // max_partitions (≤ ABS 4096). A key-form identity can hold no ceremony → the floor is its law.
@@ -346,6 +353,11 @@ export function verify(doc, opts = {}) {
       return identity.status === 'unavailable'
         ? { result: 'INDETERMINATE', reason: 'unavailable', identity, detail: identity.detail }   // W1: retry, NOT failure
         : bad('E-GENESIS', 'authoritative required but ' + identity.strength + '/' + identity.status);
+    // §12.2a #40 — a consumer that needs a CURRENT key-log (revocation may have propagated) sets requireFreshKeylog:
+    // an `unverified` freshness (a possibly-stale cache) ⇒ INDETERMINATE (retry: re-fetch the key-log from the
+    // authoritative discovery surface or supply an anchoredKeylogHead), NEVER a silent accept on a stale view.
+    if (opts.requireFreshKeylog && identity.freshness === 'unverified')
+      return { result: 'INDETERMINATE', reason: 'stale_keylog', identity, detail: 'key-log freshness unverified (possibly-stale cache); re-fetch from authoritative discovery or supply anchoredKeylogHead (§12.2a)' };
     // step 8 — privacy (§14.8/§10): if the caller discloses {nonce,value}, REPRODUCE the commit; for
     // `encrypted`, AEAD-decrypt must reproduce the SAME committed plaintext (E-COMMIT on mismatch). Never brute-force.
     const disclosed = [];
@@ -510,17 +522,26 @@ export function resolveKeys(genesis, keylog = []) {
     }
     prevHash = contentHash(e);
   }
-  return { validKeys, revoked };
+  return { validKeys, revoked, head: prevHash };                                 // #40: head = the last entry's content_hash (genesis if empty) — the freshness anchor point
 }
 
 // ─── §12 HIGH name-authority resolution. STATELESS: the caller (ustate/engine) supplies the genesis +
 //     key-log transcripts (retrieval is the stateful layer's job) and asserts no-fork from the witness (W1).
-export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, corroborated = false, anchorTime } = {}) {
+export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, corroborated = false, anchorTime, keylogFreshAsOf, anchoredKeylogHead } = {}) {
   if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
   if (genesis.state?.id?.domain_shard !== doc.state.id.domain_shard) return { error: 'E-GENESIS', detail: 'genesis domain mismatch' };
   const rk = resolveKeys(genesis, keylog);
   if (rk.error) return { error: rk.error, detail: rk.detail };
   const { validKeys, revoked } = rk;
+  // §12.2a #40 KEY-LOG FRESHNESS — "this key is still valid" is an authenticated NON-MEMBERSHIP claim (no MORE
+  // RECENT revoking entry exists), the same class as no-fork (F.5a): a CACHED key-log proves only "revoke ∉ my
+  // view", never "revoke does not exist". So freshness is EARNED, never assumed. `anchoredKeylogHead` (the
+  // content_hash of the head committed to the substrate) proves the head IS the whole log ⇒ `attested`; else a
+  // `keylogFreshAsOf` timestamp from an AUTHORITATIVE fetch that covers the doc's anchor time ⇒ `fresh`; else
+  // `unverified` — NOT invalid (the cache is not "wrong"), but the consumer is TOLD its view may be stale (F.5b).
+  const freshness = (anchoredKeylogHead && anchoredKeylogHead === rk.head) ? 'attested'
+    : (keylogFreshAsOf && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(keylogFreshAsOf) && (!anchorTime || keylogFreshAsOf >= anchorTime)) ? 'fresh'
+    : 'unverified';
   // rc.12: surface the ceremony-declared CAPACITY so callers can pass it as opts.capacity to verify()
   // once authority is established — the grant flows FROM resolution, never from a raw genesis.
   const gvCap = genesis.state?.data?.genesis?.value ?? {};
@@ -556,9 +577,9 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
   // responsibility, reported `caller-asserted`). There is deliberately NO `mapInclusion:true` boolean — a raw
   // flag that is not a verified proof would be exactly the overclaim we removed. The map path returns here as
   // `authoritative` only once a real VerifiedMapReceipt is checked (future revision).
-  if (noForkConfirmed) return { strength: 'authoritative', noFork: 'caller-asserted', status: st2, capacity };
-  if (corroborated) return { strength: 'corroborated', noFork: 'served-list', status: st2, capacity };
-  return { strength: 'corroborated', noFork: 'unconfirmed', status: 'unavailable', capacity,
+  if (noForkConfirmed) return { strength: 'authoritative', noFork: 'caller-asserted', status: st2, capacity, freshness };
+  if (corroborated) return { strength: 'corroborated', noFork: 'served-list', status: st2, capacity, freshness };
+  return { strength: 'corroborated', noFork: 'unconfirmed', status: 'unavailable', capacity, freshness,
     detail: 'no independent no-fork evidence; a served witness only corroborates (§12.1a F.5a) → authority pending, retry' };
 }
 

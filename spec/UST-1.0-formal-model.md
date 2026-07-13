@@ -338,6 +338,20 @@ is a function of `(candidates, A_{auth})` alone. ∎ This is exactly the propert
 "canonical = anchor-included" turns an operator-side race into a consumer-side FUNCTION — the loser is decided by
 the chain, not by whichever document a given agent happened to fetch first.
 
+## F.5d Key-log freshness is the third face of authenticated non-membership
+
+The revocation predicate "key `k` is still valid at time `t`" is `¬∃ e : e revokes k ∧ e ∈ keylog ∧ time(e) ⪯ t`
+— a NON-MEMBERSHIP statement over the key-log, structurally identical to no-fork on the name axis (F.5a) and
+snapshot-completeness on the time axis (F.3.1). By Corollary F.3.1 it does NOT follow from any positive view: a
+consumer holding a cached key-log `L' ⊆ L` decides only `revoke ∉ L'` (membership in its own prefix), which is in
+`σ(L')`, NOT in the σ-algebra that decides `revoke ∉ L`. The publisher (or a stale cache) can OMIT the revoking
+entry exactly as it can omit a rival genesis. So freshness is earned by bringing the non-membership coordinate
+into `ℐ`: an anchored key-log HEAD (its `content_hash` in `Fₜ` — prefix-uniqueness of the chain makes "this is
+the head" a positive lookup that settles `¬∃` later entry, the F.5a mechanism transposed to the key-log) ⇒
+`attested`; a fetch from the authoritative surface timestamped `≥ t` ⇒ `fresh`; neither ⇒ `unverified`. Emitting
+`unverified` (never a forged "valid") and letting the consumer floor on it (`requireFreshKeylog`) is the F.5b
+discipline: the strong word is earned by the coordinate, not bought by assuming the cache is complete.
+
 ## F.6 Composition — the event algebra
 
 An **anchored existence-and-commitment claim** is an event `A ∈ Fₜ`; an UNANCHORED signed claim is a document

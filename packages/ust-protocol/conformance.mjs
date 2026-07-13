@@ -498,6 +498,29 @@ console.log('\n═════════════════════�
   check('#44 human fields preserved beside machine fields (error+detail intact)', typeof vc.detail === 'string' && vc.detail.includes('sw'));
 }
 
+// ─── #40 IDENTITY HARDENING — IDN/homograph A-label guard (§4.3a) + key-log freshness (§12.2a). ───
+{
+  const G = kp('bb'.repeat(32)), K = kp('cc'.repeat(32));
+  const signG = (st) => P.seal(st, G.priv, G.pubB64);
+  // Hole 1: a homograph name-form domain_shard (Cyrillic а, U+0430) must be E-MALFORMED, never a deceptive publisher.
+  const homo = 'а' + 'pple.com';
+  const genH = signG(P.buildGenesis({ domain_shard: homo, ust_id: 'ust:20260628.10', key_id: G.key_id }, T, G.pubB64));
+  check('#40 homograph name-form domain_shard → E-MALFORMED (obligation §4.3a A-label)', (r => r.error === 'E-MALFORMED' && r.obligation === '§4.3a name-form A-label')(P.verify(genH, { context: 'key' })));
+  check('#40 punycode A-label (xn--…) still VALID (guard blocks glyphs, not IDN)', P.verify(P.seal(P.buildState({ domain_shard: 'xn--80ak6aa92e.com', ust_id: 'ust:20260628.12', key_id: G.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { x: '1' } } }), G.priv, G.pubB64), { context: 'data' }).result.startsWith('VALID'));
+  // Hole 2: key-log freshness — a stale cache must REPORT freshness, and requireFreshKeylog floors on it.
+  const dom = 'noosphere.md';
+  const gen = signG(P.buildGenesis({ domain_shard: dom, ust_id: 'ust:20260628.19', key_id: G.key_id }, T, G.pubB64));
+  const add = signG(P.buildKeyLogEntry({ domain_shard: dom, ust_id: 'ust:20260628.1901', key_id: G.key_id }, T, { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(gen)));
+  const revoke = signG(P.buildKeyLogEntry({ domain_shard: dom, ust_id: 'ust:20260628.1902', key_id: G.key_id }, T, { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: '2026-06-28T14:30:00Z' }, P.contentHash(add)));
+  const docK = P.seal(P.buildState({ domain_shard: dom, ust_id: 'ust:20260628.20', key_id: K.key_id, class: 'observation' }, T, { sw: { kind: 'captured', value: { kp: '5' } } }), K.priv, K.pubB64);
+  const Aft = '2026-06-28T14:45:00Z';
+  check('#40 fresh log [add,revoke] → E-KEY (revocation still bites)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, revoke], anchorTime: Aft }).error === 'E-KEY');
+  check('#40 stale cache [add] REPORTS freshness:unverified (no longer silent)', (r => r.strength === 'authoritative' && r.freshness === 'unverified')(P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft })));
+  check('#40 requireFreshKeylog on a stale cache → INDETERMINATE stale_keylog', (r => r.result === 'INDETERMINATE' && r.reason === 'stale_keylog')(P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, requireFreshKeylog: true, anchorTime: Aft, context: 'data' })));
+  check('#40 anchoredKeylogHead == head → freshness:attested', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, anchoredKeylogHead: P.contentHash(add) }).freshness === 'attested');
+  check('#40 keylogFreshAsOf ≥ anchorTime → freshness:fresh', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, keylogFreshAsOf: '2026-06-28T15:00:00Z' }).freshness === 'fresh');
+}
+
 console.log('  ust-protocol ' + P.VERSION.spec + ' conformance vs ' + V.version);
 console.log('  PASS ' + pass + '   FAIL ' + fail + '   NOTES ' + note);
 if (fails.length) { console.log('\n  FAILURES:'); fails.forEach(f => console.log('    ✗ ' + f)); }

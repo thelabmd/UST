@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.25`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.26`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -245,6 +245,15 @@ untrusted per I9, but tamper-evident). Nothing a human sees is outside the signa
 
 A verifier reports the mode (`identity.mode: "name" | "key"`) alongside the strength. A key-form shard never
 resolves genesis (there is no name to bind); name authority (§12) applies to `name` mode only.
+
+**Homograph guard (normative, #40).** A **name-form** `domain_shard` MUST be an **A-label**: ASCII only, with an
+internationalized name carried in its punycode (`xn--…`) form, NEVER as raw Unicode glyphs. A verifier MUST
+reject a name-form shard containing any non-ASCII code point (`> U+007F`) as `E-MALFORMED` (`obligation:
+"§4.3a name-form A-label"`). Reason: `аpple.com` (Cyrillic а, U+0430) renders identically to `apple.com` but is a
+DIFFERENT string, so a homograph genesis could impersonate a name to a human reading the verdict — and NFC
+normalization does NOT catch it (U+0430 is a single, already-NFC code point). Rejecting U-labels means a consumer
+sees either plain ASCII or a visibly-distinct `xn--…`, never deceptive glyphs; the floor stays light (no
+confusables table). This applies to the `name` mode only — a `key` mode shard is `sha256:<hex>`, already ASCII.
 
 ### 4.4 Data — per-partition kind, visibility & hashing (029 feature, in the namespaced shape)
 `data` is a map of one or more **partitions**; names are operator-schema, unique, non-reserved (I3 — names
@@ -888,6 +897,31 @@ which rejects `corroborated`.
   A consumer needing revocation (or name authority) MUST verify at HIGH/TOP. This is inherent to a carried/pinned
   (TOFU) key.
 
+### 12.2a Key-log freshness — "still valid" is authenticated non-membership (#40)
+
+Revocation (§12.2) only bites if the consumer has SEEN it. "This key is still valid" is the claim that **no more
+recent revoking entry exists** — an authenticated NON-MEMBERSHIP statement, the same class as no-fork (§12.1a /
+F.5a) and snapshot-completeness (F.3.1): a CACHED key-log proves only `revoke ∉ my view`, never `revoke does not
+exist`. So a stale cache can accept a key the live log has already revoked, and — the real gap — do so SILENTLY.
+
+Freshness is therefore EARNED and REPORTED, never assumed. `resolveAuthority` returns an
+`identity.freshness` alongside the strength:
+
+- **`attested`** — the caller supplies `anchoredKeylogHead`, the `content_hash` of the key-log HEAD committed to
+  the anchor substrate; if it equals the resolved head, the head IS the whole log at that anchor (the prefix
+  can't hide a later entry) — independent non-membership, the strongest basis.
+- **`fresh`** — the caller supplies `keylogFreshAsOf` (a strict RFC3339-Z instant it fetched the log from the
+  AUTHORITATIVE §20.1 discovery surface) that is `≥` the document's anchor time — the log was current at least as
+  late as the fact being judged.
+- **`unverified`** (default) — no freshness evidence; the view MAY be stale. This is NOT `INVALID` (the cache is
+  not "wrong"), it is an honest strength report (F.5b): the consumer is TOLD, never silently trusted.
+
+A consumer for whom revocation propagation matters sets **`requireFreshKeylog`**: an `unverified` freshness then
+yields **`INDETERMINATE` (`reason: "stale_keylog"`)** — retry by re-fetching the key-log from authoritative
+discovery or by supplying an `anchoredKeylogHead` — NEVER a silent accept on a possibly-stale view. This is the
+key-log twin of anchored-time freshness (P10) and of the F.5b downgrade floors: absence of proof lowers the
+reported assurance, it does not forge it.
+
 ---
 
 ## 13. Structural bounds (I5) — hard ceilings
@@ -1073,13 +1107,15 @@ A verifier returns one of THREE OUTCOME KINDS — **availability is distinct fro
   implemented by this verifier (`unsupported_alg`): NOT a negative. The document keeps its LIGHT verdict;
   the affected strength is reported `unavailable` (retry). Fail-closed means "never CLAIM a strength you did not
   verify" — it does NOT mean "call it INVALID." A verifier/MCP MUST NOT report an unreachable authority as a
-  failed document. The reason set is CLOSED — {`unavailable`, `unsupported_alg`}: a fetch timeout IS
-  `unavailable`; a verification-budget overrun is INVALID `E-BOUNDS` (§13); a fetched-but-WRONG dependency is
-  its own definite error; an above-floor document without a TRUSTED capacity grant is `unavailable` (§13
-  ladder). **`resource_limit`** (rc.12) is the third and last member: the document may be protocol-valid but
-  exceeds THIS verifier's declared capability, or the raw input exceeds the transport admission budget —
-  verification was refused or could not complete on THIS implementation; retry on a bigger verifier. A verifier
-  MUST NOT mint new INDETERMINATE reasons.
+  failed document. The reason set is CLOSED — {`unavailable`, `unsupported_alg`, `resource_limit`,
+  `stale_keylog`}: a fetch timeout IS `unavailable`; a verification-budget overrun is INVALID `E-BOUNDS` (§13); a
+  fetched-but-WRONG dependency is its own definite error; an above-floor document without a TRUSTED capacity
+  grant is `unavailable` (§13 ladder). **`resource_limit`** (rc.12) is the third member: the document may be
+  protocol-valid but exceeds THIS verifier's declared capability, or the raw input exceeds the transport
+  admission budget — verification was refused or could not complete on THIS implementation; retry on a bigger
+  verifier. **`stale_keylog`** (#40) is the fourth: under `requireFreshKeylog`, a key-log of `unverified`
+  freshness (a possibly-stale cache, §12.2a) — retry by re-fetching from authoritative discovery or supplying an
+  `anchoredKeylogHead`. A verifier MUST NOT mint new INDETERMINATE reasons beyond these four.
 Producers/MCPs SHOULD map the three kinds distinctly (INVALID ≈ 4xx deterministic; INDETERMINATE ≈ 503 retry).
 
 **Machine-structured failure + agent-safety entrypoints (§15.1, agent footgun elimination).** An INVALID verdict
@@ -1608,6 +1644,19 @@ provenance and will be lifted into this ledger when the spec is published.
   (§after the STRICT clause): RFC 8032 is deterministic BY CONSTRUCTION (nonce = `H(prefix‖message)`, no RNG in
   signing) — the ECDSA nonce-reuse recovery does NOT apply, no RFC 6979 clause is needed; the one real requirement
   is CSPRNG key generation. Stated so future audits don't re-raise it. +8 conformance vectors; MCP live isError.
+- **REV 37 (2026-07-13)** — #40, identity hardening (two HIGH-tier holes a gap review found, both reproduced
+  first). (1) **IDN / homograph** (§4.3a): a name-form `domain_shard` MUST be an A-label (ASCII; punycode `xn--`
+  for IDN) — raw Unicode glyphs ⇒ `E-MALFORMED` (`obligation: "§4.3a name-form A-label"`). `аpple.com` (Cyrillic
+  а) renders identically to `apple.com` but is a different string; NFC does not catch a single already-NFC code
+  point, so a homograph genesis could impersonate a name to a human. Rejecting U-labels ⇒ a consumer sees plain
+  ASCII or a visibly-distinct `xn--…`, never deceptive glyphs; floor stays light (no confusables table). (2)
+  **Key-log freshness** (§12.2a, F.5d): "this key is still valid" is authenticated NON-MEMBERSHIP (no more-recent
+  revoking entry) — the same class as no-fork (F.5a); a cached key-log proves only `revoke ∉ my view`. So
+  `resolveAuthority` now returns `identity.freshness`: `attested` (an `anchoredKeylogHead` equal to the resolved
+  head — independent non-membership), `fresh` (a `keylogFreshAsOf` authoritative fetch ≥ the anchor time), or
+  `unverified` (default — reported, never silently trusted). `requireFreshKeylog` floors on it → `INDETERMINATE`
+  (`reason: "stale_keylog"`, the fourth and last member of the closed reason set), the key-log twin of the F.5b
+  downgrade floors. Surfaced via MCP `ust_verify`/`ust_resolve` + CLI `--require-fresh-keylog`. +7 vectors.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the
