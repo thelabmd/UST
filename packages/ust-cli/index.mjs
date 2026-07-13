@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createCipheriv, scryptSync, randomBytes, createHash, generateKeyPairSync, sign as edsign } from 'node:crypto';
 import * as P from 'ust-protocol';
+import { makeSsrfSafeFetch } from 'ust-protocol/ssrf';   // #71 — the SAME Node SSRF guard the MCP uses (resolve→classify→reject private)
 import * as W from '@ust-protocol/web-signer';
 
 const arg = (name, def) => { const i = process.argv.indexOf('--' + name); return i > -1 ? (process.argv[i + 1] ?? true) : def; };
@@ -833,8 +834,11 @@ async function cmdVerify() {
       try { const m = await import(pkg); if (m.substrateVerify) plugins.push(m.substrateVerify); } catch { /* absent */ }
     }
     const substrateVerify = plugins.length ? P.combineSubstrates(plugins) : undefined;
+    // #71 — the discovery target comes from an UNTRUSTED document; the SSRF guard (resolve → reject private IPs)
+    // wraps the fetch on the CLI too, not only the MCP. Core's lexical isPublicDnsShard is the floor beneath it.
+    const guardedFetch = makeSsrfSafeFetch(async (u, init) => { console.error(`  ⏳ resolving identity from ${new URL(u).origin} … (--offline to skip)`); return fetch(u, init); });
     const rd = await P.resolveByDiscovery(doc, { context: opts.context, offline: !!arg('offline', false), noForkConfirmed: noFork },
-      { substrateVerify, fetchImpl: async (u, init) => { console.error(`  ⏳ resolving identity from ${new URL(u).origin} … (--offline to skip)`); return fetch(u, init); } });
+      { substrateVerify, fetchImpl: guardedFetch });
     if (!substrateVerify && rd.resolution && String(rd.resolution.noFork || '').startsWith('HIGH pending')) console.error('  ℹ️  anchor not cross-checked — `npm i @ust-protocol/ots-verify @ust-protocol/rekor-verify` for automatic HIGH');
     if (rd.resolution) {
       r = rd.verdict;

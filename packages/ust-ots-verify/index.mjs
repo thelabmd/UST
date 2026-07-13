@@ -50,7 +50,7 @@ export function parseOtsBitcoin(ots) {
   return found ? { height: found.height, merkle: found.merkle, digest } : null;
 }
 
-export function makeSubstrateVerify({ upgrade = true, fetchImpl = fetch, explorers = EXPLORERS, minConfirmations = 6 } = {}) {
+export function makeSubstrateVerify({ upgrade = true, fetchImpl = fetch, explorers = EXPLORERS, minConfirmations = 6, quorum = 2 } = {}) {
   return async function substrateVerify(anchor, root) {
     const sub = anchor?.substrate ?? anchor?.anchor?.substrate;
     if (sub && sub !== 'bitcoin-ots') return null;                 // not ours → router delegates onward
@@ -72,19 +72,30 @@ export function makeSubstrateVerify({ upgrade = true, fetchImpl = fetch, explore
     if (!parsed || typeof parsed.height !== 'number') return { final: false, time: 'unproven' };
     const wantMerkle = Buffer.from(parsed.merkle).reverse().toString('hex');   // block header displays reversed
 
+    // #71 — TRUST TERMINATION HONESTY. A SINGLE explorer is a TRUSTED ORACLE (it could serve a self-consistent
+    // fake block/merkle/tip). So finality REQUIRES AGREEMENT across ≥ `quorum` INDEPENDENT explorers, and the
+    // result is labelled `explorer-corroborated` — NOT trustless Bitcoin finality. Trustless needs a real node /
+    // SPV header-chain (PoW-validated); that is an OPERATOR plugin injected through this SAME substrateVerify
+    // seam. This plugin is honest about its ceiling; a reachable explorer that DISAGREES on the merkle root is a
+    // definitive NO.
+    const need = Math.max(1, Math.min(quorum, explorers.length));
+    let agree = 0, time = null, conflict = false;
     for (const base of explorers) {
       try {
         const hash = (await (await fetchImpl(`${base}/block-height/${parsed.height}`, { signal: AbortSignal.timeout(10000) })).text()).trim();
         if (!/^[0-9a-f]{64}$/.test(hash)) continue;
         const blk = await (await fetchImpl(`${base}/block/${hash}`, { signal: AbortSignal.timeout(10000) })).json();
-        if (!blk || blk.merkle_root !== wantMerkle) return { final: false, time: 'unproven' };  // definitive NO
+        if (!blk || typeof blk.merkle_root !== 'string') continue;
+        if (blk.merkle_root !== wantMerkle) { conflict = true; break; }        // an independent source DISAGREES → NO
         const tip = Number((await (await fetchImpl(`${base}/blocks/tip/height`, { signal: AbortSignal.timeout(10000) })).text()).trim());
-        const confirmations = Number.isFinite(tip) ? tip - parsed.height + 1 : 0;
-        if (confirmations < minConfirmations) return { final: false, time: 'unproven' };         // not yet buried
-        return { final: true, time: blk.timestamp ? new Date(blk.timestamp * 1000).toISOString().slice(0, 19) + 'Z' : 'bitcoin-block-' + parsed.height };
+        if (!Number.isFinite(tip) || tip - parsed.height + 1 < minConfirmations) continue;   // this source lags on burial → don't count
+        agree++;
+        time = blk.timestamp ? new Date(blk.timestamp * 1000).toISOString().slice(0, 19) + 'Z' : 'bitcoin-block-' + parsed.height;
+        if (agree >= need) return { final: true, time, assurance: 'explorer-corroborated', explorers: agree };
       } catch { /* explorer unreachable — try the next */ }
     }
-    return { final: false, time: 'unproven' };                    // no explorer could confirm → honest unproven
+    if (conflict) return { final: false, time: 'unproven' };                   // a real merkle conflict
+    return { final: false, time: 'unproven', detail: `only ${agree}/${need} independent explorers corroborated` };
   };
 }
 

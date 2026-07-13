@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.21`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.22`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -18,7 +18,7 @@ graduated tiers (LIGHT / HIGH / TOP, §3.1). Every mechanism below serves that s
 judged by ONE question — *how much trust does this actually earn, and does the protocol say so honestly?* A
 tier must never let a consumer read "signed" as "true," "anchored" as "correct," or "agreeing" as "independent."
 
-Status: **Normative specification — 1.0 REV 32 (2026-07-13).** The SECURELY-STRUCTURED (namespaced) base that
+Status: **Normative specification — 1.0 REV 33 (2026-07-13).** The SECURELY-STRUCTURED (namespaced) base that
 closed all red-team findings STRUCTURALLY (I3 collision unrepresentable, I1 whole-State signature by
 construction, no stored-hash footgun), with ALL v0.29 FEATURES merged IN (not a flat-wire revert): per-partition
 captured/computed hashing (cross-engine corroboration for computed parts), `parent_ust` (hour-close timing),
@@ -1507,6 +1507,17 @@ provenance and will be lifted into this ledger when the spec is published.
   is not a proof; the only authoritative path until the #42 map verifier is an out-of-band caller assertion.
   (Audit tails still open, tracked: OTS single-explorer trust, Rekor body substring-vs-schema, SSRF resolution
   guard beyond MCP — next round.)
+- **REV 33 (2026-07-13)** — the rc.20-audit TAILS closed, each along the honest open-library ceiling. (1) Rekor
+  entry↔root binding is now checked by the EXACT `hashedrekord` schema (`kind`, `spec.data.hash.algorithm`,
+  `.value`), not a substring scan of the body — a hash present only in a comment no longer matches. (2) The
+  Node SSRF resolution guard moved to a SHARED adapter (`ust-protocol/ssrf`, an opt-in Node subpath — the core
+  stays zero-dep/browser-portable) used by BOTH the CLI and the MCP, not MCP-only. (3) Bitcoin/OTS finality is
+  now honest about its TRUST TERMINATION: a single explorer is a trusted oracle, so the plugin requires
+  AGREEMENT across ≥ N INDEPENDENT explorers and labels the result **`explorer-corroborated`**, NOT trustless
+  Bitcoin finality — a disagreeing explorer is a definitive NO. TOP still names the anchored time; a new
+  `assurance` field on the time report says HOW it was verified (`explorer-corroborated` here; an operator's
+  real-node/SPV plugin, injected through the SAME `substrateVerify` seam, would report `bitcoin-node`). The tier
+  is never inflated by the trust model — the same claim=proof discipline as `corroborated` on the name axis.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

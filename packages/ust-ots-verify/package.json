@@ -1,7 +1,7 @@
 {
   "name": "@ust-protocol/ots-verify",
-  "version": "1.0.0-rc.4",
-  "description": "Opt-in Bitcoin/OpenTimestamps substrateVerify for UST anchors — cross-checks a genesis/hour root against a REAL Bitcoin block header + >=6 confirmations. #68 witness / #69 A2.",
+  "version": "1.0.0-rc.5",
+  "description": "Opt-in Bitcoin/OpenTimestamps substrateVerify for UST anchors — cross-checks a genesis/hour root against a REAL Bitcoin block header + >=6 confirmations. #68 witness / #69 A2 / #71 explorer-corroborated (2-of-N).",
   "type": "module",
   "main": "index.mjs",
   "exports": "./index.mjs",

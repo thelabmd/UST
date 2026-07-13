@@ -18,7 +18,7 @@ test('REAL rekor.sigstore.dev anchor (captured) → final:true', async () => {
 test('P0 #69 A1 — fabricated treeSize=1 tree (rootHash=leaf, unsigned checkpoint) → NOT final', async () => {
   const root = 'sha256:' + 'ab'.repeat(32);
   const artifactHash = createHash('sha256').update(Buffer.from(root.slice(7), 'utf8')).digest('hex');
-  const body = Buffer.from(JSON.stringify({ spec: { data: { hash: { value: artifactHash } } } })).toString('base64');
+  const body = Buffer.from(JSON.stringify({ kind: 'hashedrekord', spec: { data: { hash: { algorithm: 'sha256', value: artifactHash } } } })).toString('base64');
   const leaf = sha256(Buffer.concat([Buffer.from([0x00]), Buffer.from(body, 'base64')]));
   const fake = {
     substrate: 'rekor', body, integratedTime: 700000000,
@@ -27,6 +27,21 @@ test('P0 #69 A1 — fabricated treeSize=1 tree (rootHash=leaf, unsigned checkpoi
   };
   const r = await sv(fake, root);
   assert.equal(r.final, false); // the checkpoint carries no valid Rekor signature
+});
+
+test('#71 P1 — the root hash present only in a COMMENT (not spec.data.hash.value) → rejected (schema-exact, not substring)', async () => {
+  const a = structuredClone(FIX.anchor);
+  const rootHex = FIX.root.replace(/^sha256:/, '');
+  const artifactHash = createHash('sha256').update(Buffer.from(rootHex, 'utf8')).digest('hex');
+  a.body = Buffer.from(JSON.stringify({ kind: 'hashedrekord', spec: { data: { hash: { algorithm: 'sha256', value: '00'.repeat(32) } }, metadata: { comment: artifactHash } } })).toString('base64');
+  assert.equal(await sv(a, FIX.root), null);   // the hash is in the body, but NOT at the attested field
+});
+
+test('#71 P1 — wrong entry kind (not hashedrekord) → rejected', async () => {
+  const a = structuredClone(FIX.anchor);
+  const artifactHash = createHash('sha256').update(Buffer.from(FIX.root.replace(/^sha256:/, ''), 'utf8')).digest('hex');
+  a.body = Buffer.from(JSON.stringify({ kind: 'rekord', spec: { data: { hash: { algorithm: 'sha256', value: artifactHash } } } })).toString('base64');
+  assert.equal(await sv(a, FIX.root), null);
 });
 
 test('tampered checkpoint signature on the real anchor → NOT final', async () => {

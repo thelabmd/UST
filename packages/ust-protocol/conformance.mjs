@@ -126,6 +126,9 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const topProof = { root: P.Hbytes('ust:leaf', Buffer.from(dch, 'utf8')), path: [], anchor: { substrate: 'bitcoin-ots' } };
   const topR = P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', substrateVerify: () => ({ final: true, time: '2027-01-01T00:00:00Z' }) });
   check('TOP authoritative+anchored→VALID:TOP', topR.result === 'VALID:TOP');
+  // #71 — a substrate's ASSURANCE basis flows into the verdict's time field (TOP names its trust model honestly)
+  const topA = P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', substrateVerify: () => ({ final: true, time: '2027-01-01T00:00:00Z', assurance: 'explorer-corroborated' }) });
+  check('#71 substrate assurance surfaces in the TOP verdict (explorer-corroborated ≠ trustless)', topA.result === 'VALID:TOP' && topA.time.assurance === 'explorer-corroborated');
   check('TOP verdict still carries completeness: not_evaluated (range property)', topR.completeness === 'not_evaluated');
   check('tier ladder distinct: LIGHT vs TOP', P.verify(mk(), { context: 'data' }).result === 'VALID:LIGHT' && topR.tier === 'TOP');
   // rc.6 N9 — a document cannot postdate its own anchor: substrate time BEFORE generated_at ⇒ E-ANCHOR.

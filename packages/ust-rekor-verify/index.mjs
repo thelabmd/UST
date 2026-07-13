@@ -91,12 +91,16 @@ export function makeSubstrateVerify({ fetchImpl = fetch, api = REKOR, rekorPubKe
     }
     if (!proof || !bodyB64) return { final: false, time: 'unproven' };
 
-    // (1) the logged entry MUST attest THIS root. Convention (§17 rekor Locator): the artifact logged is the
-    // root's hex string (utf8); Rekor stores sha256(artifact). Recompute and match (claim ≠ proof).
-    let body; try { body = Buffer.from(bodyB64, 'base64').toString('utf8'); } catch { return null; }
+    // (1) the logged entry MUST attest THIS root, checked by the EXACT hashedrekord schema — NOT a substring
+    // scan of the body (#71: a validly-signed entry that merely CONTAINS the hash in some other field, e.g. a
+    // comment, would otherwise pass). Convention (§17 rekor Locator): the artifact logged is the root's hex
+    // string (utf8); Rekor stores sha256(artifact) at spec.data.hash.value with algorithm sha256.
     const rootHex = root.replace(/^sha256:/, '');
     const artifactHash = createHash('sha256').update(Buffer.from(rootHex, 'utf8')).digest('hex');
-    if (!body.includes(artifactHash)) return null;   // this Rekor entry is not about our root
+    let entry; try { entry = JSON.parse(Buffer.from(bodyB64, 'base64').toString('utf8')); } catch { return null; }
+    if (entry?.kind !== 'hashedrekord') return null;                              // exact entry type
+    const h = entry?.spec?.data?.hash;
+    if (!h || h.algorithm !== 'sha256' || h.value !== artifactHash) return null;  // exact field, not substring
 
     // (2) the inclusion path reaches proof.rootHash (RFC 6962).
     const leafHash = sha256(Buffer.concat([Buffer.from([0x00]), Buffer.from(bodyB64, 'base64')]));

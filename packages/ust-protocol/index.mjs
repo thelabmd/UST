@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.21' };
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.22' };
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -412,7 +412,7 @@ export function verify(doc, opts = {}) {
       // Pinned RFC3339-Z strings compare lexicographically as instants.
       if (a.time === 'anchored' && a.anchorTime && st.time.generated_at > a.anchorTime)
         return bad('E-ANCHOR', 'generated_at after the anchor time (N9: the document postdates its own anchor)');
-      timeField = { strength: a.time, status: a.status, inclusion: true, ...(a.anchorTime ? { anchorTime: a.anchorTime } : {}) };
+      timeField = { strength: a.time, status: a.status, inclusion: true, ...(a.anchorTime ? { anchorTime: a.anchorTime } : {}), ...(a.assurance ? { assurance: a.assurance } : {}) };
     }
     // The verdict CARRIES ITS SCOPE: `VALID:LIGHT|HIGH|TOP`, so a consumer cannot read "valid" without reading
     // valid-AT-WHAT (a bare `=== 'VALID'` no longer matches — the same forcing function as publisher_claimed).
@@ -556,7 +556,10 @@ export function verifyAnchor(contentHash, proof, opts = {}) {
   if (sub && typeof sub.then === 'function') return { inclusion: true, time: 'unproven', status: 'unavailable', detail: 'substrate check is ASYNC — use verifyAsync() or resolveByDiscovery() (they await it), not sync verify()' };
   if (!sub) return { inclusion: true, time: 'unproven', status: 'unavailable', detail: 'substrate unreachable' };
   if (!sub.final) return { inclusion: true, time: 'unproven', status: 'verified', detail: 'substrate not final (e.g. <6 conf)' };
-  return { inclusion: true, time: 'anchored', status: 'verified', anchorTime: sub.time };
+  // #71 — carry the substrate's ASSURANCE basis so TOP names its trust model honestly (an OTS plugin that
+  // corroborates via independent explorers reports `explorer-corroborated`; an operator real-node/SPV plugin
+  // would report `bitcoin-node`). TOP is earned either way; assurance says HOW, never inflating the tier.
+  return { inclusion: true, time: 'anchored', status: 'verified', anchorTime: sub.time, ...(sub.assurance ? { assurance: sub.assurance } : {}) };
 }
 
 // #69 E1 — the ONE async entry: verify() is deliberately sync (portable, no await in the hot path), but the
