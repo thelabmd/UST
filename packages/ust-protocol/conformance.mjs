@@ -517,7 +517,10 @@ console.log('\n═════════════════════�
   check('#40 fresh log [add,revoke] → E-KEY (revocation still bites)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, revoke], anchorTime: Aft }).error === 'E-KEY');
   check('#40 stale cache [add] REPORTS freshness:unverified (no longer silent)', (r => r.strength === 'authoritative' && r.freshness === 'unverified')(P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft })));
   check('#40 requireFreshKeylog on a stale cache → INDETERMINATE stale_keylog', (r => r.result === 'INDETERMINATE' && r.reason === 'stale_keylog')(P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, requireFreshKeylog: true, anchorTime: Aft, context: 'data' })));
-  check('#40 anchoredKeylogHead == head → freshness:attested', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, anchoredKeylogHead: P.contentHash(add) }).freshness === 'attested');
+  // rc.28 AUDIT FIX — a raw self-computed head hash proves nothing (derivable from a stale log): NOT attested.
+  const headProof = { root: P.Hbytes('ust:leaf', Buffer.from(P.contentHash(add), 'utf8')), path: [], anchor: { substrate: 'bitcoin-ots' } };
+  check('#40 keylogHeadAnchor WITHOUT substrateVerify → NOT attested (overclaim closed)', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, keylogHeadAnchor: headProof }).freshness !== 'attested');
+  check('#40 VERIFIED keylogHeadAnchor (inclusion + substrate-final) → freshness:attested', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, keylogHeadAnchor: headProof, substrateVerify: () => ({ final: true, time: '2027-01-01T00:00:00Z' }) }).freshness === 'attested');
   check('#40 keylogFreshAsOf ≥ anchorTime → freshness:fresh', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, keylogFreshAsOf: '2026-06-28T15:00:00Z' }).freshness === 'fresh');
 }
 

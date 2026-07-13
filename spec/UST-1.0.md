@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.27`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.28`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -254,6 +254,12 @@ DIFFERENT string, so a homograph genesis could impersonate a name to a human rea
 normalization does NOT catch it (U+0430 is a single, already-NFC code point). Rejecting U-labels means a consumer
 sees either plain ASCII or a visibly-distinct `xn--…`, never deceptive glyphs; the floor stays light (no
 confusables table). This applies to the `name` mode only — a `key` mode shard is `sha256:<hex>`, already ASCII.
+**Honest scope (not a full confusable defense):** the A-label rule closes NON-ASCII homographs (the Cyrillic-а
+class). It does NOT close ASCII-only confusables (`paypaI.com` with a capital I for l, `rn` for `m`) — those need
+a Unicode-confusables/skeleton table, deliberately NOT carried at the protocol floor. Detecting ASCII look-alikes
+is a consumer/registrar policy layer (allow-lists, brand monitoring, a `ust_assess`-style policy), not a canon or
+verify rule. What the protocol guarantees is that the `domain_shard` a verifier reports is the EXACT ASCII bytes
+that were signed — no glyph substitution hides inside a U-label.
 
 ### 4.4 Data — per-partition kind, visibility & hashing (029 feature, in the namespaced shape)
 `data` is a map of one or more **partitions**; names are operator-schema, unique, non-reserved (I3 — names
@@ -907,9 +913,12 @@ exist`. So a stale cache can accept a key the live log has already revoked, and 
 Freshness is therefore EARNED and REPORTED, never assumed. `resolveAuthority` returns an
 `identity.freshness` alongside the strength:
 
-- **`attested`** — the caller supplies `anchoredKeylogHead`, the `content_hash` of the key-log HEAD committed to
-  the anchor substrate; if it equals the resolved head, the head IS the whole log at that anchor (the prefix
-  can't hide a later entry) — independent non-membership, the strongest basis.
+- **`attested`** — the caller supplies `keylogHeadAnchor`, a **verified anchor inclusion proof** for the key-log
+  HEAD, checked against the substrate (inclusion + final). A verified anchored head IS the whole log at that
+  anchor (the prefix can't hide a later entry) — independent non-membership, the strongest basis. **A RAW head
+  `content_hash` is NOT accepted** (it is trivially derivable from the consumer's own — possibly stale — log, so
+  it proves nothing; accepting it would be an overclaim, the same class as the removed `mapInclusion:true`). Only
+  a substrate-checked proof earns `attested`.
 - **`fresh`** — the caller supplies `keylogFreshAsOf` (a strict RFC3339-Z instant it fetched the log from the
   AUTHORITATIVE §20.1 discovery surface) that is `≥` the document's anchor time — the log was current at least as
   late as the fact being judged.
@@ -918,7 +927,7 @@ Freshness is therefore EARNED and REPORTED, never assumed. `resolveAuthority` re
 
 A consumer for whom revocation propagation matters sets **`requireFreshKeylog`**: an `unverified` freshness then
 yields **`INDETERMINATE` (`reason: "stale_keylog"`)** — retry by re-fetching the key-log from authoritative
-discovery or by supplying an `anchoredKeylogHead` — NEVER a silent accept on a possibly-stale view. This is the
+discovery or by supplying a verified `keylogHeadAnchor` — NEVER a silent accept on a possibly-stale view. This is the
 key-log twin of anchored-time freshness (P10) and of the F.5b downgrade floors: absence of proof lowers the
 reported assurance, it does not forge it.
 
@@ -1115,7 +1124,7 @@ A verifier returns one of THREE OUTCOME KINDS — **availability is distinct fro
   admission budget — verification was refused or could not complete on THIS implementation; retry on a bigger
   verifier. **`stale_keylog`** (#40) is the fourth: under `requireFreshKeylog`, a key-log of `unverified`
   freshness (a possibly-stale cache, §12.2a) — retry by re-fetching from authoritative discovery or supplying an
-  `anchoredKeylogHead`. A verifier MUST NOT mint new INDETERMINATE reasons beyond these four.
+  a verified `keylogHeadAnchor`. A verifier MUST NOT mint new INDETERMINATE reasons beyond these four.
 Producers/MCPs SHOULD map the three kinds distinctly (INVALID ≈ 4xx deterministic; INDETERMINATE ≈ 503 retry).
 
 **Machine-structured failure + agent-safety entrypoints (§15.1, agent footgun elimination).** An INVALID verdict
@@ -1669,6 +1678,17 @@ provenance and will be lifted into this ledger when the spec is published.
   the trap is INHERENT to deterministic text-signing (the price of I4) — reduced to ~zero in practice, not
   eliminated; passing the vectors is the definite, checkable fact. Display-safety note (bidi/zero-width in
   untrusted VALUES is a renderer concern, byte-integrity is unaffected) folded into the guide.
+- **REV 39 (2026-07-13)** — a SELF-AUDIT pass over rc.23–27 (the Group-I mechanisms) caught one real overclaim
+  and clarified one honest limit. (1) **`freshness: attested` overclaim (P0), closed.** The rc.26 key-log
+  freshness accepted a RAW `anchoredKeylogHead` string and granted `attested` if it equalled the resolved head —
+  but the head is trivially derivable from the consumer's own (possibly stale) log, so it proved NOTHING (the
+  same class as the removed `mapInclusion:true`). Fixed: `attested` now requires a `keylogHeadAnchor` — a VERIFIED
+  anchor inclusion proof for the head, checked against the substrate (inclusion + final). A raw hash is no longer
+  accepted; the working non-default basis without a substrate is `fresh` (an authoritative-fetch timestamp).
+  Reproduced the overclaim, then closed it. (2) **IDN honest scope.** §4.3a's A-label rule closes non-ASCII
+  homographs but NOT ASCII-only confusables (`paypaI.com`); that needs a confusables table, deliberately not at
+  the floor — a consumer/registrar policy concern. Stated so the guarantee is not over-read. Other Group-I
+  mechanisms (requireAnchored, forkChoice, verifyOrThrow/structured verdict, canon arbiter) probed clean.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

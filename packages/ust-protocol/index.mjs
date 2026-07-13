@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.27' };
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.28' };
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -355,9 +355,9 @@ export function verify(doc, opts = {}) {
         : bad('E-GENESIS', 'authoritative required but ' + identity.strength + '/' + identity.status);
     // §12.2a #40 — a consumer that needs a CURRENT key-log (revocation may have propagated) sets requireFreshKeylog:
     // an `unverified` freshness (a possibly-stale cache) ⇒ INDETERMINATE (retry: re-fetch the key-log from the
-    // authoritative discovery surface or supply an anchoredKeylogHead), NEVER a silent accept on a stale view.
+    // authoritative discovery surface or supply a VERIFIED keylogHeadAnchor), NEVER a silent accept on a stale view.
     if (opts.requireFreshKeylog && identity.freshness === 'unverified')
-      return { result: 'INDETERMINATE', reason: 'stale_keylog', identity, detail: 'key-log freshness unverified (possibly-stale cache); re-fetch from authoritative discovery or supply anchoredKeylogHead (§12.2a)' };
+      return { result: 'INDETERMINATE', reason: 'stale_keylog', identity, detail: 'key-log freshness unverified (possibly-stale cache); re-fetch from authoritative discovery or supply a verified keylogHeadAnchor (§12.2a)' };
     // step 8 — privacy (§14.8/§10): if the caller discloses {nonce,value}, REPRODUCE the commit; for
     // `encrypted`, AEAD-decrypt must reproduce the SAME committed plaintext (E-COMMIT on mismatch). Never brute-force.
     const disclosed = [];
@@ -527,21 +527,27 @@ export function resolveKeys(genesis, keylog = []) {
 
 // ─── §12 HIGH name-authority resolution. STATELESS: the caller (ustate/engine) supplies the genesis +
 //     key-log transcripts (retrieval is the stateful layer's job) and asserts no-fork from the witness (W1).
-export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, corroborated = false, anchorTime, keylogFreshAsOf, anchoredKeylogHead } = {}) {
+export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, corroborated = false, anchorTime, keylogFreshAsOf, keylogHeadAnchor, substrateVerify } = {}) {
   if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
   if (genesis.state?.id?.domain_shard !== doc.state.id.domain_shard) return { error: 'E-GENESIS', detail: 'genesis domain mismatch' };
   const rk = resolveKeys(genesis, keylog);
   if (rk.error) return { error: rk.error, detail: rk.detail };
   const { validKeys, revoked } = rk;
-  // §12.2a #40 KEY-LOG FRESHNESS — "this key is still valid" is an authenticated NON-MEMBERSHIP claim (no MORE
-  // RECENT revoking entry exists), the same class as no-fork (F.5a): a CACHED key-log proves only "revoke ∉ my
-  // view", never "revoke does not exist". So freshness is EARNED, never assumed. `anchoredKeylogHead` (the
-  // content_hash of the head committed to the substrate) proves the head IS the whole log ⇒ `attested`; else a
-  // `keylogFreshAsOf` timestamp from an AUTHORITATIVE fetch that covers the doc's anchor time ⇒ `fresh`; else
-  // `unverified` — NOT invalid (the cache is not "wrong"), but the consumer is TOLD its view may be stale (F.5b).
-  const freshness = (anchoredKeylogHead && anchoredKeylogHead === rk.head) ? 'attested'
-    : (keylogFreshAsOf && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(keylogFreshAsOf) && (!anchorTime || keylogFreshAsOf >= anchorTime)) ? 'fresh'
-    : 'unverified';
+  // §12.2a #40 KEY-LOG FRESHNESS (rc.28 audit fix) — "this key is still valid" is an authenticated NON-MEMBERSHIP
+  // claim (no MORE RECENT revoking entry exists), the same class as no-fork (F.5a): a CACHED key-log proves only
+  // "revoke ∉ my view", never "revoke does not exist". Freshness is EARNED, and — the audit catch — a raw
+  // self-computed head hash proves NOTHING (the consumer trivially derives it from its own stale log; that was an
+  // overclaim, the same class as the removed `mapInclusion:true`). So `attested` requires a VERIFIED anchor proof
+  // for the head: `keylogHeadAnchor` (an inclusion proof) checked against the substrate — inclusion + final proves
+  // the head IS the whole log at that anchor (independent non-membership). A `keylogFreshAsOf` timestamp from an
+  // AUTHORITATIVE fetch ≥ the doc anchor ⇒ `fresh` (caller-basis, like air-gap no-fork). Else `unverified` — NOT
+  // invalid (the cache is not "wrong"), but the consumer is TOLD its view may be stale (F.5b).
+  let freshness = 'unverified';
+  if (keylogHeadAnchor && typeof substrateVerify === 'function') {
+    const ha = verifyAnchor(rk.head, keylogHeadAnchor, { substrateVerify });     // VERIFIED: head ∈ a substrate-final anchored root
+    if (ha.inclusion && ha.time === 'anchored') freshness = 'attested';
+  }
+  if (freshness === 'unverified' && keylogFreshAsOf && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(keylogFreshAsOf) && (!anchorTime || keylogFreshAsOf >= anchorTime)) freshness = 'fresh';
   // rc.12: surface the ceremony-declared CAPACITY so callers can pass it as opts.capacity to verify()
   // once authority is established — the grant flows FROM resolution, never from a raw genesis.
   const gvCap = genesis.state?.data?.genesis?.value ?? {};

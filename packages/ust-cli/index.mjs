@@ -781,7 +781,7 @@ export function stageSummary({ genHash, witnesses = [], profile }) {
 // resolution inputs are FLAGS on the same command — the tier ladder is one tool, not tribal knowledge.
 async function cmdVerify() {
   const src = process.argv[3];
-  if (!src) die('usage: ust verify <file | - for stdin> [--context data|key] [--offline] [--genesis <file> --keylog <file[,file…]> [--no-fork-confirmed]] [--require-authoritative] [--require-anchored]\n  by default the tool AUTO-RESOLVES the publisher identity from its /.well-known/ discovery pair\n  --require-authoritative floors at HIGH · --require-anchored floors at TOP (downgrade resistance: below-floor ⇒ reject, never a silent lower tier)\n  --require-fresh-keylog rejects a possibly-stale key-log (§12.2a) · --keylog-fresh-as-of <RFC3339-Z> / --anchored-keylog-head <sha256:…> supply freshness evidence');
+  if (!src) die('usage: ust verify <file | - for stdin> [--context data|key] [--offline] [--genesis <file> --keylog <file[,file…]> [--no-fork-confirmed]] [--require-authoritative] [--require-anchored]\n  by default the tool AUTO-RESOLVES the publisher identity from its /.well-known/ discovery pair\n  --require-authoritative floors at HIGH · --require-anchored floors at TOP (downgrade resistance: below-floor ⇒ reject, never a silent lower tier)\n  --require-fresh-keylog rejects a possibly-stale key-log (§12.2a) · --keylog-fresh-as-of <RFC3339-Z> supplies fresh-fetch evidence (attested needs a verified head-anchor proof, API-only)');
   const raw = src === '-' ? readFileSync(0) : readFileSync(src);   // Buffer — admission precedes decode
   // pre-parse ONLY to pick the context — the VERDICT below comes from the normative raw path
   let doc; try { doc = decodeInput(raw.toString('utf8')); } catch (e) { die('not a UST blob/base64/json: ' + e.message); }
@@ -807,8 +807,7 @@ async function cmdVerify() {
   if (arg('require-anchored', false)) opts.requireAnchored = true;
   // §12.2a #40 key-log freshness — floor + evidence inputs (a stale cache can accept a revoked key silently).
   if (arg('require-fresh-keylog', false)) opts.requireFreshKeylog = true;
-  { const f = arg('keylog-fresh-as-of', null); if (f && f !== true) opts.keylogFreshAsOf = f;
-    const h = arg('anchored-keylog-head', null); if (h && h !== true) opts.anchoredKeylogHead = h; }
+  { const f = arg('keylog-fresh-as-of', null); if (f && f !== true) opts.keylogFreshAsOf = f; }
   const genesisPath = arg('genesis', null);
   const noFork = !!arg('no-fork-confirmed', false);
   if (genesisPath && genesisPath !== true) {
@@ -852,7 +851,7 @@ async function cmdVerify() {
     // #71 — the discovery target comes from an UNTRUSTED document; the SSRF guard (resolve → reject private IPs)
     // wraps the fetch on the CLI too, not only the MCP. Core's lexical isPublicDnsShard is the floor beneath it.
     const guardedFetch = makeSsrfSafeFetch(async (u, init) => { console.error(`  ⏳ resolving identity from ${new URL(u).origin} … (--offline to skip)`); return fetch(u, init); });
-    const rd = await P.resolveByDiscovery(doc, { context: opts.context, offline: !!arg('offline', false), noForkConfirmed: noFork, requireAuthoritative: opts.requireAuthoritative, requireAnchored: opts.requireAnchored, requireFreshKeylog: opts.requireFreshKeylog, keylogFreshAsOf: opts.keylogFreshAsOf, anchoredKeylogHead: opts.anchoredKeylogHead },
+    const rd = await P.resolveByDiscovery(doc, { context: opts.context, offline: !!arg('offline', false), noForkConfirmed: noFork, requireAuthoritative: opts.requireAuthoritative, requireAnchored: opts.requireAnchored, requireFreshKeylog: opts.requireFreshKeylog, keylogFreshAsOf: opts.keylogFreshAsOf },
       { substrateVerify, fetchImpl: guardedFetch });
     if (!substrateVerify && rd.resolution && String(rd.resolution.noFork || '').startsWith('HIGH pending')) console.error('  ℹ️  anchor not cross-checked — `npm i @ust-protocol/ots-verify @ust-protocol/rekor-verify` for automatic HIGH');
     if (rd.resolution) {
