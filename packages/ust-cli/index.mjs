@@ -781,7 +781,7 @@ export function stageSummary({ genHash, witnesses = [], profile }) {
 // resolution inputs are FLAGS on the same command — the tier ladder is one tool, not tribal knowledge.
 async function cmdVerify() {
   const src = process.argv[3];
-  if (!src) die('usage: ust verify <file | - for stdin> [--context data|key] [--offline] [--genesis <file> --keylog <file[,file…]> [--no-fork-confirmed]]\n  by default the tool AUTO-RESOLVES the publisher identity from its /.well-known/ discovery pair');
+  if (!src) die('usage: ust verify <file | - for stdin> [--context data|key] [--offline] [--genesis <file> --keylog <file[,file…]> [--no-fork-confirmed]] [--require-authoritative] [--require-anchored]\n  by default the tool AUTO-RESOLVES the publisher identity from its /.well-known/ discovery pair\n  --require-authoritative floors at HIGH · --require-anchored floors at TOP (downgrade resistance: below-floor ⇒ reject, never a silent lower tier)');
   const raw = src === '-' ? readFileSync(0) : readFileSync(src);   // Buffer — admission precedes decode
   // pre-parse ONLY to pick the context — the VERDICT below comes from the normative raw path
   let doc; try { doc = decodeInput(raw.toString('utf8')); } catch (e) { die('not a UST blob/base64/json: ' + e.message); }
@@ -801,6 +801,10 @@ async function cmdVerify() {
     if (v === true) die(`--${flag} needs a value (a JSON file)`);
     if (v !== null) { try { opts[key] = JSON.parse(readFileSync(v, 'utf8')); } catch (e) { die(`could not read --${flag} ${v}: ` + e.message); } }
   }
+  // §3.1/F.5b downgrade-resistance FLOORS — a consumer requiring tier T rejects anything below it (never a silent
+  // lower-tier accept). requireAuthoritative floors at HIGH, requireAnchored at TOP.
+  if (arg('require-authoritative', false)) opts.requireAuthoritative = true;
+  if (arg('require-anchored', false)) opts.requireAnchored = true;
   const genesisPath = arg('genesis', null);
   const noFork = !!arg('no-fork-confirmed', false);
   if (genesisPath && genesisPath !== true) {
@@ -844,7 +848,7 @@ async function cmdVerify() {
     // #71 — the discovery target comes from an UNTRUSTED document; the SSRF guard (resolve → reject private IPs)
     // wraps the fetch on the CLI too, not only the MCP. Core's lexical isPublicDnsShard is the floor beneath it.
     const guardedFetch = makeSsrfSafeFetch(async (u, init) => { console.error(`  ⏳ resolving identity from ${new URL(u).origin} … (--offline to skip)`); return fetch(u, init); });
-    const rd = await P.resolveByDiscovery(doc, { context: opts.context, offline: !!arg('offline', false), noForkConfirmed: noFork },
+    const rd = await P.resolveByDiscovery(doc, { context: opts.context, offline: !!arg('offline', false), noForkConfirmed: noFork, requireAuthoritative: opts.requireAuthoritative, requireAnchored: opts.requireAnchored },
       { substrateVerify, fetchImpl: guardedFetch });
     if (!substrateVerify && rd.resolution && String(rd.resolution.noFork || '').startsWith('HIGH pending')) console.error('  ℹ️  anchor not cross-checked — `npm i @ust-protocol/ots-verify @ust-protocol/rekor-verify` for automatic HIGH');
     if (rd.resolution) {
@@ -1028,6 +1032,46 @@ async function cmdStream() {
     + (!checkpoint ? '   (no --checkpoint — unreachable without one)' : ''));
   console.log('\n  completeness is a RANGE verdict over THESE frames — it never upgrades any single document\'s tier');
   process.exit((r.complete === 'chain-consistent' || r.complete === 'complete') ? 0 : 2);
+}
+
+// ─── ust forkchoice <doc…> — canonical = anchor-included (§3.1/F.5c). Hold ≥2 docs claiming ONE ust_id with
+//     different content (dual-writer race / adversary) → decide WHICH is canonical, deterministically from the chain.
+async function cmdForkChoice() {
+  const files = process.argv.slice(3).filter((a) => !a.startsWith('--'));
+  if (files.length < 2) die('usage: ust forkchoice <doc.json> <doc.json> [more…] [--genesis <f>] [--keylog <f,f…>] [--no-fork-confirmed] [--offline]\n  decide the CANONICAL document among candidates that claim the SAME ust_id — canonical = the one in the anchored hour root (§3.1/F.5c)\n  exit: 0=CANONICAL · 2=INDETERMINATE (none anchored yet) / MULTI_AUTHORITY · 1=E-PREV (equivocation) / E-MALFORMED');
+  const candidates = [];
+  for (const f of files) {
+    const { verdict, doc } = verifyRaw(readFileSync(f));                 // every candidate passes the RAW boundary
+    if (!P.isValid(verdict)) die(`candidate ${f} does not VERIFY (${verdict.error ?? verdict.result})`);
+    candidates.push(doc);
+  }
+  const rd = (flag) => { const v = arg(flag, null); if (v === true) die(`--${flag} needs a value`); if (!v) return null;
+    const { verdict, doc } = verifyRaw(readFileSync(v)); if (!P.isValid(verdict)) die(`--${flag} file does not VERIFY (${verdict.error ?? verdict.result})`); return doc; };
+  const genesis = rd('genesis');
+  const klsRaw = arg('keylog', null);
+  const keylog = (klsRaw && klsRaw !== true) ? klsRaw.split(',').map((f) => { const { verdict, doc } = verifyRaw(readFileSync(f.trim())); if (!P.isValid(verdict)) die(`--keylog entry ${f} does not VERIFY (${verdict.error ?? verdict.result})`); return doc; }) : undefined;
+  const noFork = !!arg('no-fork-confirmed', false);
+  const offline = !!arg('offline', false);
+  // anchor-inclusion is a SUBSTRATE fact — load the same opt-in plugins as `verify`. None installed ⇒ nothing is
+  // anchor-included ⇒ honest INDETERMINATE, never a guessed winner.
+  const plugins = [];
+  if (!offline) for (const pkg of ['@ust-protocol/ots-verify', '@ust-protocol/rekor-verify']) {
+    try { const m = await import(pkg); if (m.substrateVerify) plugins.push(m.substrateVerify); } catch { /* absent */ }
+  }
+  const substrateVerify = plugins.length ? P.combineSubstrates(plugins) : undefined;
+  if (!substrateVerify && !offline) console.error('  ℹ️  no substrate plugin installed — anchor-inclusion cannot be checked → INDETERMINATE. `npm i @ust-protocol/ots-verify` to decide.');
+  const r = await P.forkChoice(candidates, { ...(genesis ? { genesis } : {}), ...(keylog ? { keylog } : {}), noForkConfirmed: noFork, offline, context: 'data', substrateVerify });
+  const ust = r.ust_id ? `  ust_id ${r.ust_id}` : '';
+  if (r.result === 'CANONICAL') {
+    console.log(`  ✅ CANONICAL${ust}`);
+    console.log(`  content_hash  ${r.content_hash}   (authority ${r.authority}, tier ${r.tier})`);
+    if (r.losers.length) console.log(`  losers        ${r.losers.map((l) => l.content_hash).join(', ')}   (valid but not anchor-included for this slot)`);
+    process.exit(0);
+  }
+  if (r.result === 'INDETERMINATE') { console.log(`  ⏳ INDETERMINATE${ust} — ${r.detail || 'no anchor-included candidate yet'}`); process.exit(2); }
+  if (r.result === 'MULTI_AUTHORITY') { console.log(`  ℹ️  MULTI_AUTHORITY${ust} — distinct authorities share the ust_id string (not a fork); each is canonical for its own name`); process.exit(2); }
+  console.log(`  ❌ ${r.result}${ust}${r.detail ? ' — ' + r.detail : ''}`);
+  process.exit(1);
 }
 
 // ─── ust mirror <domain> — vendor-independence on a SECOND vendor, attested never claimed ─────────────
@@ -1437,7 +1481,7 @@ export async function cmdRotate() {
 const isMain = (() => { try { return process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; } })();
 if (isMain) {
   const cmd = process.argv[2];
-  const run = { verify: cmdVerify, canon: cmdCanon, genesis: cmdGenesis, rotate: cmdRotate, discovery: cmdDiscovery, publish: cmdPublish, mirror: cmdMirror, stream: cmdStream, witness: cmdWitness }[cmd];
-  if (!run) { console.error('ust — verify machine-readable state\n\n  ust verify <file|->        verify a transcript (exit 0 = VALID, 1 = not)\n  ust canon  <file|->        print canonical bytes + hash (cross-language diff)\n  ust genesis --domain <d>   run the HIGH genesis ceremony (add --publish cf for one-click serving)\n  ust rotate  --domain <d> --root <enc>   APPEND a key rotation to the served log (never re-mint; old docs stay valid)\n  ust discovery <domain>     attest the §20.1 serving contract (any infra)\n  ust publish cf --domain <d> --genesis <f>   deploy the CF serving adapter for an existing genesis\n  ust mirror <domain>        publish + attest a SECOND-vendor mirror (§20.1 vendor-independence)\n  ust stream <frames…>       RANGE verdict: chain · forks · completeness (needs --checkpoint for proven)\n  ust witness rekor --domain <d>   log the genesis in a transparency log → automatic no-fork (#68)\n'); process.exit(cmd ? 1 : 0); }
+  const run = { verify: cmdVerify, canon: cmdCanon, genesis: cmdGenesis, rotate: cmdRotate, discovery: cmdDiscovery, publish: cmdPublish, mirror: cmdMirror, stream: cmdStream, forkchoice: cmdForkChoice, witness: cmdWitness }[cmd];
+  if (!run) { console.error('ust — verify machine-readable state\n\n  ust verify <file|->        verify a transcript (exit 0 = VALID, 1 = not; --require-anchored floors at TOP)\n  ust canon  <file|->        print canonical bytes + hash (cross-language diff)\n  ust genesis --domain <d>   run the HIGH genesis ceremony (add --publish cf for one-click serving)\n  ust rotate  --domain <d> --root <enc>   APPEND a key rotation to the served log (never re-mint; old docs stay valid)\n  ust discovery <domain>     attest the §20.1 serving contract (any infra)\n  ust publish cf --domain <d> --genesis <f>   deploy the CF serving adapter for an existing genesis\n  ust mirror <domain>        publish + attest a SECOND-vendor mirror (§20.1 vendor-independence)\n  ust stream <frames…>       RANGE verdict: chain · forks · completeness (needs --checkpoint for proven)\n  ust forkchoice <docs…>     pick the CANONICAL doc among candidates for ONE ust_id (canonical = anchor-included)\n  ust witness rekor --domain <d>   log the genesis in a transparency log → automatic no-fork (#68)\n'); process.exit(cmd ? 1 : 0); }
   run().catch((e) => die(e.message || String(e)));
 }

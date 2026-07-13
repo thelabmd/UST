@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.23' };
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.24' };
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -425,6 +425,22 @@ export function verify(doc, opts = {}) {
     // §3.1/§15 — TOP = authoritative identity + anchored time. HIGH = name-bound (corroborated or authoritative).
     // Stream COMPLETENESS is a separate RANGE verdict (verifyStream), never a single-document claim.
     const tier = authoritative && timeField.strength === 'anchored' ? 'TOP' : nameBound ? 'HIGH' : 'LIGHT';
+    // §3.1/F.5b DOWNGRADE RESISTANCE — the symmetric floor to requireAuthoritative. A consumer requiring TOP
+    // MUST reject anything the evidence proves below TOP, NEVER silently accept a lower tier (stripping the anchor
+    // can only LOWER the tier, W1: it cannot forge upward). The rejection NAMES the missing coordinate: a
+    // non-authoritative identity fails the name axis first (E-GENESIS / INDETERMINATE-on-unavailable, as
+    // requireAuthoritative); an authoritative doc with NO proof attached is a structural downgrade (E-ANCHOR); a
+    // proof that is PRESENT + inclusion-valid but whose substrate is unreachable / not-yet-buried is retryable,
+    // not a forgery (INDETERMINATE). (A malformed / non-reaching proof already returned E-ANCHOR above, ln 410.)
+    if (opts.requireAnchored && tier !== 'TOP') {
+      if (!authoritative)
+        return identity.status === 'unavailable'
+          ? { result: 'INDETERMINATE', reason: 'unavailable', identity, detail: identity.detail }
+          : bad('E-GENESIS', 'anchored (TOP) required but identity is ' + identity.strength + '/' + identity.status);
+      if (doc.proof === undefined)
+        return bad('E-ANCHOR', 'anchored (TOP) required but no anchor proof is attached (downgrade rejected)');
+      return { result: 'INDETERMINATE', reason: 'unavailable', detail: 'anchored (TOP) required; proof present but substrate is ' + timeField.status + '/' + timeField.strength + ' — retry' };
+    }
     return { result: 'VALID:' + tier, tier, identity: { ...identity, mode: shardMode }, disclosed, sources, ...nameField,
       ...(identity.noFork ? { no_fork: identity.noFork } : {}),
       ust_id: st.id.ust_id, class: st.id.class, content_hash: ch, time: timeField, provenance: provenanceReport,
@@ -582,6 +598,45 @@ export async function verifyAsync(doc, opts = {}) {
   if (!doc?.proof || !opts.substrateVerify || opts.offline) return verify(doc, opts);
   let receipt; try { receipt = await opts.substrateVerify(doc.proof.anchor, doc.proof.root); } catch { receipt = null; }
   return verify(doc, { ...opts, substrateVerify: () => receipt });   // receipt (or null) → sync verifyAnchor path
+}
+
+// §3.1/F.5c FORK-CHOICE — canonical = anchor-included. One `ust_id` may have several candidate documents with
+// DISTINCT content_hashes (the honest dual-writer race — main + failover both seal the slot — or an adversary
+// offering two states). The CANONICAL document is the one whose content_hash is in the authority's anchored hour
+// root; a consumer holding more than one resolves DETERMINISTICALLY from the chain, not from local arrival order
+// (Proposition F.5c). Async because "anchor-included" means substrate-final, which verifyAsync awaits. Fail-safe:
+// with no substrateVerify NO candidate is anchored ⇒ INDETERMINATE, never a guessed winner. Returns ONE verdict.
+export async function forkChoice(candidates, opts = {}) {
+  if (!Array.isArray(candidates) || candidates.length === 0)
+    return { result: 'E-MALFORMED', detail: 'forkChoice needs a non-empty array of candidate documents' };
+  const ids = new Set(candidates.map((c) => c?.state?.id?.ust_id));
+  if (ids.size !== 1 || ids.has(undefined))                            // fork-choice is PER-SLOT — a mixed batch is a caller bug, not a fork
+    return { result: 'E-MALFORMED', detail: 'forkChoice candidates must all share one ust_id (fork-choice is per-slot)' };
+  const ust_id = [...ids][0];
+  // verify each at its NATURAL tier (strip the floors — forkChoice does its own tier logic). A candidate is
+  // ANCHOR-INCLUDED iff it VERIFIES and its content_hash sits in a substrate-final anchored root (time 'anchored').
+  const vopts = { ...opts, requireAnchored: false, requireAuthoritative: false };
+  const verds = await Promise.all(candidates.map(async (d) => ({ doc: d, v: await verifyAsync(d, vopts) })));
+  const anchored = [], losers = [], invalid = [];
+  for (const { doc, v } of verds) {
+    if (!/^VALID:/.test(v.result || '')) { invalid.push({ result: v.result, detail: v.detail }); continue; }
+    const rec = { doc, content_hash: v.content_hash, authority: doc?.state?.id?.domain_shard, tier: v.tier };
+    (v.time?.strength === 'anchored' ? anchored : losers).push(rec);   // anchored = in the chain; else a valid non-anchored candidate
+  }
+  if (anchored.length === 0)                                           // nothing in Fₜ yet — undecidable at TOP, wait or resolve at HIGH
+    return { result: 'INDETERMINATE', ust_id, reason: 'no anchor-included candidate', detail: 'no candidate is in a substrate-final anchored root yet — wait for the hour anchor or resolve at HIGH', losers: losers.length, invalid: invalid.length };
+  // group anchored by AUTHORITY (domain_shard). A single authority with ≥2 DISTINCT anchored content_hashes for
+  // one ust_id is EQUIVOCATION — it signed a root containing both = a non-repudiable, punishable fault (E-PREV).
+  const byAuth = new Map();
+  for (const a of anchored) { if (!byAuth.has(a.authority)) byAuth.set(a.authority, new Set()); byAuth.get(a.authority).add(a.content_hash); }
+  for (const [authority, hashes] of byAuth) if (hashes.size >= 2)
+    return { result: 'E-PREV', ust_id, authority, detail: `operator equivocation: authority ${authority} anchored ${hashes.size} distinct content_hashes for one ust_id`, content_hashes: [...hashes] };
+  if (byAuth.size > 1)                                                 // distinct NAMES sharing a ust_id string — not a fork; canonicity is per-authority
+    return { result: 'MULTI_AUTHORITY', ust_id, detail: 'distinct authorities anchored the same ust_id string — not a fork (canonicity is per-authority)', canonicals: anchored.map((a) => ({ authority: a.authority, content_hash: a.content_hash })) };
+  const winner = anchored[0];                                         // one authority, one distinct anchored content_hash → THE canonical
+  return { result: 'CANONICAL', ust_id, authority: winner.authority, content_hash: winner.content_hash, tier: winner.tier, canonical: winner.doc,
+    losers: losers.map((l) => ({ content_hash: l.content_hash, tier: l.tier, reason: 'valid but not anchor-included for this slot (out-raced or unanchored)' })),
+    ...(invalid.length ? { invalid } : {}) };
 }
 
 // ─── #69 C — the EXPECTED GRID. `ust_id` IS the time coordinate, so the slots a cadence implies over an

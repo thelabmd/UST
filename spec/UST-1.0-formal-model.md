@@ -264,6 +264,80 @@ non-membership on the time axis: both are F.3.1 authenticated non-membership ove
 structure already commits (the frame grid for completeness, the anchored name-map for no-fork). The strong word
 is EARNED by bringing that non-membership coordinate into `ℐ`, not bought by weakening the definition.
 
+## F.5b Downgrade resistance is the consumer's floor, not the producer's promise
+
+The tiers are totally ordered, `LIGHT < HIGH < TOP`, and by Theorem F.5 each is a coarser σ-algebra than the
+next: `𝒮_LIGHT ⊆ 𝒮_HIGH ⊆ 𝒮_TOP`. Write `T(d, ℐ)` for the FINEST tier decidable for document `d` from an
+information set `ℐ` — the verdict the reference verifier emits. Three facts pin its behaviour under an attacker
+who can only DELETE evidence (strip the anchor `proof`, omit the genesis / key-log, hide the name-map):
+
+- **Monotone erosion.** `ℐ' ⊆ ℐ ⇒ T(d, ℐ') ≤ T(d, ℐ)`. Every tier above LIGHT is earned by a coordinate that
+  lives OUTSIDE the document bytes — the resolved key-log for HIGH (§F.5), the anchored map + substrate root for
+  TOP (§F.5a, §F.3). Removing any such coordinate from `ℐ` removes it from the σ-algebra that decides the higher
+  tier, so the decidable tier can only fall. Stripping is a coarsening, never a refinement.
+- **No upward forge (`W1`).** `T(d, ℐ)` is never ABOVE the true tier the evidence supports: authority can be
+  DENIED but not fabricated (F.3.1 / F.5a — non-membership and anchored time are not producible by the
+  publisher). Evidence is necessary, not assertable; there is no header, flag, or self-claim in `𝒮_LIGHT` that
+  raises `T`.
+- **Consumer floor.** A consumer names a REQUIRED tier `R` and accepts `d` iff `T(d, ℐ) ≥ R`. This is the only
+  place the ordering is USED: the floor is a comparison, not a coercion.
+
+**Theorem F.5b (downgrade resistance).** Let a consumer hold floor `R` and let an attacker present `d` with an
+eroded `ℐ' ⊆ ℐ`. Then either `T(d, ℐ') ≥ R` (the surviving evidence still earns `R` — a genuine `R`-grade
+document, nothing was gained) or `T(d, ℐ') < R`, in which case the consumer REJECTS. There is no third branch:
+because acceptance is `T ≥ R` and never "accept at whatever `T` came out," a strip that drops the tier below the
+floor produces a rejection, never a silent accept at the lower tier. *Proof.* Immediate from monotone erosion
+(the strip can only lower `T`) and the floor being a total-order comparison against a fixed `R`. Downgrade is the
+floor doing its job; it is the consumer's CHOICE of `R`, never a forge succeeding (`W1` blocks the only other
+route, raising `T`). ∎
+
+**Corollary F.5b (the two floors are symmetric).** `requireAuthoritative` is the floor `R = HIGH`-authoritative;
+`requireAnchored` is the floor `R = TOP`. A verifier MUST implement each as `T(d, ℐ) ≥ R ? accept : reject`. The
+rejection NAMES the missing coordinate — a stripped/absent anchor proof ⇒ `E-ANCHOR` (a structural downgrade: the
+document cannot reach TOP without a new proof), a non-authoritative identity ⇒ `E-GENESIS`, and an anchor that is
+PRESENT and inclusion-valid but whose substrate is unreachable or not-yet-buried ⇒ `INDETERMINATE` (retry, `W1`:
+the evidence may still arrive — this is unavailability, not a forgery). Absence of a floor is the LIGHT default,
+where `T` is surfaced as-is; the floors exist precisely so a TOP-needing consumer cannot be handed a LIGHT doc.
+
+## F.5c Fork-choice — anchor-inclusion is the choice function
+
+A single time coordinate `ust_id` may have SEVERAL candidate documents `{d₁, …, dₙ}` with DISTINCT
+`content_hash`es: the honest dual-writer race (main and failover both seal the slot, different arrival ⇒
+different bytes), or an adversary offering two states for one slot. A consumer holding two of them must resolve
+which is canonical WITHOUT trusting local arrival order — otherwise two consumers disagree, and "valid" stops
+being a function of the data.
+
+The resolvent is already in the model. The anchor journal `Fₜ` (§F.3) commits, per authority and per hour, a SET
+of leaves — the hour's Merkle root, substrate-timestamped — a single totally-ordered, tamper-evident object. Define
+the choice function
+
+  `canonical(ust_id) = the unique dᵢ with content_hash(dᵢ) ∈ leaves(A_{auth}(hour(ust_id)))`,
+
+where `A_{auth}(h)` is the anchored leaf-set of authority `auth` for hour `h`. Its well-definedness is a counting
+statement about the operator's admission rule:
+
+- **Election ⇒ uniqueness.** The store-NX election (a content-addressed conditional-write: the first writer to
+  claim `ust_id` wins, §11 dual-writer) admits AT MOST ONE writer's document to the set that is later anchored.
+  So in honest operation `|{ i : ch(dᵢ) ∈ A_{auth} }| ≤ 1`.
+- **Exactly one anchored ⇒ that one is canonical.** The others are non-canonical LOSERS — not invalid (each may
+  be a perfectly `VALID:HIGH` document; it simply lost the race and was never anchored for this slot). A consumer
+  deterministically keeps the anchor-included one.
+- **Zero anchored ⇒ `INDETERMINATE` at TOP.** No candidate is in `Fₜ` yet (the hour is still open, or neither was
+  elected). Fork-choice is undecidable at TOP; the consumer resolves at HIGH by other means or WAITS for the hour
+  anchor. This is unavailability (`W1`), not a fault.
+- **Two or more anchored under ONE authority ⇒ `E-PREV` (equivocation).** `|{ i : ch(dᵢ) ∈ A_{auth} }| ≥ 2` with
+  distinct `content_hash`es means the operator committed TWO states for one slot into an anchored root under one
+  name — a non-repudiable, detectable fault. The anchor makes it PUNISHABLE: the operator SIGNED a root
+  containing both, so equivocation is evidence, not deniable ambiguity. (Distinct authorities publishing the same
+  `ust_id` are NOT a fork — canonicity is per-authority; each is canonical in its own `A_{auth}`.)
+
+**Proposition F.5c (determinism).** Two consumers with the same candidate set and the same anchor `A_{auth}` emit
+the SAME `canonical`. *Proof.* The choice reads only `content_hash(dᵢ)` (a function of the bytes) and membership
+in `A_{auth}` (a function of the shared anchor); neither depends on arrival order or local state. So `canonical`
+is a function of `(candidates, A_{auth})` alone. ∎ This is exactly the property §11 requires of the dual-writer:
+"canonical = anchor-included" turns an operator-side race into a consumer-side FUNCTION — the loser is decided by
+the chain, not by whichever document a given agent happened to fetch first.
+
 ## F.6 Composition — the event algebra
 
 An **anchored existence-and-commitment claim** is an event `A ∈ Fₜ`; an UNANCHORED signed claim is a document

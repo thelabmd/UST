@@ -10,7 +10,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { listTools, dispatch } from './index.mjs';
 
-const VERSION = '1.0.0-rc.7';
+// VERSION is read from THIS package's own manifest — never hardcoded (a hardcoded copy silently drifted to rc.7
+// while package.json climbed; a stale advertised version is a safety lie, so the manifest is the ONE source).
+let VERSION = 'unknown';
+try { VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version; } catch { /* leave 'unknown' */ }
 // Version handshake: report the resolved ust-protocol version too. A stale verifier gives confident WRONG
 // verdicts, so WHICH protocol build is loaded is safety-relevant, not cosmetic. (ust-protocol doesn't export
 // ./package.json, so resolve its entry and read the sibling manifest.)

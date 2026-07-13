@@ -144,6 +144,29 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   check('revocation U < C → pre-compromise accepted (suspect)', (r => r.strength === 'authoritative' && r.status === 'suspect')(P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], noForkConfirmed: true, anchorTime: '2026-06-28T14:59:59Z' })));
   const revBad = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1903', key_id: G.key_id }, T, { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: '2026-06-28T15:00:00.5Z' }, P.contentHash(add)));
   check('fractional compromised_since → E-MALFORMED (strict-Z, §12.2)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, revBad], anchorTime: C }).error === 'E-MALFORMED');
+  // ─── #45 F.5b DOWNGRADE RESISTANCE — requireAnchored is the symmetric floor to requireAuthoritative. Stripping
+  //     the anchor can only LOWER the tier; a TOP-needing consumer REJECTS, never silently accepts a lower tier.
+  const anchorSV = () => ({ final: true, time: '2027-01-01T00:00:00Z' });
+  check('#45 requireAnchored: TOP doc passes the TOP floor', P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', requireAnchored: true, substrateVerify: anchorSV }).result === 'VALID:TOP');
+  check('#45 requireAnchored: proof STRIPPED (authoritative HIGH) → E-ANCHOR (downgrade rejected)', P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', requireAnchored: true }).error === 'E-ANCHOR');
+  check('#45 control: same stripped doc, NO floor → VALID:HIGH (default surfaces the earned tier)', P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data' }).result === 'VALID:HIGH');
+  check('#45 requireAnchored: proof present but substrate unreachable → INDETERMINATE (retry, not forgery)', P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', requireAnchored: true, substrateVerify: () => null }).result === 'INDETERMINATE');
+  check('#45 requireAnchored: self-asserted (LIGHT) doc → E-GENESIS (name axis fails first)', P.verify(mk(), { requireAnchored: true, context: 'data' }).error === 'E-GENESIS');
+  // ─── #45 F.5c FORK-CHOICE — canonical = anchor-included. One ust_id, distinct content_hashes (dual-writer race).
+  const leafRoot = (d) => ({ root: P.Hbytes('ust:leaf', Buffer.from(P.contentHash(d), 'utf8')), path: [], anchor: { substrate: 'bitcoin-ots' } });
+  const slot = (n) => P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.2015', key_id: K.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { n } } }), K.priv, K.pubB64);
+  const f1 = slot('1'), f2 = slot('2');
+  const fp1 = leafRoot(f1), fp2 = leafRoot(f2);
+  const cand1 = { ...f1, proof: fp1 }, cand2 = { ...f2, proof: fp2 };
+  const fbase = { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data' };
+  const only1 = (a, root) => root === fp1.root ? anchorSV() : null;
+  const fcWin = await P.forkChoice([cand1, cand2], { ...fbase, substrateVerify: only1 });
+  check('#45 forkChoice: one anchor-included → CANONICAL picks it', fcWin.result === 'CANONICAL' && fcWin.content_hash === P.contentHash(f1));
+  check('#45 forkChoice: the out-raced doc is a recorded loser (VALID, not anchored)', fcWin.losers.length === 1 && fcWin.losers[0].content_hash === P.contentHash(f2));
+  check('#45 forkChoice: determinism — reversed input order → SAME canonical', (await P.forkChoice([cand2, cand1], { ...fbase, substrateVerify: only1 })).content_hash === fcWin.content_hash);
+  check('#45 forkChoice: neither anchored → INDETERMINATE (no guessed winner)', (await P.forkChoice([cand1, cand2], { ...fbase, substrateVerify: () => null })).result === 'INDETERMINATE');
+  check('#45 forkChoice: both anchored, one authority, distinct hash → E-PREV (equivocation)', (await P.forkChoice([cand1, cand2], { ...fbase, substrateVerify: anchorSV })).result === 'E-PREV');
+  check('#45 forkChoice: mixed ust_ids → E-MALFORMED (fork-choice is per-slot)', (await P.forkChoice([cand1, { ...docK, proof: topProof }], { ...fbase, substrateVerify: anchorSV })).result === 'E-MALFORMED');
 }
 
 // ─── rc.6 — the OBLIGATIONS TABLE (§14a): every commitment-bearing member recomputed; semantic consistency;

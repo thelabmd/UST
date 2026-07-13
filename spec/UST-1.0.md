@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.23`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.24`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -155,6 +155,29 @@ canonical), I5 (bounds), I6 (blinded privacy when used), I9 (data untrusted), I1
 invariants (HIGH/TOP, strengths):** I2's NAME authority, I7, I11, I12, I13 — verified WHEN present, reported as
 strengths, never a floor gate. **Rule:** any rule that raises the floor above "sign your canonical addressable
 JSON" is a regression against adoption and belongs in a TIER, not the floor.
+
+**A tier is EARNED per verification, never asserted by a header (downgrade resistance, F.5b).** The tier is
+computed from the evidence in the verifier's information set `ℐ` — resolved key-log for HIGH, anchored proof for
+TOP — and there is NO field a producer can set to CLAIM a tier. Because every rung above LIGHT rests on a
+coordinate OUTSIDE the document bytes, an attacker who strips the anchor `proof` or omits the genesis can only
+LOWER the decidable tier (never forge it upward: authority is DENIED, not fabricated, `W1`). Downgrade resistance
+is therefore the CONSUMER's job, expressed as a required-tier FLOOR: a consumer requiring tier `T` MUST reject
+anything the evidence proves below `T` — `requireAuthoritative` floors at HIGH, `requireAnchored` floors at TOP.
+A missing/invalid anchor proof ⇒ `E-ANCHOR`; a non-authoritative identity ⇒ `E-GENESIS`; an anchor present and
+inclusion-valid but whose substrate is unreachable or not-yet-buried ⇒ `INDETERMINATE` (retry, not a forgery) —
+NEVER a silent accept at a lower tier. Stripping proofs yields rejection *for a consumer that required the higher
+tier*; it is that consumer's floor doing its job, not a downgrade the attacker achieved.
+
+**Fork-choice — canonical = anchor-included (F.5c).** A single `ust_id` MAY have several candidate documents with
+DISTINCT `content_hash`es (an honest dual-writer race — main + failover both seal the slot — or an adversary
+offering two states). The CANONICAL document for a `ust_id` is the one whose `content_hash` is INCLUDED in the
+authority's anchored hour root (§11). A consumer holding more than one resolves deterministically: **exactly one
+anchor-included ⇒ that one is canonical** (the others are non-canonical losers — `VALID` but out-raced, never
+anchored for this slot); **zero anchor-included ⇒ `INDETERMINATE` at TOP** (wait for the hour anchor or resolve at
+HIGH); **two or more anchor-included under the SAME authority with distinct `content_hash`es ⇒ `E-PREV`**
+(operator equivocation — a non-repudiable, punishable fault: the operator signed a root containing both). Distinct
+authorities publishing the same `ust_id` are not a fork (canonicity is per-authority). The choice reads only the
+bytes and the shared anchor, so two consumers reach the SAME canonical regardless of local fetch order.
 
 ---
 
@@ -1535,6 +1558,20 @@ provenance and will be lifted into this ledger when the spec is published.
   single-source result `explorer-single`, reserving `explorer-corroborated` for ≥2; and `verifyStream`'s
   origin-to-checkpoint PREFIX scope is documented honestly (a true middle-`[from,to]` range needs a previous
   checkpoint + cumulative-count delta — a tracked follow-up, not silently assumed).
+- **REV 35 (2026-07-13)** — #45, the two tier/fork INTEGRITY edges the 7th audit named, now formalized and
+  enforced. (1) **Downgrade resistance** (§3.1, F.5b): a tier is EARNED per verification, never asserted by a
+  header, and stripping evidence can only LOWER the decidable tier (`W1`: it cannot forge upward). So downgrade
+  resistance is a CONSUMER FLOOR — `requireAnchored` is the symmetric twin of `requireAuthoritative`: a
+  TOP-needing consumer REJECTS anything below TOP (a stripped/absent anchor ⇒ `E-ANCHOR`; a present but
+  substrate-unavailable/not-yet-buried anchor ⇒ `INDETERMINATE` retry; a non-authoritative identity ⇒
+  `E-GENESIS`), NEVER a silent lower-tier accept. (2) **Fork-choice** (§3.1, F.5c): the CANONICAL document for a
+  `ust_id` is the one whose `content_hash` is INCLUDED in the authority's anchored hour root. New `forkChoice()`
+  resolves candidates deterministically — exactly one anchor-included ⇒ `CANONICAL` (others are `VALID` but
+  non-canonical losers); none ⇒ `INDETERMINATE`; two or more under ONE authority with distinct hashes ⇒ `E-PREV`
+  (operator equivocation, a punishable fault: it signed a root containing both). The choice reads only the bytes
+  + the shared anchor, so two consumers agree regardless of local fetch order — turning the dual-writer race into
+  a consumer-side FUNCTION. Surfaced through `ust_verify {requireAnchored}` + `ust_fork_choice` (MCP) and
+  `ust verify --require-anchored` + `ust forkchoice` (CLI). +11 conformance vectors; formal-model F.5b/F.5c.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the
