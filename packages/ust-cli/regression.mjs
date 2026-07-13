@@ -597,6 +597,29 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   check('rfc6962_wrong_root_fails', verifyInclusion({ leafHash: l[2], index: 2, treeSize: 3, hashes: [n01.toString('hex')], rootHash: 'aa'.repeat(32) }) === false);
 }
 
+// ── 11. UST#66 `ust rotate` — APPENDS a rotation (never re-mint): the new key resolves authoritative, the OLD
+// key STAYS valid (continuity, §12.2, resolved at anchored time), the log is a PREFIX (refuse-rewrite), and the
+// cold-root backup roundtrips (wrong passphrase throws). Uses the testable core rotateKeylog.
+{
+  const Tr = { generated_at: '2026-06-28T10:00:00Z', valid_from: '2026-06-28T10:00:00Z', valid_to: '2026-06-28T11:00:00Z' };
+  const dom = 'rot.example';
+  const root = await W.generateSigner({ extractable: true });
+  const genesis = await W.seal(P.buildGenesis({ domain_shard: dom, ust_id: 'ust:20260628.10', key_id: root.key_id }, Tr, root.pub), root);
+  const K1 = await W.generateSigner({ extractable: true });
+  const kl0 = await W.seal(P.buildKeyLogEntry({ domain_shard: dom, ust_id: 'ust:20260628.1001', key_id: root.key_id }, Tr, { op: 'add', pub: K1.pub, new_key_id: K1.key_id }, P.contentHash(genesis)), root);
+  const docBy = async (s) => W.seal(await W.buildState({ domain_shard: dom, ust_id: 'ust:20260628.1010', key_id: s.key_id, class: 'observation' }, Tr, { r: { kind: 'captured', value: { x: '1' } } }), s);
+  const r = await C.rotateKeylog({ genesis, keylog: [kl0], rootSigner: root, time: Tr, ustId: 'ust:20260628.1002' });
+  check('rotate_new_key_authoritative', P.resolveAuthority(await docBy(r.newOp), { genesis, keylog: r.keylog, noForkConfirmed: true }).strength === 'authoritative');
+  check('rotate_old_key_still_valid_continuity', P.resolveAuthority(await docBy(K1), { genesis, keylog: r.keylog, noForkConfirmed: true }).strength === 'authoritative');
+  check('rotate_appends_never_rewrites', P.contentHash(r.keylog[0]) === P.contentHash(kl0) && r.keylog.length === 2);
+  const rv = await C.rotateKeylog({ genesis, keylog: [kl0], rootSigner: root, reason: 'retired', time: Tr, ustId: 'ust:20260628.1002' });
+  check('rotate_reason_retired_revokes', !!rv.revokedPub && rv.keylog.length === 3);
+  check('rotate_compromised_needs_since', await threw(() => C.rotateKeylog({ genesis, keylog: [kl0], rootSigner: root, reason: 'compromised', time: Tr, ustId: 'x' })));
+  const enc = C.encryptKey(Buffer.from(await crypto.subtle.exportKey('pkcs8', root.privateKey)), 'pw');
+  check('rotate_root_backup_roundtrip', (await C.rootSignerFrom(C.decryptKey(enc, 'pw'), root.pub)).pub === root.pub);
+  check('rotate_wrong_passphrase_throws', await threw(async () => C.decryptKey(enc, 'wrong')));
+}
+
 console.log(`\nPASS ${pass} FAIL ${fail} NOTES ${note}`);
 if (fail) { console.error('\nFAILURES:\n  ' + fails.join('\n  ')); process.exit(1); }
 console.log('✓ 9th-audit regression holds — the seven points cannot silently regress');

@@ -9,7 +9,7 @@
 import { createInterface } from 'node:readline/promises';
 import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { createCipheriv, scryptSync, randomBytes, createHash, generateKeyPairSync, sign as edsign } from 'node:crypto';
+import { createCipheriv, createDecipheriv, scryptSync, randomBytes, createHash, generateKeyPairSync, sign as edsign } from 'node:crypto';
 import * as P from 'ust-protocol';
 import { makeSsrfSafeFetch } from 'ust-protocol/ssrf';   // #71 — the SAME Node SSRF guard the MCP uses (resolve→classify→reject private)
 import * as W from '@ust-protocol/web-signer';
@@ -135,6 +135,13 @@ export const encryptKey = (pkcs8, pass) => {
   const c = createCipheriv('aes-256-gcm', key, iv);
   const ct = Buffer.concat([c.update(pkcs8), c.final()]);
   return Buffer.concat([salt, iv, c.getAuthTag(), ct]).toString('base64');
+};
+// inverse of encryptKey — throws (GCM auth) on a wrong passphrase / corrupt backup (never a silent bad key).
+export const decryptKey = (b64, pass) => {
+  const buf = Buffer.from(b64, 'base64');
+  const salt = buf.subarray(0, 16), iv = buf.subarray(16, 28), tag = buf.subarray(28, 44), ct = buf.subarray(44);
+  const d = createDecipheriv('aes-256-gcm', scryptSync(pass, salt, 32), iv); d.setAuthTag(tag);
+  return Buffer.concat([d.update(ct), d.final()]);
 };
 
 // Build genesis + key-log[0] (adds an operational key) and SELF-CHECK both (fail-closed, 9th audit #6):
@@ -1341,12 +1348,93 @@ async function cmdGenesis() {
   rl.close();
 }
 
+// ─── UST#66 `ust rotate` — key-log lifecycle: APPEND a rotation (never re-mint). rc.15 added the remint guard;
+//     this is the missing half. Continuity law (§12.2): old docs stay valid under the key that was active at
+//     THEIR anchored time, so a rotation NEVER invalidates history. Testable core + CLI wrapper.
+export async function rootSignerFrom(pkcs8, rootPubB64url) {
+  const priv = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, false, ['sign']);
+  const pubKey = await crypto.subtle.importKey('raw', Buffer.from(rootPubB64url, 'base64url'), { name: 'Ed25519' }, true, ['verify']);
+  const signer = await W.signerFromKeys(priv, pubKey);
+  if (signer.pub !== rootPubB64url) throw new Error('decrypted root key does NOT match the served genesis pub — wrong backup');
+  return signer;
+}
+// Build the grown key-log. Signs the new op key with the ROOT (a current valid key, §12.2), prev-chained;
+// optionally revokes the superseded op key with a reason. Refuses to REWRITE (input MUST be a prefix). Pure.
+export async function rotateKeylog({ genesis, keylog, rootSigner, reason = null, compromisedSince = null, time, ustId }) {
+  const domain = genesis.state.id.domain_shard;
+  if (!Array.isArray(keylog)) throw new Error('key-log is not a JSON array');
+  const currentOp = [...keylog].reverse().find((e) => { const op = e.state?.data?.key_op?.value; return op && (op.op === 'add' || op.op === 'rotate'); });
+  const newOp = await W.generateSigner({ extractable: true });
+  const prev = keylog.length ? P.contentHash(keylog[keylog.length - 1]) : P.contentHash(genesis);
+  const rotate = await W.seal(P.buildKeyLogEntry({ domain_shard: domain, ust_id: ustId, key_id: rootSigner.key_id }, time, { op: 'rotate', pub: newOp.pub, new_key_id: newOp.key_id }, prev), rootSigner);
+  const out = [...keylog, rotate];
+  if (reason) {
+    if (reason !== 'retired' && reason !== 'compromised') throw new Error('--reason must be retired|compromised');
+    if (!currentOp) throw new Error('--reason given but there is no current op key to revoke');
+    if (reason === 'compromised' && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(compromisedSince || '')) throw new Error('--reason compromised requires --compromised-since <RFC3339-Z>');
+    const oldPub = currentOp.state.data.key_op.value.pub;
+    const revoke = await W.seal(P.buildKeyLogEntry({ domain_shard: domain, ust_id: ustId, key_id: rootSigner.key_id }, time, { op: 'revoke', pub: oldPub, reason, ...(reason === 'compromised' ? { compromised_since: compromisedSince } : {}) }, P.contentHash(rotate)), rootSigner);
+    out.push(revoke);
+  }
+  for (let i = 0; i < keylog.length; i++) if (P.contentHash(keylog[i]) !== P.contentHash(out[i])) throw new Error('refuse: rotation must APPEND, not rewrite (entry ' + i + ' changed)');
+  return { keylog: out, newOp, revokedPub: reason && currentOp ? currentOp.state.data.key_op.value.pub : null };
+}
+export async function cmdRotate() {
+  const domain = arg('domain');
+  if (!domain || domain === true) die('usage: ust rotate --domain <d> --root <encrypted-root.b64> [--keylog <served array file>]\n         [--reason retired|compromised [--compromised-since <RFC3339-Z>]] [--out .]\n  APPENDS a key rotation to the served log (never re-mints). Old docs stay valid under the key active at their anchored time (§12.2).');
+  const rootFile = arg('root'); if (!rootFile || rootFile === true) die('--root <encrypted root backup .b64> required (the cold crown key)');
+  // fetch the current identity (genesis + served key-log), or take the log from --keylog
+  const get = async (p) => { const r = await fetch(`https://${domain}${p}`, { signal: AbortSignal.timeout(10000), redirect: 'error' }); if (!r.ok) throw new Error(`HTTP ${r.status} at ${p}`); return r.text(); };
+  let genesis; try { genesis = JSON.parse(await get('/.well-known/ust-genesis')); } catch (e) { die('cannot fetch genesis for ' + domain + ': ' + (e.message || e)); }
+  if (!P.isValid(P.verify(genesis, { context: 'key' }))) die('served genesis does not VERIFY');
+  const klFile = arg('keylog', null);
+  let keylog;
+  try { keylog = (klFile && klFile !== true) ? JSON.parse(readFileSync(klFile, 'utf8')) : JSON.parse(await get('/.well-known/ust-keylog')); }
+  catch (e) { die('cannot load the key-log: ' + (e.message || e)); }
+  // decrypt the cold root, reconstruct the signer, self-verify it matches the genesis
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q) => rl.question(q);
+  const pass = await askHidden('  🔑 root passphrase: ', ask);
+  let rootSigner;
+  try { rootSigner = await rootSignerFrom(decryptKey(readFileSync(rootFile, 'utf8').trim(), pass), genesis.state.data.genesis.value.pub); }
+  catch (e) { rl.close(); die(e.message.includes('match') ? e.message : 'decrypt failed — wrong passphrase or corrupt backup'); }
+  const reason = arg('reason', null); const cs = arg('compromised-since', null);
+  const { ust_id, time } = W.nowFrame();
+  let grown;
+  try { grown = await rotateKeylog({ genesis, keylog, rootSigner, reason: reason === true ? null : reason, compromisedSince: cs === true ? null : cs, time, ustId: ust_id }); }
+  catch (e) { rl.close(); die(e.message); }
+  // SELF-CHECK fail-closed: a doc signed by the NEW op key must resolve authoritative under the grown log
+  const probe = await W.seal(await W.buildState({ domain_shard: domain, ust_id, key_id: grown.newOp.key_id, class: 'observation' }, time, { r: { kind: 'captured', value: { x: '1' } } }), grown.newOp);
+  const res = P.resolveAuthority(probe, { genesis, keylog: grown.keylog, noForkConfirmed: true });
+  if (res.error || res.strength !== 'authoritative') { rl.close(); die('self-check FAILED: the new key does not resolve authoritative (' + (res.error || res.strength) + ')'); }
+  rl.close();
+  const outDir = (arg('out', null) && arg('out', null) !== true) ? arg('out', null) : '.';
+  writeFileSync(`${outDir}/ust-keylog`, JSON.stringify(grown.keylog, null, 2) + '\n');
+  const newOpPkcs8 = Buffer.from(await crypto.subtle.exportKey('pkcs8', grown.newOp.privateKey)).toString('base64');
+  writeFileSync(`${outDir}/operational-key.b64`, newOpPkcs8 + '\n');
+  console.log('\n  ══════════════════════════════════════════════');
+  console.log(`  ✅ KEY ROTATED — ${domain}  (APPENDED, identity unchanged)`);
+  console.log('  ══════════════════════════════════════════════');
+  console.log(`  key-log        ${keylog.length} → ${grown.keylog.length} entries  (prefix preserved — never rewritten)`);
+  console.log(`  new op key     ${grown.newOp.key_id}  (warm daily signer)`);
+  if (grown.revokedPub) console.log(`  revoked        old op key, reason=${reason}${reason === 'compromised' ? ' since ' + cs : ''}`);
+  console.log('\n  📦 outputs');
+  console.log(`  ${outDir}/ust-keylog             → PUBLIC — serve at /.well-known/ust-keylog (the grown array)`);
+  console.log(`  ${outDir}/operational-key.b64    → 🔥 WARM — the engine's new signer (an env var), then DELETE the file`);
+  console.log('\n  ⏳ validity of OLD documents (§12.2 X1 — decided against ANCHORED time, not now):');
+  if (reason === 'compromised') console.log(`     compromised: an old-key doc is VALID only if its anchor proves it existed BEFORE ${cs} (else INVALID, fail-closed).`);
+  else if (reason === 'retired') console.log('     retired: an old-key doc is VALID iff its anchor time is at/before this rotation (hygienic — history intact).');
+  else console.log('     no revocation: old-key docs remain VALID (the key is superseded, not revoked). Add --reason to revoke.');
+  console.log('\n  ▶️  next: serve the grown key-log, then point the engine at the new operational key.');
+  console.log(`     one-click reserve: npx @ust-protocol/cli publish cf --domain ${domain} --genesis <ust-genesis> --keylog ${outDir}/ust-keylog --auth wrangler`);
+}
+
 // Run the dispatcher ONLY when executed directly — importing this module (regression suite / Go-binding
 // harness) must not trigger the CLI or its process.exit.
 const isMain = (() => { try { return process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; } })();
 if (isMain) {
   const cmd = process.argv[2];
-  const run = { verify: cmdVerify, canon: cmdCanon, genesis: cmdGenesis, discovery: cmdDiscovery, publish: cmdPublish, mirror: cmdMirror, stream: cmdStream, witness: cmdWitness }[cmd];
-  if (!run) { console.error('ust — verify machine-readable state\n\n  ust verify <file|->        verify a transcript (exit 0 = VALID, 1 = not)\n  ust canon  <file|->        print canonical bytes + hash (cross-language diff)\n  ust genesis --domain <d>   run the HIGH genesis ceremony (add --publish cf for one-click serving)\n  ust discovery <domain>     attest the §20.1 serving contract (any infra)\n  ust publish cf --domain <d> --genesis <f>   deploy the CF serving adapter for an existing genesis\n  ust mirror <domain>        publish + attest a SECOND-vendor mirror (§20.1 vendor-independence)\n  ust stream <frames…>       RANGE verdict: chain · forks · completeness (needs --checkpoint for proven)\n  ust witness rekor --domain <d>   log the genesis in a transparency log → automatic no-fork (#68)\n'); process.exit(cmd ? 1 : 0); }
+  const run = { verify: cmdVerify, canon: cmdCanon, genesis: cmdGenesis, rotate: cmdRotate, discovery: cmdDiscovery, publish: cmdPublish, mirror: cmdMirror, stream: cmdStream, witness: cmdWitness }[cmd];
+  if (!run) { console.error('ust — verify machine-readable state\n\n  ust verify <file|->        verify a transcript (exit 0 = VALID, 1 = not)\n  ust canon  <file|->        print canonical bytes + hash (cross-language diff)\n  ust genesis --domain <d>   run the HIGH genesis ceremony (add --publish cf for one-click serving)\n  ust rotate  --domain <d> --root <enc>   APPEND a key rotation to the served log (never re-mint; old docs stay valid)\n  ust discovery <domain>     attest the §20.1 serving contract (any infra)\n  ust publish cf --domain <d> --genesis <f>   deploy the CF serving adapter for an existing genesis\n  ust mirror <domain>        publish + attest a SECOND-vendor mirror (§20.1 vendor-independence)\n  ust stream <frames…>       RANGE verdict: chain · forks · completeness (needs --checkpoint for proven)\n  ust witness rekor --domain <d>   log the genesis in a transparency log → automatic no-fork (#68)\n'); process.exit(cmd ? 1 : 0); }
   run().catch((e) => die(e.message || String(e)));
 }
