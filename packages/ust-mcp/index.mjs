@@ -33,9 +33,20 @@ export const tools = [
     inputSchema: { type: 'object', properties: { doc: { type: 'object' }, json: { type: 'string' }, offline: { type: 'boolean', description: 'true = never touch the network (no discovery auto-fetch)' }, pinnedKeys: { type: 'array' }, genesis: { type: 'object' }, keylog: { type: 'array' }, proof: { type: 'object' }, disclosures: { type: 'object' }, noForkConfirmed: { type: 'boolean' }, requireAuthoritative: { type: 'boolean', description: 'floor at HIGH — reject anything not name-authoritative (E-GENESIS)' }, requireAnchored: { type: 'boolean', description: 'floor at TOP — reject anything not anchored (downgrade resistance, §3.1/F.5b): a stripped/absent anchor ⇒ E-ANCHOR, a substrate-unavailable one ⇒ INDETERMINATE, never a silent lower-tier accept' }, soft: { type: 'boolean', description: '#44 agent-safety: by DEFAULT an INVALID verdict is returned as an ERROR response (isError) you MUST acknowledge — you cannot skip it as a data field. Set soft:true to OPT IN to the advisory path (INVALID returned as data). The structured verdict rides the error either way.' }, requireFreshKeylog: { type: 'boolean', description: '#40 floor: reject a possibly-stale key-log (freshness unverified) ⇒ INDETERMINATE stale_keylog (re-fetch from discovery), never a silent accept on a cached view that may miss a revocation.' }, keylogFreshAsOf: { type: 'string', description: '#40 RFC3339-Z: when you fetched the key-log from authoritative discovery. If ≥ the doc anchor time ⇒ freshness:fresh.' }, keylogHeadAnchor: { type: 'object', description: '#40 a VERIFIED anchor inclusion proof for the key-log HEAD (checked against the substrate: inclusion + final ⇒ freshness:attested). A raw head hash is NOT accepted — it proves nothing (rc.28 audit).' }, capacity: { type: 'object', description: 'trusted capacity grant {maxPartitions?, maxTranscriptBytes?} — pass what resolveAuthority returned as .capacity (rc.12)' }, maxSupportedBytes: { type: 'number' } } },
     handler: async ({ doc, json, offline, pinnedKeys, genesis, keylog, proof, disclosures, noForkConfirmed, requireAuthoritative, requireAnchored, soft, requireFreshKeylog, keylogFreshAsOf, keylogHeadAnchor, capacity, maxSupportedBytes }) => {
       const o = { pinnedKeys, genesis, keylog, disclosures, noForkConfirmed, requireAuthoritative, requireAnchored, requireFreshKeylog, keylogFreshAsOf, keylogHeadAnchor, capacity, maxSupportedBytes, context: 'data' };
-      // #44 throw-on-non-VALID: an INVALID verdict becomes an isError response (dispatch catches the throw) unless
-      // soft:true. The agent CANNOT read a data field and skip the failure — verification is in the control flow.
-      const gate = (v) => { if (!soft && typeof v?.result === 'string' && v.result.startsWith('INVALID')) throw Object.assign(new Error('UST verification failed: ' + (v.error || 'INVALID') + (v.detail ? ' — ' + v.detail : '')), { verdict: v }); return v; };
+      // #44/#75 P1-04 throw-on-non-VALID: ANY non-VALID verdict (INVALID *or* INDETERMINATE) becomes an isError
+      // response (dispatch catches the throw) unless soft:true — matching spec §15.1. A lazy agent must NOT be able
+      // to read INDETERMINATE as a data field and proceed as if it got an answer (that is the exact footgun #44
+      // closes). isError forces acknowledgment; the structured `verdict` (carried by dispatch) says reject vs retry:
+      // INVALID (`error`) ⇒ reject; INDETERMINATE (`reason`) ⇒ cannot-decide, retry/degrade — never proceed.
+      const gate = (v) => {
+        if (!soft && typeof v?.result === 'string' && !v.result.startsWith('VALID:')) {
+          const retry = v.result === 'INDETERMINATE';
+          throw Object.assign(new Error(retry
+            ? 'UST INDETERMINATE (' + (v.reason || 'unavailable') + ') — cannot decide; retry or degrade, do NOT proceed' + (v.detail ? ': ' + v.detail : '')
+            : 'UST verification failed: ' + (v.error || 'INVALID') + (v.detail ? ' — ' + v.detail : '')), { verdict: v });
+        }
+        return v;
+      };
       // `json` (raw text) = the safe conformance boundary — duplicate-key + NFC scan BEFORE parse (F7).
       const ro = { ...o, offline };
       const _plugins = [];

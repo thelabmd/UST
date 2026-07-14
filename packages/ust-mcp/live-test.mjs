@@ -38,6 +38,10 @@ const tRes = await rawCall(client, 'ust_verify', { doc: bad });
 check('live:tampered → isError (agent must acknowledge)', tRes.isError === true);
 check('live:tampered isError carries structured verdict', tRes.body.verdict?.error === 'E-CANON' && tRes.body.verdict.obligation === '§4.4 partition-hash');
 check('live:tampered soft:true → returned as DATA', (await rawCall(client, 'ust_verify', { doc: bad, soft: true })).body.result === 'INVALID');
+// #75 P1-04 — INDETERMINATE is ALSO non-VALID → isError (agent must acknowledge + retry, not skip). maxSupportedBytes:1 forces resource_limit.
+const iRes = await rawCall(client, 'ust_verify', { doc, maxSupportedBytes: 1 });
+check('live:INDETERMINATE → isError (must acknowledge, not skip)', iRes.isError === true && iRes.body.verdict?.result === 'INDETERMINATE');
+check('live:INDETERMINATE soft:true → returned as DATA (retry advisory)', (await rawCall(client, 'ust_verify', { doc, maxSupportedBytes: 1, soft: true })).body.result === 'INDETERMINATE');
 
 // ust_verify_stream over the wire — a range as one authority's chain (genesis+checkpoint, no signed cadence ⇒
 // chain-consistent: no-deletion proven; `complete` would additionally require a signed cadence + interval bounds)
