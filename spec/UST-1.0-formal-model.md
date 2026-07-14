@@ -381,6 +381,45 @@ window; the `keylog-state` vectors exercise the reducer invariant — both are e
 implementation runs through its own `K_n` and must match. (The `authorized_at` lower bound uses the key's CLAIMED
 authorization time; making it an ANCHORED lower bound is the operator manifest, ROOT 3.)
 
+## F.5f Composite authority is TRANSITIVE — the impersonation fix needs no new signed object (#75 ROOT 3)
+
+An external audit proposed closing the composition holes (an impostor becoming `canonical` / `complete` under a
+victim's name, P0-03; off-grid commitment grinding, P0-04) with a new **operator-signed HourManifest**. The math
+says that is unnecessary, and shows *why* — resolving two apparent dilemmas ("sign the hour root or not?", "typed
+leaf or raw hash?") by direct computation rather than taste.
+
+**Proposition F.5f.1 (impersonation is a per-frame authority failure, not a missing manifest).** A candidate `d`
+claiming authority `A` for slot `s` is canonical-under-`A` only if `key(d) ∈ K_A(t)` (§F.5e). The impersonation
+verdict is `key(d) ∉ K_A` — decidable in `σ(K_A)` from the genesis+key-log ALONE (ROOT 1+2), independent of any
+anchor or manifest. So `forkChoice`/`verifyStream` must read the RESOLVED authority `A` (the name the resolved key
+binds), never the LIGHT `domain_shard` CLAIM in the bytes. The claim is in `𝒮_LIGHT`; the binding is in `σ(K_A)`;
+conflating them was the whole bug. No new object closes a σ-algebra gap that `K_A` already decides.
+
+**Proposition F.5f.2 (the hour root carries no information a signature could add).** Let the hour's leaves be the
+frames `d_1…d_m`, each already `A`-authenticated (F.5f.1), and let the expected grid be `G = grid(from, to,
+cadence)` where `cadence` is `A`-signed (F.5e cadence log). The hour root `R = merkle(d_1…d_m)` and the
+completeness predicate `{d_i} ⤳ G` are DETERMINISTIC functions of already-authenticated inputs. A signature over
+`R` is therefore in `σ(K_A, {d_i}, cadence)` already — it adds no measurable event (the same reason `content_hash
+= H(canon(state))` is not separately signed: it is a function of the signed state). Hence an operator hour root
+is correctly UNSIGNED; its trust is (i) the `A`-authenticated leaves, (ii) the `A`-signed cadence, and (iii) the
+substrate anchor for TIME + immutability (`Fₜ`), NOT an operator signature. The prod notary reached this
+empirically (git+OTS, unsigned root); F.5f.2 is the reason.
+
+**Corollary F.5f.3 (the typed leaf is redundant).** `content_hash(d) = H("ust:state", canon({ust, state}))` and
+`state.id` contains `domain_shard` and `ust_id`; so `content_hash` already COMMITS the coordinate
+`(domain_shard, ust_id, value)`. A leaf `H("ust:frame", canon({domain_shard, ust_id, content_hash}))` re-commits
+what `content_hash` commits — no separation gained. The raw `content_hash` IS the coordinate-bound leaf.
+
+**What the anchor is still load-bearing for** (not dissolved): (a) **canonicity among `A`'s OWN candidates** — a
+dual-writer race yields two `A`-authenticated values for `s`; the one in `A`'s anchored set is canonical
+(`forkChoice` via the substrate proof it already takes) — the store-NX election puts exactly one there, ≥2 ⇒
+equivocation ⇒ `E-PREV`; (b) **standalone completeness** for a consumer who holds NONE of the frames — the
+operator serves the anchored, deterministic (unsigned) hour index; this is an operator-profile artifact (§20),
+not a new protocol primitive. (c) The remaining `latest-head` freshness (P0-05) is F.5a/F.5d authenticated
+non-membership — the one composition problem that genuinely needs the anchored monitorable single-head, tracked
+separately. The audit's manifest collapses, by the math, to "per-frame `K_A` + `A`-signed cadence + the existing
+substrate anchor" — less machinery, each omission proven, not cut.
+
 ## F.6 Composition — the event algebra
 
 An **anchored existence-and-commitment claim** is an event `A ∈ Fₜ`; an UNANCHORED signed claim is a document

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.31', revision: 42 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.32', revision: 43 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -716,14 +716,20 @@ export async function forkChoice(candidates, opts = {}) {
   // ANCHOR-INCLUDED iff it VERIFIES and its content_hash sits in a substrate-final anchored root (time 'anchored').
   const vopts = { ...opts, requireAnchored: false, requireAuthoritative: false };
   const verds = await Promise.all(candidates.map(async (d) => ({ doc: d, v: await verifyAsync(d, vopts) })));
-  const anchored = [], losers = [], invalid = [];
+  const anchored = [], losers = [], invalid = [], unauthenticated = [];
   for (const { doc, v } of verds) {
     if (!/^VALID:/.test(v.result || '')) { invalid.push({ result: v.result, detail: v.detail }); continue; }
-    const rec = { doc, content_hash: v.content_hash, authority: doc?.state?.id?.domain_shard, tier: v.tier };
+    // #75 P0-03a — the authority is the RESOLVED one (key ∈ K_A via genesis+key-log), NEVER the unverified LIGHT
+    // `domain_shard` claim. A candidate whose key is NOT bound to its claimed authority (self-asserted / pinned)
+    // is an IMPOSTER for that name and can NEVER be canonical under it — the math: content_hash commits the
+    // CLAIMED domain, authority resolution proves the claim (ROOT 1+2). No manifest needed to close this.
+    const bound = v.identity && (v.identity.strength === 'authoritative' || v.identity.strength === 'corroborated');
+    if (!bound) { unauthenticated.push({ content_hash: v.content_hash, claimed: doc?.state?.id?.domain_shard, anchored: v.time?.strength === 'anchored' }); continue; }
+    const rec = { doc, content_hash: v.content_hash, authority: doc.state.id.domain_shard, tier: v.tier };   // domain_shard now VERIFIED-bound (resolveAuthority checked genesis.domain == doc.domain)
     (v.time?.strength === 'anchored' ? anchored : losers).push(rec);   // anchored = in the chain; else a valid non-anchored candidate
   }
-  if (anchored.length === 0)                                           // nothing in Fₜ yet — undecidable at TOP, wait or resolve at HIGH
-    return { result: 'INDETERMINATE', ust_id, reason: 'no anchor-included candidate', detail: 'no candidate is in a substrate-final anchored root yet — wait for the hour anchor or resolve at HIGH', losers: losers.length, invalid: invalid.length };
+  if (anchored.length === 0)                                           // no BOUND candidate in Fₜ yet — undecidable, wait or resolve at HIGH
+    return { result: 'INDETERMINATE', ust_id, reason: 'no authoritative anchor-included candidate', detail: 'no candidate is BOTH bound to its claimed authority (key ∈ key-log) AND in a substrate-final anchored root', losers: losers.length, invalid: invalid.length, ...(unauthenticated.length ? { unauthenticated } : {}) };
   // group anchored by AUTHORITY (domain_shard). A single authority with ≥2 DISTINCT anchored content_hashes for
   // one ust_id is EQUIVOCATION — it signed a root containing both = a non-repudiable, punishable fault (E-PREV).
   const byAuth = new Map();
@@ -735,6 +741,7 @@ export async function forkChoice(candidates, opts = {}) {
   const winner = anchored[0];                                         // one authority, one distinct anchored content_hash → THE canonical
   return { result: 'CANONICAL', ust_id, authority: winner.authority, content_hash: winner.content_hash, tier: winner.tier, canonical: winner.doc,
     losers: losers.map((l) => ({ content_hash: l.content_hash, tier: l.tier, reason: 'valid but not anchor-included for this slot (out-raced or unanchored)' })),
+    ...(unauthenticated.length ? { unauthenticated } : {}),           // key-unbound impostors under a claimed name — recorded, never canonical
     ...(invalid.length ? { invalid } : {}) };
 }
 
@@ -832,11 +839,23 @@ export function verifyStream(frames, { genesis, keylog, checkpoint, cadenceLog, 
   if (!Array.isArray(frames) || !frames.length) return { complete: 'none' };
   let prevHash = genesis ? contentHash(genesis) : null;
   const authority = frames[0].state.id.domain_shard;                   // §11.3: a stream belongs to ONE authority
+  // #75 P0-03b — when a genesis is supplied, EACH frame's key MUST be BOUND to that authority's key-log (key ∈
+  // K_A), not merely claim the `domain_shard`. Otherwise an impostor's frames (key ∉ K_A), prev-chained to the
+  // victim genesis hash, read as a `complete` stream under the victim's name. Math: the LIGHT `domain_shard` is a
+  // CLAIM; binding (ROOT 1+2) is the proof. No manifest needed — the authority is the resolved key set.
+  let boundKeys = null;
+  if (genesis) {
+    if (genesis.state?.id?.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'genesis domain_shard != stream authority (' + authority + ')' };
+    const rk = resolveKeys(genesis, Array.isArray(keylog) ? keylog : []);
+    if (rk.error) return { error: rk.error, detail: 'stream authority: ' + rk.detail };
+    boundKeys = rk.validKeys;
+  }
   const seenUstId = new Set(), seenPrev = new Set();
   let lastE = null;
   for (const [i, f] of frames.entries()) {
     if (requirePerFrameValid) { const v = verify(f, { context: 'data' }); if (!isValid(v)) return { error: 'E-SIG', detail: 'frame ' + i + ' invalid: ' + v.error }; } // X2
     if (f.state.id.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'frame ' + i + ' domain_shard != stream authority (' + authority + ') — mixed-authority stream' };
+    if (boundKeys && boundKeys.get(f.state.id.key_id) !== f.sig.pub) return { error: 'E-AUTHORITY', detail: 'frame ' + i + ' key not bound to the authority key-log — impersonation (key ∉ K_A, §12.2)' };
     if (seenUstId.has(f.state.id.ust_id)) return { error: 'E-PREV', detail: 'duplicate ust_id (fork, Y1): ' + f.state.id.ust_id };
     seenUstId.add(f.state.id.ust_id);
     // #69 C P0 — the prev-chain must ALSO be CHRONOLOGICAL: `ust_id` strictly increasing in chain order. Else a
@@ -862,6 +881,7 @@ export function verifyStream(frames, { genesis, keylog, checkpoint, cadenceLog, 
     const cv = verify(checkpoint, { context: 'data' });
     if (!isValid(cv) || checkpoint.state.id.class !== 'attestation') return { error: 'E-PREV', detail: 'invalid checkpoint' };
     if (checkpoint.state.id.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'checkpoint not from the stream authority (' + authority + ') — TOP completeness cannot cross authority' };
+    if (boundKeys && boundKeys.get(checkpoint.state.id.key_id) !== checkpoint.sig.pub) return { error: 'E-AUTHORITY', detail: 'checkpoint key not bound to the authority key-log (impersonation, §12.2)' };
     const a = checkpoint.state.data.checkpoint?.value;
     // NOTE (honest scope) — with a genesis, `frame_count === frames.length` + `first frame.prev === genesis`
     // means this verifies the ORIGIN-TO-CHECKPOINT PREFIX (the interval's `from` MUST be the stream's first
@@ -888,13 +908,21 @@ export function verifyStream(frames, { genesis, keylog, checkpoint, cadenceLog, 
       if (cF.cadence !== cT.cadence) return { complete: 'chain-consistent', head: prevHash, detail: 'interval crosses a cadence change — split it at the boundary; each side is `complete` under its own cadence (continuity)' };
       const grid = cF.cadence > 0 ? ustGrid(a.from, a.to, cF.cadence) : null;
       if (grid) {
+        const gridSet = new Set(grid);
         const covered = new Set();
         for (const f of frames) {
           const c = f.state.id.class;
-          if (c === 'observation' || c === 'derivation' || (c === 'attestation' && f.state.data?.gap !== undefined)) covered.add(f.state.id.ust_id);
+          const slotBearing = c === 'observation' || c === 'derivation' || (c === 'attestation' && f.state.data?.gap !== undefined);
+          if (!slotBearing) continue;
+          // #75 P0-04 — grid EQUALITY, not just coverage: EVERY frame must sit ON the grid. An off-grid frame
+          // (e.g. 00:15 under a 30s cadence) is an extra commitment inside a declared slot region → commitment
+          // grinding. Coverage alone (every grid slot filled) let it through; equality rejects it.
+          if (!gridSet.has(f.state.id.ust_id)) return { error: 'E-PREV', detail: 'off-grid frame ' + f.state.id.ust_id + ' is not a slot of the signed cadence grid (§11.3 — grid equality, no commitment grinding)' };
+          covered.add(f.state.id.ust_id);
         }
         const hole = grid.find((g) => !covered.has(g));
         if (hole) return { complete: 'chain-consistent', head: prevHash, hole, detail: 'grid slot ' + hole + ' has no frame and no signed gap — chain intact, not complete (§11.3 C)' };
+        // grid EQUALITY holds: every frame ∈ grid (above) ∧ every grid slot covered (here) ∧ no dup ust_id (Y1) ⇒ bijection.
         return { complete: 'complete', head: prevHash, cadence: String(cF.cadence), grid_slots: String(grid.length) };
       }
     }

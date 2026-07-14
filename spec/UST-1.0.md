@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.31`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.32`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -18,7 +18,7 @@ graduated tiers (LIGHT / HIGH / TOP, §3.1). Every mechanism below serves that s
 judged by ONE question — *how much trust does this actually earn, and does the protocol say so honestly?* A
 tier must never let a consumer read "signed" as "true," "anchored" as "correct," or "agreeing" as "independent."
 
-Status: **Normative specification — 1.0 REV 42 (2026-07-13).** The SECURELY-STRUCTURED (namespaced) base that
+Status: **Normative specification — 1.0 REV 43 (2026-07-14).** The SECURELY-STRUCTURED (namespaced) base that
 closed all red-team findings STRUCTURALLY (I3 collision unrepresentable, I1 whole-State signature by
 construction, no stored-hash footgun), with ALL v0.29 FEATURES merged IN (not a flat-wire revert): per-partition
 captured/computed hashing (cross-engine corroboration for computed parts), `parent_ust` (hour-close timing),
@@ -168,16 +168,21 @@ inclusion-valid but whose substrate is unreachable or not-yet-buried ⇒ `INDETE
 NEVER a silent accept at a lower tier. Stripping proofs yields rejection *for a consumer that required the higher
 tier*; it is that consumer's floor doing its job, not a downgrade the attacker achieved.
 
-**Fork-choice — canonical = anchor-included (F.5c).** A single `ust_id` MAY have several candidate documents with
-DISTINCT `content_hash`es (an honest dual-writer race — main + failover both seal the slot — or an adversary
-offering two states). The CANONICAL document for a `ust_id` is the one whose `content_hash` is INCLUDED in the
-authority's anchored hour root (§11). A consumer holding more than one resolves deterministically: **exactly one
-anchor-included ⇒ that one is canonical** (the others are non-canonical losers — `VALID` but out-raced, never
-anchored for this slot); **zero anchor-included ⇒ `INDETERMINATE` at TOP** (wait for the hour anchor or resolve at
-HIGH); **two or more anchor-included under the SAME authority with distinct `content_hash`es ⇒ `E-PREV`**
-(operator equivocation — a non-repudiable, punishable fault: the operator signed a root containing both). Distinct
-authorities publishing the same `ust_id` are not a fork (canonicity is per-authority). The choice reads only the
-bytes and the shared anchor, so two consumers reach the SAME canonical regardless of local fetch order.
+**Fork-choice & stream authority — the authority is RESOLVED, never the LIGHT claim (F.5c/F.5f, #75).** A single
+`ust_id` MAY have several candidate documents with DISTINCT `content_hash`es (an honest dual-writer race — main +
+failover both seal the slot — or an adversary offering two states). **First, the authority of every candidate /
+frame MUST be RESOLVED (`key ∈ K_A(t)` via genesis+key-log), NOT read from its LIGHT `domain_shard` claim:** a
+document signed by a key NOT bound to the claimed authority is an IMPOSTER and can never be canonical / complete
+under that name (an impersonation is a per-frame authority failure, decidable from the key-log alone — no anchor
+or manifest needed, F.5f.1). Among candidates that ARE authority-bound, the CANONICAL one for a `ust_id` is the
+one whose `content_hash` is INCLUDED in the authority's anchored hour root (§11): **exactly one anchor-included ⇒
+canonical** (others are `VALID` but out-raced); **zero ⇒ `INDETERMINATE`**; **two or more under the SAME authority
+with distinct `content_hash`es ⇒ `E-PREV`** (operator equivocation — non-repudiable, the immutable anchor makes it
+punishable). The `content_hash` already commits `(domain_shard, ust_id, value)`, so it IS the coordinate-bound
+leaf — no typed wrapper is needed (F.5f.3); and the hour root is a deterministic function of the `A`-authenticated
+frames + `A`-signed cadence, so it is correctly UNSIGNED — a signature would add no information (F.5f.2). The
+choice reads only the resolved key-log + the shared anchor, so two consumers reach the SAME canonical regardless
+of local fetch order. (Stream completeness applies the same rule per frame — see §11.3 grid equality.)
 
 ---
 
@@ -735,7 +740,13 @@ signed cadence is that ONLY the operator can move the grid). Without the key-log
 a change (fail-CLOSED). The checkpoint carries `from` and `to` (the
 interval's first and last `ust_id`) in its `checkpoint` value. The verifier computes `G` deterministically from
 `(from, to, cadence)` at the precision the cadence implies (a multiple of 3600 s ⇒ hour, of 60 s ⇒ minute, else
-second) and requires every `g ∈ G` be covered by a frame or a gap.
+second) and requires **grid EQUALITY, not mere coverage (#75 P0-04):** every `g ∈ G` is covered by a frame or a
+signed gap, AND every frame sits ON the grid (`ust_id ∈ G`). Coverage alone let an OFF-grid frame (e.g. `…142915`
+under a 30 s cadence) ride inside a declared slot region — commitment grinding, multiple commitments per slot;
+equality (`{frames} = G`, a bijection given no duplicate `ust_id`, Y1) rejects it (`E-PREV`). **And each frame's
+key MUST be BOUND to the stream authority's key-log (`key ∈ K_A`, F.5f.1), not merely claim the `domain_shard`** —
+an impostor's frames (key ∉ K_A) prev-chained to the victim genesis hash would otherwise read as a `complete`
+stream under the victim's name (`E-AUTHORITY`). Authority is the resolved key set, never the LIGHT claim.
 
 **Order & interval integrity (normative).** The `prev`-chain alone does not pin TIME order — a publisher could
 permute slots in time while keeping the chain valid and the grid-set covered. So the verifier ALSO requires the
@@ -1752,6 +1763,22 @@ provenance and will be lifted into this ledger when the spec is published.
   (MATH-05 done; the lower bound uses the CLAIMED authorization time — an anchored lower bound is the operator
   manifest, ROOT 3). 5 executable `authority-at-time` vectors carry the window cross-language. conformance 217/0,
   cli 130/0, mcp live 9/0.
+- **REV 43 (2026-07-14)** — #75 ROOT 3, the composition holes (P0-03 impersonation + P0-04 off-grid) — closed by
+  the MATH, NOT by the audit's proposed signed HourManifest (which the derivation showed to be over-engineering,
+  formal model F.5f). (1) **Per-frame authority**: `forkChoice`/`verifyStream` now resolve each candidate/frame's
+  authority (`key ∈ K_A` via genesis+key-log) instead of reading the LIGHT `domain_shard` CLAIM — an impostor
+  (key ∉ K_A) can never be `canonical`/`complete` under a victim's name (`forkChoice` → not canonical /
+  INDETERMINATE; `verifyStream` → `E-AUTHORITY`). This is decidable from the key-log alone (ROOT 1+2), no anchor
+  or manifest. (2) **Grid EQUALITY** (`verifyStream`): completeness now requires every frame to sit ON the signed
+  cadence grid (`{frames} = G`), not merely that every grid slot is covered — an off-grid frame ⇒ `E-PREV` (kills
+  commitment grinding). Math (F.5f): the hour root is a deterministic function of `A`-authenticated frames +
+  `A`-signed cadence, so it is correctly UNSIGNED (a signature adds no information — the prod notary's git+OTS,
+  unsigned-root choice, now justified); `content_hash` already commits `(domain_shard, ust_id, value)`, so a typed
+  leaf is redundant. The anchor stays load-bearing only for canonicity among an authority's OWN dual-writer
+  candidates (`forkChoice`, existing substrate proof) and for the operator's standalone-completeness artifact
+  (§20, unsigned-deterministic — not a new protocol object). 4 executable composition vectors (`stream-authority`,
+  `stream-grid`, `fork-choice`). P0-01/02/03/04 all reproduce SAFE; P0-05 (latest-head) remains the F.5a
+  monitorable single-head. conformance 221/0, cli 130/0, mcp live 9/0.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

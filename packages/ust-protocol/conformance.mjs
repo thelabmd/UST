@@ -54,6 +54,10 @@ for (const v of V.vectors) {
     case 'keylog-state': { const r = P.resolveKeys(v.genesis, v.keylog); check(v.id, v.expect.error ? r.error === v.expect.error : (!r.error && r.active.size === v.expect.active_count && r.validKeys.size === v.expect.all_count)); break; }
     // #75 ROOT 1 — K_n(t): authority resolved at a PROVEN anchor time (lower bound premature · upper bound X1).
     case 'authority-at-time': { const r = P.resolveAuthority(v.doc, { genesis: v.genesis, keylog: v.keylog, noForkConfirmed: true, anchorTime: v.anchor_time }); check(v.id, v.expect.error ? r.error === v.expect.error : (r.strength === v.expect.strength && r.status === v.expect.status)); break; }
+    // #75 ROOT 3 (math-derived, no manifest) — composition authority: forkChoice/verifyStream resolve per-frame
+    // authority (impersonation) + grid equality (off-grid), all language-neutral.
+    case 'stream-authority': case 'stream-grid': { const r = P.verifyStream(v.frames, { genesis: v.genesis, checkpoint: v.checkpoint }); check(v.id, v.expect.error ? r.error === v.expect.error : r.complete === v.expect.complete); break; }
+    case 'fork-choice': { const sv = (a, root) => v.anchored_roots.includes(root) ? { final: true, time: '2027-01-01T00:00:00Z' } : null; const r = await P.forkChoice(v.candidates, { genesis: v.genesis, noForkConfirmed: true, substrateVerify: sv }); check(v.id, r.result === v.expect.result); break; }
     default: noted(v.id, 'kind ' + v.kind + ' not exercised');
   }
 }
