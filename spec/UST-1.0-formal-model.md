@@ -1,6 +1,19 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # UST 1.0 — Formal Model (NON-NORMATIVE Appendix)
 
+> **You don't have to read this — and you don't have to think about it at all.** Nothing here is needed to use UST.
+> To publish, to verify, or to build a client in any language, you need only the normative spec (`UST-1.0.md`), the
+> reference code, and the conformance vectors. This document is for people who want to see *why the ground is solid*,
+> not just take our word that it is. If that isn't you today, skip it with a clear conscience — you lose nothing
+> operational.
+>
+> Here's the part worth knowing even if you never scroll past this line: on our side, every claim below is held to a
+> strict **math → code → vector → test** correspondence. Each theorem points at a real test that runs in our build,
+> a guard breaks the build if a theorem ever cites a check that isn't there, and each check is pinned by a
+> language-neutral vector anyone can run. So the math isn't decoration and it isn't a promise — it's wired to the
+> exact same tests your own implementation would run. That link is what lets UST be rebuilt in **any language**:
+> you check the vectors, never our prose.
+
 > **Status: NON-NORMATIVE.** This appendix gives a measure-theoretic semantics for UST. It defines nothing new:
 > every object here is a restatement of a mechanism already fixed in `UST-1.0.md` (the normative text). Where this
 > appendix and the normative spec appear to differ, **the normative spec wins** — this is a lens, not a rule.
@@ -225,6 +238,68 @@ depends on them, so it is measurable only in the larger σ-algebra. (3)–(5) ar
 record measurable, and is it measurable-true there."* The tier ladder is literally a tower of nested information
 σ-algebras; climbing it means bringing more (external, harder-won) information into `ℐ`. `VALID:LIGHT/HIGH/TOP`
 is the honest name of *how much information the verdict rests on*.
+
+## F.5.0 Assurance is a PRODUCT LATTICE; the tier is one policy projection (#78, gaps 1–3)
+
+The nested tower `𝒮_LIGHT ⊆ 𝒮_HIGH ⊆ 𝒮_TOP` above is ONE cut through a richer object. The audit (#76) separated
+structure the linear tier had fused, so F.5 is restated in product form — the per-mechanism theorems `F.5a–F.5n`
+below are its per-AXIS realizations (this subsumes the `F.5a–F.5f` sketch of #78: those names were taken by the
+built theorems during #76, so the framework moves here and the letters stay per-axis). Verification measures FIVE
+ORTHOGONAL coordinates, each its own information sub-σ-algebra of `ℐ`:
+
+- **Integrity** `𝒮_I(d) := {∅, Ω}` — the trivial algebra; the §14 floor, a total function of `d`'s bytes.
+- **IdentityStrength** `A_id := σ(name-binding, active-genesis uniqueness)` (§12.1a / F.5a, F.5j).
+- **FreshnessStrength** `A_fresh := σ(terminality, temporal order, checkpoint uniqueness)` (§12.2a/§12.3 / F.5i, F.5n).
+- **TimeStrength** `Fₜ` — the anchor filtration (§11.2 / F.5c).
+- **EvidenceBasis** — the connector-evidence class; it enters `Fₜ` ONLY under Variant A (a proof-kind bound to a
+  real-time relation, F.5g gap 5), never as a bare timestamp.
+
+**Gap 3 — split `A_id` from `A_fresh`.** These were the two facts `𝒮_HIGH`'s `W_n` fused; F.5a already splits
+name-binding from no-fork, and here the split is axis-level: name authority and key-log freshness are measurable
+one WITHOUT the other.
+
+Each axis is a finite TOTAL order of earned strengths (a rank): *"LATTICE (1) every axis is a total order"*. The
+**AssuranceState** of `d` is the tuple `A(d) = (I, IdentityStrength, FreshnessStrength, TimeStrength, EvidenceBasis)
+∈ 𝓐 := ∏ axes`, ordered COMPONENTWISE (`A ≤ A'` iff `≤` on every axis). `(𝓐, ≤)` is a finite distributive LATTICE —
+meet = per-axis min, join = per-axis max — a reflexive/antisymmetric partial order
+(*"LATTICE (2) product order reflexive + antisymmetric"*) obeying the lattice laws over the full
+*"LATTICE product = 256 states"* (*"LATTICE (3) meet=glb, join=lub, commutative + absorption"*).
+
+**Gap 1 — `A_id ⊥ A_fresh` (independence).** Identity and freshness strengthen INDEPENDENTLY: name authority can
+rise with freshness fixed and vice-versa, so the two are in general INCOMPARABLE in `(𝓐, ≤)` —
+*"LATTICE (4) A_id"* vs `A_fresh`. The linear tower collapsed this; the product keeps them apart.
+
+**Theorem F.5.0 (Tier is a monotone policy projection).** The classic tier is a map `Π : 𝓐 → {NONE ≺ LIGHT ≺ HIGH
+≺ TOP}` reading ONLY the Integrity, IdentityStrength and TimeStrength coordinates: `Π(A) = TOP` iff
+`IdentityStrength = authoritative ∧ TimeStrength = anchored`; `HIGH` iff name-bound (`IdentityStrength ≥
+corroborated`); `LIGHT` iff the integrity floor holds; `NONE` below it (*"LATTICE (6b) integrity floor unmet"*).
+`Π` is ORDER-PRESERVING — `A ≤ A' ⇒ Π(A) ≤ Π(A')`, so more assurance NEVER lowers the tier:
+*"LATTICE (5) projectTier is monotone"*. And `Π` agrees with the §14 verifier on every realized strength — no
+second truth: *"LATTICE (6) projectTier agrees with the realized"* tier. Crucially `FreshnessStrength` and
+`EvidenceBasis` are NOT in `Π`'s image: they strengthen the state WITHOUT moving the linear tier — the product
+carries assurance the scalar ladder cannot express.
+
+**Gap 2 — `ℐ_C`, the CAPPED term.** A consumer config `C = (accepted roots, accepted issuers, issuer→trust_domain,
+installed-verifier trust, policy floors)` induces `ℐ_C = σ(evidence verified AND admitted under C) ⊆ ℐ`. The
+REPORTED assurance is the MEET of what is proven and what is admissible under `C`: `A_C(d) = A(d) ∧ ceil(C)`.
+Assurance is thus EARNED by proof and CAPPED by trust — `C` can only LOWER it: `A_C ≤ A` on every axis, idempotent
+(*"LATTICE (7a) capAssurance downgrade-only"*), and no ceiling ⇒ identity (*"LATTICE (7b) no ceiling"*). A
+publisher who PROVES TOP is still read as LIGHT by a consumer that admits no trust roots and no independent
+domains: *"LATTICE (7c) proven-TOP capped by no-trust-roots"*. A missing/out-of-range axis is never guessed —
+*"LATTICE (8) missing/out-of-range axis"* ⇒ fail-closed. This is the measure-theoretic content of "assurance is
+never self-declared": `ℐ_C` is the consumer's, and the meet is computed, never asserted by the publisher.
+
+*Sketch.* Each axis order is total and finite, so `∏` under the componentwise order is a finite distributive
+lattice with per-coordinate meet/join (standard); the three properties are checked exhaustively over all `2·4·4·2·4
+= 256` states and `256²` pairs. `Π` is monotone because each of its three read coordinates is monotone and the
+`TOP/HIGH/LIGHT` thresholds are up-sets; agreement with §14 is the `identity×time` case check. `ceil(C)` is an
+element of `𝓐`, so `A ∧ ceil(C) ≤ A` is immediate from meet, giving downgrade-resistance (F.5b) as a lattice fact,
+not a separate axiom. ∎
+
+**Reading.** The ladder `LIGHT/HIGH/TOP` is the shadow `Π` casts from the product lattice onto one policy axis;
+identity, freshness, time and evidence are the real, independently-earned coordinates, and `ℐ_C` is the consumer's
+trust ceiling meeting them. Assurance is a POINT in a lattice — capped by trust, projected to a tier — never a
+scalar, never self-declared.
 
 ## F.5a No-fork is authenticated non-membership — `corroborated ⊊ authoritative`
 

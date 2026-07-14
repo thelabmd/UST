@@ -1,7 +1,7 @@
 {
   "version": "UST 1.0 assurance-arc vectors (1.0.0-rc.33)",
   "note": "language-neutral contract: pre-signed inputs + expected verdict, executable by any implementation (see run-arc-vectors.mjs)",
-  "count": 33,
+  "count": 44,
   "vectors": [
     {
       "id": "ac-valid-chain",
@@ -5787,6 +5787,189 @@
       },
       "expect": {
         "ok": false
+      }
+    },
+    {
+      "id": "lat-tier-top",
+      "op": "projectTier",
+      "state": {
+        "integrity": "valid",
+        "identity": "authoritative",
+        "freshness": "attested",
+        "time": "anchored",
+        "evidence": "inclusion+order+time"
+      },
+      "expect": {
+        "value": "TOP"
+      }
+    },
+    {
+      "id": "lat-tier-high",
+      "op": "projectTier",
+      "state": {
+        "integrity": "valid",
+        "identity": "corroborated",
+        "freshness": "corroborated",
+        "time": "unproven",
+        "evidence": "inclusion+order"
+      },
+      "expect": {
+        "value": "HIGH"
+      }
+    },
+    {
+      "id": "lat-tier-light",
+      "op": "projectTier",
+      "state": {
+        "integrity": "valid",
+        "identity": "self-asserted",
+        "freshness": "unverified",
+        "time": "unproven",
+        "evidence": "opaque"
+      },
+      "expect": {
+        "value": "LIGHT"
+      }
+    },
+    {
+      "id": "lat-tier-none-integrity-floor-unmet",
+      "op": "projectTier",
+      "state": {
+        "integrity": "invalid",
+        "identity": "authoritative",
+        "freshness": "attested",
+        "time": "anchored",
+        "evidence": "inclusion+order+time"
+      },
+      "expect": {
+        "value": "NONE"
+      }
+    },
+    {
+      "id": "lat-authoritative-but-unanchored-is-HIGH-not-TOP",
+      "op": "projectTier",
+      "state": {
+        "integrity": "valid",
+        "identity": "authoritative",
+        "freshness": "attested",
+        "time": "unproven",
+        "evidence": "inclusion+order+time"
+      },
+      "expect": {
+        "value": "HIGH"
+      }
+    },
+    {
+      "id": "lat-freshness-does-not-lift-the-tier",
+      "op": "projectTier",
+      "state": {
+        "integrity": "valid",
+        "identity": "self-asserted",
+        "freshness": "attested",
+        "time": "unproven",
+        "evidence": "opaque"
+      },
+      "expect": {
+        "value": "LIGHT"
+      }
+    },
+    {
+      "id": "lat-orthogonal-id-up-vs-fresh-up-incomparable",
+      "op": "assuranceLE",
+      "a": {
+        "integrity": "valid",
+        "identity": "authoritative",
+        "freshness": "unverified",
+        "time": "unproven",
+        "evidence": "opaque"
+      },
+      "b": {
+        "integrity": "valid",
+        "identity": "self-asserted",
+        "freshness": "attested",
+        "time": "unproven",
+        "evidence": "opaque"
+      },
+      "expect": {
+        "le": false
+      }
+    },
+    {
+      "id": "lat-orthogonal-fresh-up-vs-id-up-incomparable",
+      "op": "assuranceLE",
+      "a": {
+        "integrity": "valid",
+        "identity": "self-asserted",
+        "freshness": "attested",
+        "time": "unproven",
+        "evidence": "opaque"
+      },
+      "b": {
+        "integrity": "valid",
+        "identity": "authoritative",
+        "freshness": "unverified",
+        "time": "unproven",
+        "evidence": "opaque"
+      },
+      "expect": {
+        "le": false
+      }
+    },
+    {
+      "id": "lat-le-light-below-top",
+      "op": "assuranceLE",
+      "a": {
+        "integrity": "valid",
+        "identity": "self-asserted",
+        "freshness": "unverified",
+        "time": "unproven",
+        "evidence": "opaque"
+      },
+      "b": {
+        "integrity": "valid",
+        "identity": "authoritative",
+        "freshness": "attested",
+        "time": "anchored",
+        "evidence": "inclusion+order+time"
+      },
+      "expect": {
+        "le": true
+      }
+    },
+    {
+      "id": "lat-cap-no-trust-roots-drops-TOP-to-LIGHT",
+      "op": "capAssurance",
+      "state": {
+        "integrity": "valid",
+        "identity": "authoritative",
+        "freshness": "attested",
+        "time": "anchored",
+        "evidence": "inclusion+order+time"
+      },
+      "ceiling": {
+        "identity": "self-asserted",
+        "freshness": "corroborated"
+      },
+      "expect": {
+        "identity": "self-asserted",
+        "freshness": "corroborated",
+        "tier": "LIGHT"
+      }
+    },
+    {
+      "id": "lat-cap-no-ceiling-unchanged",
+      "op": "capAssurance",
+      "state": {
+        "integrity": "valid",
+        "identity": "authoritative",
+        "freshness": "attested",
+        "time": "anchored",
+        "evidence": "inclusion+order+time"
+      },
+      "ceiling": null,
+      "expect": {
+        "identity": "authoritative",
+        "tier": "TOP"
       }
     }
   ]

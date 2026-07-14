@@ -20,6 +20,9 @@ const call = {
   verifyActiveGenesisUniqueness: (v) => P.verifyActiveGenesisUniqueness(v.proof, v.opts),
   verifyCheckpointRecovery: (v) => P.verifyCheckpointRecovery(v.statements, v.opts),
   verifyEpochTransition: (v) => P.verifyEpochTransition(v.statement, v.opts),
+  projectTier: (v) => P.projectTier(v.state),                                     // #78 lattice — returns a bare tier string
+  assuranceLE: (v) => ({ le: P.assuranceLE(v.a, v.b) }),                          // product order (comparability)
+  capAssurance: (v) => { const c = P.capAssurance(v.state, v.ceiling); return { ...c, tier: P.projectTier(c) }; },   // ℐ_C cap + resulting tier
 };
 
 let pass = 0, fail = 0; const fails = [];

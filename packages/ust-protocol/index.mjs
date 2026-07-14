@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.33', revision: 45 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.33', revision: 47 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -1231,6 +1231,57 @@ export function deriveCheckpointFreshness(chain, { genesisAuthority, pinnedPrior
   }
   return { result: 'VALID', keylog_freshness: 'corroborated', basis: 'publisher-checkpoint', anti_equivocation: 'unverified',  // ceiling without independent uniqueness
     head: headId, sequence: b.sequence, active_genesis: b.active_genesis };
+}
+
+// ─── #78 ASSURANCE PRODUCT-LATTICE (formal-model F.5 revision, CODE realization — the math must pass through code +
+//     vectors + guard before it ships). The linear tier LIGHT ⊆ HIGH ⊆ TOP is ONE policy projection of a PRODUCT of
+//     FIVE orthogonal, independently-strengthening information axes — identity and freshness strengthen SEPARATELY
+//     (F.5 gap 1/3, `A_id` ⊥ `A_fresh`). Each axis is a total order (a rank); AssuranceState is their product under
+//     the componentwise (partial) order — a LATTICE: meet = per-axis min, join = per-axis max. `projectTier` reads
+//     ONLY identity+time (the classic tier); freshness+evidence ride alongside, never folded in.
+export const ASSURANCE_AXES = {
+  integrity: ['invalid', 'valid'],                                            // the §14 floor (canon/hash/sig) — the Integrity axis
+  identity:  ['self-asserted', 'pinned', 'corroborated', 'authoritative'],    // A_id: name-binding + active-genesis uniqueness (§12.1a)
+  freshness: ['unverified', 'fresh', 'corroborated', 'attested'],             // A_fresh: terminality + order + checkpoint uniqueness (§12.2a / §12.3.5)
+  time:      ['unproven', 'anchored'],                                        // Fₜ: the anchor filtration (§11.2)
+  evidence:  ['opaque', 'inclusion', 'inclusion+order', 'inclusion+order+time'],  // EvidenceBasis: Variant A — only `inclusion+order+time` may enter Fₜ (§12.3.5)
+};
+const AXES = Object.keys(ASSURANCE_AXES);
+export const axisRank = (axis, v) => ASSURANCE_AXES[axis].indexOf(v);          // -1 ⇒ not a value of this axis
+const axisLE = (axis, a, b) => { const ra = axisRank(axis, a), rb = axisRank(axis, b); return ra >= 0 && rb >= 0 && ra <= rb; };
+// AssuranceState = a full 5-tuple; every axis present with an in-range value, else E-ASSURANCE (fail-closed).
+export function assuranceState(s = {}) {
+  const out = {};
+  for (const ax of AXES) { if (axisRank(ax, s[ax]) < 0) throw Object.assign(new Error(`E-ASSURANCE: axis '${ax}' missing or out of range`), { code: 'E-ASSURANCE' }); out[ax] = s[ax]; }
+  return out;
+}
+// The product order (F.5 gap 1): a ≤ b iff a ≤ b on EVERY axis — a PARTIAL order (identity & freshness independent,
+// so most pairs are incomparable). meet/join make it a LATTICE.
+export const assuranceLE = (a, b) => AXES.every((ax) => axisLE(ax, a[ax], b[ax]));
+const axisMin = (axis, a, b) => (axisRank(axis, a) <= axisRank(axis, b) ? a : b);
+const axisMax = (axis, a, b) => (axisRank(axis, a) >= axisRank(axis, b) ? a : b);
+export const meetAssurance = (a, b) => Object.fromEntries(AXES.map((ax) => [ax, axisMin(ax, a[ax], b[ax])]));
+export const joinAssurance = (a, b) => Object.fromEntries(AXES.map((ax) => [ax, axisMax(ax, a[ax], b[ax])]));
+// PolicyProjection (F.5 gap 1 / F.5b): the classic tier reads ONLY identity+time. TOP = authoritative name ∧ anchored
+// time; HIGH = name-bound (identity ≥ corroborated); LIGHT = the integrity floor; below the floor there is NO tier.
+// This is the CANONICAL projection; the inline §14 verify tier is conformance-pinned to agree with it (no 2nd truth).
+export function projectTier(state) {
+  const s = assuranceState(state);
+  if (!axisLE('integrity', 'valid', s.integrity)) return 'NONE';              // integrity floor unmet ⇒ INVALID upstream
+  if (s.identity === 'authoritative' && s.time === 'anchored') return 'TOP';
+  if (axisLE('identity', 'corroborated', s.identity)) return 'HIGH';          // corroborated ≤ identity ⇒ name-bound
+  return 'LIGHT';
+}
+export const TIER_RANK = { NONE: -1, LIGHT: 0, HIGH: 1, TOP: 2 };
+// capAssurance (F.5 gap 2 — the CAPPED term ℐ_C): the reported state is the MEET of what is PROVEN and the ceiling
+// ADMISSIBLE under the consumer config C (a per-axis max: no accepted trust domains ⇒ freshness caps below
+// `attested`; no pinned/accepted roots ⇒ identity caps at `self-asserted`). Assurance is EARNED by proof and CAPPED
+// by trust — never self-declared; an unspecified ceiling axis imposes no cap (tops out).
+export function capAssurance(state, ceiling) {
+  const s = assuranceState(state);
+  if (!ceiling) return s;
+  const cap = assuranceState(Object.fromEntries(AXES.map((ax) => [ax, ceiling[ax] ?? ASSURANCE_AXES[ax][ASSURANCE_AXES[ax].length - 1]])));
+  return meetAssurance(s, cap);
 }
 
 // ─── TOP §11.3 completeness: a sequenced stream is prev-chained; first frame's prev = genesis content_hash

@@ -134,6 +134,27 @@ const add = (id, op, fields) => V.push({ id, op, ...fields });
   add('epoch-unit-wrong-signer', 'verifyEpochTransition', { statement: P.buildEpochTransition(ef, KXe.priv, KXe.pub), opts: eOpts, expect: { ok: false } });
 }
 
+// ─── #78 ASSURANCE PRODUCT-LATTICE vectors — pure axis-tuple contracts (no keys): tier projection, the product
+//     order (independence witnesses), and the ℐ_C cap. A second impl reproduces projectTier/assuranceLE/capAssurance.
+{
+  const TOP = { integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored', evidence: 'inclusion+order+time' };
+  const HIGH = { integrity: 'valid', identity: 'corroborated', freshness: 'corroborated', time: 'unproven', evidence: 'inclusion+order' };
+  const LIGHT = { integrity: 'valid', identity: 'self-asserted', freshness: 'unverified', time: 'unproven', evidence: 'opaque' };
+  const idUp = { integrity: 'valid', identity: 'authoritative', freshness: 'unverified', time: 'unproven', evidence: 'opaque' };
+  const frUp = { integrity: 'valid', identity: 'self-asserted', freshness: 'attested', time: 'unproven', evidence: 'opaque' };
+  add('lat-tier-top', 'projectTier', { state: TOP, expect: { value: 'TOP' } });
+  add('lat-tier-high', 'projectTier', { state: HIGH, expect: { value: 'HIGH' } });
+  add('lat-tier-light', 'projectTier', { state: LIGHT, expect: { value: 'LIGHT' } });
+  add('lat-tier-none-integrity-floor-unmet', 'projectTier', { state: { ...TOP, integrity: 'invalid' }, expect: { value: 'NONE' } });
+  add('lat-authoritative-but-unanchored-is-HIGH-not-TOP', 'projectTier', { state: { ...TOP, time: 'unproven' }, expect: { value: 'HIGH' } });
+  add('lat-freshness-does-not-lift-the-tier', 'projectTier', { state: frUp, expect: { value: 'LIGHT' } });
+  add('lat-orthogonal-id-up-vs-fresh-up-incomparable', 'assuranceLE', { a: idUp, b: frUp, expect: { le: false } });
+  add('lat-orthogonal-fresh-up-vs-id-up-incomparable', 'assuranceLE', { a: frUp, b: idUp, expect: { le: false } });
+  add('lat-le-light-below-top', 'assuranceLE', { a: LIGHT, b: TOP, expect: { le: true } });
+  add('lat-cap-no-trust-roots-drops-TOP-to-LIGHT', 'capAssurance', { state: TOP, ceiling: { identity: 'self-asserted', freshness: 'corroborated' }, expect: { identity: 'self-asserted', freshness: 'corroborated', tier: 'LIGHT' } });
+  add('lat-cap-no-ceiling-unchanged', 'capAssurance', { state: TOP, ceiling: null, expect: { identity: 'authoritative', tier: 'TOP' } });
+}
+
 const out = { version: 'UST 1.0 assurance-arc vectors (' + P.VERSION.spec + ')', note: 'language-neutral contract: pre-signed inputs + expected verdict, executable by any implementation (see run-arc-vectors.mjs)', count: V.length, vectors: V };
 writeFileSync(new URL('../../vectors/arc-vectors.json', import.meta.url), JSON.stringify(out, null, 2) + '\n');
 console.log('  generated vectors/arc-vectors.json — ' + V.length + ' language-neutral arc vectors (' + P.VERSION.spec + ')');
