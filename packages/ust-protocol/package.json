@@ -28,6 +28,9 @@
     "notarization"
   ],
   "license": "Apache-2.0",
+  "scripts": {
+    "test": "node conformance.mjs && node model-correspondence.mjs && node ssrf.test.mjs"
+  },
   "engines": {
     "node": ">=18"
   },

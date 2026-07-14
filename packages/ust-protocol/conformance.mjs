@@ -16,6 +16,11 @@ const T = { generated_at: '2026-06-28T14:03:12Z', valid_from: '2026-06-28T14:00:
 const ID = { domain_shard: 'helioradar.com', ust_id: 'ust:20260628.14', key_id: A.key_id, class: 'observation' };
 const mk = (data = { sw: { kind: 'captured', value: { kp: '4.33' } } }, id = ID, time = T) => P.seal(P.buildState(id, time, data), A.priv, A.pubB64);
 const clone = (d) => JSON.parse(JSON.stringify(d));
+// P0-2 — `authoritative` name-authority is EARNED from a verified NO-FORK EVIDENCE (a typed claim signed by a witness
+// the CONSUMER trusts), never from a raw `noForkConfirmed` boolean (that is only a `consumer-override`). `nfe(genesis)`
+// mints a consumer-trusted witness's evidence bound to this domain + active genesis, to reach authoritative in tests.
+const W = kp('bb'.repeat(32));
+const nfe = (genesis) => ({ noForkEvidence: P.buildNoForkEvidence({ domain_shard: genesis.state.id.domain_shard, active_genesis: P.contentHash(genesis) }, W.priv, W.pubB64), trustRoots: { [W.key_id]: W.pubB64 } });
 
 let pass = 0, fail = 0, note = 0; const fails = [];
 const check = (id, ok, d) => { if (ok) pass++; else { fail++; fails.push(id + (d ? ' — ' + d : '')); } };
@@ -53,11 +58,11 @@ for (const v of V.vectors) {
     // #75 ROOT 2 — the key-log state machine as a language-neutral vector: run resolveKeys over embedded signed docs.
     case 'keylog-state': { const r = P.resolveKeys(v.genesis, v.keylog); check(v.id, v.expect.error ? r.error === v.expect.error : (!r.error && r.active.size === v.expect.active_count && r.validKeys.size === v.expect.all_count)); break; }
     // #75 ROOT 1 — K_n(t): authority resolved at a PROVEN anchor time (lower bound premature · upper bound X1).
-    case 'authority-at-time': { const r = P.resolveAuthority(v.doc, { genesis: v.genesis, keylog: v.keylog, noForkConfirmed: true, anchorTime: v.anchor_time }); check(v.id, v.expect.error ? r.error === v.expect.error : (r.strength === v.expect.strength && r.status === v.expect.status)); break; }
+    case 'authority-at-time': { const r = P.resolveAuthority(v.doc, { genesis: v.genesis, keylog: v.keylog, ...nfe(v.genesis), anchorTime: v.anchor_time }); check(v.id, v.expect.error ? r.error === v.expect.error : (r.strength === v.expect.strength && r.status === v.expect.status)); break; }
     // #75 ROOT 3 (math-derived, no manifest) — composition authority: forkChoice/verifyStream resolve per-frame
     // authority (impersonation) + grid equality (off-grid), all language-neutral.
     case 'stream-authority': case 'stream-grid': { const r = P.verifyStream(v.frames, { genesis: v.genesis, checkpoint: v.checkpoint }); check(v.id, v.expect.error ? r.error === v.expect.error : r.complete === v.expect.complete); break; }
-    case 'fork-choice': { const sv = (a, root) => v.anchored_roots.includes(root) ? { final: true, time: '2027-01-01T00:00:00Z' } : null; const r = await P.forkChoice(v.candidates, { genesis: v.genesis, noForkConfirmed: true, substrateVerify: sv }); check(v.id, r.result === v.expect.result); break; }
+    case 'fork-choice': { const sv = (a, root) => v.anchored_roots.includes(root) ? { final: true, time: '2027-01-01T00:00:00Z' } : null; const r = await P.forkChoice(v.candidates, { genesis: v.genesis, ...nfe(v.genesis), substrateVerify: sv }); check(v.id, r.result === v.expect.result); break; }
     default: noted(v.id, 'kind ' + v.kind + ' not exercised');
   }
 }
@@ -117,8 +122,8 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const add = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1901', key_id: G.key_id }, T, { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(gen)));
   const docK = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.20', key_id: K.key_id, class: 'observation' }, T, { sw: { kind: 'captured', value: { kp: '5' } } }), K.priv, K.pubB64);
   check('HIGH genesis VALID+self-signed', P.verify(gen).result === 'VALID:LIGHT' && gen.sig.key_id === gen.state.id.key_id);
-  check('HIGH resolve→authoritative', (r => r.result === 'VALID:HIGH' && r.identity?.strength === 'authoritative')(P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data' })));
-  check('G1 Y3 authoritative→publisher (not claimed)', (r => r.publisher === 'noosphere.md' && r.publisher_claimed === undefined)(P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data' })));
+  check('HIGH resolve→authoritative', (r => r.result === 'VALID:HIGH' && r.identity?.strength === 'authoritative')(P.verify(docK, { genesis: gen, keylog: [add], ...nfe(gen), context: 'data' })));
+  check('G1 Y3 authoritative→publisher (not claimed)', (r => r.publisher === 'noosphere.md' && r.publisher_claimed === undefined)(P.verify(docK, { genesis: gen, keylog: [add], ...nfe(gen), context: 'data' })));
   // TOP stream (single authority) + checkpoint → proven
   const s0 = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.2001', key_id: G.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { n: '1' } } }, { prev: P.contentHash(gen) }), G.priv, G.pubB64);
   const s1 = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.2002', key_id: G.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { n: '2' } } }, { prev: P.contentHash(s0) }), G.priv, G.pubB64);
@@ -136,10 +141,10 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   // TOP tier via verify(): authoritative identity + an embedded, substrate-final anchor ⇒ VALID:TOP
   const dch = P.contentHash(docK);
   const topProof = { root: P.Hbytes('ust:leaf', Buffer.from(dch, 'utf8')), path: [], anchor: { substrate: 'bitcoin-ots' } };
-  const topR = P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', substrateVerify: () => ({ final: true, time: '2027-01-01T00:00:00Z' }) });
+  const topR = P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], ...nfe(gen), context: 'data', substrateVerify: () => ({ final: true, time: '2027-01-01T00:00:00Z' }) });
   check('TOP authoritative+anchored→VALID:TOP', topR.result === 'VALID:TOP');
   // #71 — a substrate's ASSURANCE basis flows into the verdict's time field (TOP names its trust model honestly)
-  const topA = P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', substrateVerify: () => ({ final: true, time: '2027-01-01T00:00:00Z', assurance: 'explorer-corroborated' }) });
+  const topA = P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], ...nfe(gen), context: 'data', substrateVerify: () => ({ final: true, time: '2027-01-01T00:00:00Z', assurance: 'explorer-corroborated' }) });
   check('#71 substrate assurance surfaces in the TOP verdict (explorer-corroborated ≠ trustless)', topA.result === 'VALID:TOP' && topA.time.assurance === 'explorer-corroborated');
   check('TOP verdict still carries completeness: not_evaluated (range property)', topR.completeness === 'not_evaluated');
   check('tier ladder distinct: LIGHT vs TOP', P.verify(mk(), { context: 'data' }).result === 'VALID:LIGHT' && topR.tier === 'TOP');
@@ -153,16 +158,16 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const C = '2026-06-28T15:00:00Z';
   const rev = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1902', key_id: G.key_id }, T, { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: C }, P.contentHash(add)));
   check('revocation boundary U == C → E-KEY (X1: VALID only if U < C)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], anchorTime: C }).error === 'E-KEY');
-  check('revocation U < C → pre-compromise accepted (suspect)', (r => r.strength === 'authoritative' && r.status === 'suspect')(P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], noForkConfirmed: true, anchorTime: '2026-06-28T14:59:59Z' })));
+  check('revocation U < C → pre-compromise accepted (suspect)', (r => r.strength === 'authoritative' && r.status === 'suspect')(P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], ...nfe(gen), anchorTime: '2026-06-28T14:59:59Z' })));
   const revBad = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1903', key_id: G.key_id }, T, { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: '2026-06-28T15:00:00.5Z' }, P.contentHash(add)));
   check('fractional compromised_since → E-MALFORMED (strict-Z, §12.2)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, revBad], anchorTime: C }).error === 'E-MALFORMED');
   // ─── #45 F.5b DOWNGRADE RESISTANCE — requireAnchored is the symmetric floor to requireAuthoritative. Stripping
   //     the anchor can only LOWER the tier; a TOP-needing consumer REJECTS, never silently accepts a lower tier.
   const anchorSV = () => ({ final: true, time: '2027-01-01T00:00:00Z' });
-  check('#45 requireAnchored: TOP doc passes the TOP floor', P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', requireAnchored: true, substrateVerify: anchorSV }).result === 'VALID:TOP');
-  check('#45 requireAnchored: proof STRIPPED (authoritative HIGH) → E-ANCHOR (downgrade rejected)', P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', requireAnchored: true }).error === 'E-ANCHOR');
-  check('#45 control: same stripped doc, NO floor → VALID:HIGH (default surfaces the earned tier)', P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data' }).result === 'VALID:HIGH');
-  check('#45 requireAnchored: proof present but substrate unreachable → INDETERMINATE (retry, not forgery)', P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', requireAnchored: true, substrateVerify: () => null }).result === 'INDETERMINATE');
+  check('#45 requireAnchored: TOP doc passes the TOP floor', P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], ...nfe(gen), context: 'data', requireAnchored: true, substrateVerify: anchorSV }).result === 'VALID:TOP');
+  check('#45 requireAnchored: proof STRIPPED (authoritative HIGH) → E-ANCHOR (downgrade rejected)', P.verify(docK, { genesis: gen, keylog: [add], ...nfe(gen), context: 'data', requireAnchored: true }).error === 'E-ANCHOR');
+  check('#45 control: same stripped doc, NO floor → VALID:HIGH (default surfaces the earned tier)', P.verify(docK, { genesis: gen, keylog: [add], ...nfe(gen), context: 'data' }).result === 'VALID:HIGH');
+  check('#45 requireAnchored: proof present but substrate unreachable → INDETERMINATE (retry, not forgery)', P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], ...nfe(gen), context: 'data', requireAnchored: true, substrateVerify: () => null }).result === 'INDETERMINATE');
   check('#45 requireAnchored: self-asserted (LIGHT) doc → E-GENESIS (name axis fails first)', P.verify(mk(), { requireAnchored: true, context: 'data' }).error === 'E-GENESIS');
   // ─── #45 F.5c FORK-CHOICE — canonical = anchor-included. One ust_id, distinct content_hashes (dual-writer race).
   const leafRoot = (d) => ({ root: P.Hbytes('ust:leaf', Buffer.from(P.contentHash(d), 'utf8')), path: [], anchor: { substrate: 'bitcoin-ots' } });
@@ -170,7 +175,7 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const f1 = slot('1'), f2 = slot('2');
   const fp1 = leafRoot(f1), fp2 = leafRoot(f2);
   const cand1 = { ...f1, proof: fp1 }, cand2 = { ...f2, proof: fp2 };
-  const fbase = { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data' };
+  const fbase = { genesis: gen, keylog: [add], ...nfe(gen), context: 'data' };
   const only1 = (a, root) => root === fp1.root ? anchorSV() : null;
   const fcWin = await P.forkChoice([cand1, cand2], { ...fbase, substrateVerify: only1 });
   check('#45 forkChoice: one anchor-included → CANONICAL picks it', fcWin.result === 'CANONICAL' && fcWin.content_hash === P.contentHash(f1));
@@ -273,7 +278,8 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const d1000 = mkN(1000);
   check('grant: 1024 granted — 1000 partitions ADMITTED (default ≠ ceiling)', P.verify(d1000, { context: 'data', capacity: { maxPartitions: 1024 } }).result === 'VALID:LIGHT');
   check('P0-4 pinned: raw self-signed genesis ALONE no longer expands → INDETERMINATE', P.verify(d65, { context: 'data', genesis: genCap(128) }).result === 'INDETERMINATE');
-  const auth = P.resolveAuthority(mk(), { genesis: genCap(512, 4_000_000), keylog: [], noForkConfirmed: true });
+  const gcap = genCap(512, 4_000_000);
+  const auth = P.resolveAuthority(mk(), { genesis: gcap, keylog: [], ...nfe(gcap) });
   check('resolveAuthority surfaces the ceremony capacity (grant flows FROM resolution)', auth.capacity?.maxPartitions === 512 && auth.capacity?.maxTranscriptBytes === 4_000_000 && auth.strength === 'authoritative');
   const fake4097 = { state: { data: Object.fromEntries(Array.from({ length: 4097 }, (_, i) => ['p' + i, '1'])) } };
   check('ABS: 4097 partitions → structural E-BOUNDS precheck', P.checkBounds(fake4097) === 'partitions > 4096');
@@ -360,8 +366,8 @@ console.log('\n═════════════════════�
   const dupKl = '[' + JSON.stringify(addD).replace('{', '{"ust":"1.0",') + ']';   // JSON.parse would collapse the dup
   const rDup = await P.resolveByDiscovery(docD, { context: 'data' }, { fetchImpl: mockD(dupKl) });
   check('#69 D: dup-key discovered key-log → E-CANON (not a silent LIGHT)', /E-CANON/.test(rDup.resolution?.error || ''));
-  const rClean = await P.resolveByDiscovery(docD, { context: 'data', noForkConfirmed: true }, { fetchImpl: mockD(JSON.stringify([addD])) });
-  check('#69 D: clean key-log still resolves VALID:HIGH (honest path intact)', rClean.verdict.result === 'VALID:HIGH');
+  const rClean = await P.resolveByDiscovery(docD, { context: 'data', noForkConfirmed: true, acceptConsumerOverride: true }, { fetchImpl: mockD(JSON.stringify([addD])) });
+  check('#69 D: clean key-log + honored override still resolves VALID:HIGH (honest path intact)', rClean.verdict.result === 'VALID:HIGH');
 }
 
 // ─── rc.14: witness auto-query (§12.1 M2, #68) — no-fork becomes EVIDENCE, so HIGH is the honest default.
@@ -388,9 +394,14 @@ console.log('\n═════════════════════�
   // #69 B / F.5a — the publisher's OWN served list is CORROBORATION, not independent no-fork: HIGH, but strength
   // `corroborated` (never `authoritative`), and the name stays `publisher_claimed` (not the definitive `publisher`).
   check('witness served-list → HIGH but CORROBORATED not authoritative (#69 B)', r1.verdict.result === 'VALID:HIGH' && r1.verdict.identity.strength === 'corroborated' && r1.verdict.no_fork === 'served-list' && r1.verdict.publisher_claimed === 'wit-test.example' && r1.verdict.publisher === undefined);
-  // an out-of-band caller assertion (air-gap) IS independent → authoritative + the name surfaced as `publisher`.
-  const r1b = await P.resolveByDiscovery(doc, { context: 'data', noForkConfirmed: true }, { fetchImpl: mk(okLog), substrateVerify: final });
-  check('caller air-gap assertion → HIGH AUTHORITATIVE + publisher surfaced (#69 B)', r1b.verdict.result === 'VALID:HIGH' && r1b.verdict.identity.strength === 'authoritative' && r1b.verdict.publisher === 'wit-test.example');
+  // P0-2 — a raw air-gap assertion is NOT independent evidence: it is a `consumer-override`. It reaches the name-
+  // authoritative TIER only when the consumer CONSCIOUSLY honors it (acceptConsumerOverride), and the verdict stays
+  // transparent (independently_verified:false) — it never silently claims independent `authoritative`.
+  const r1b = await P.resolveByDiscovery(doc, { context: 'data', noForkConfirmed: true, acceptConsumerOverride: true }, { fetchImpl: mk(okLog), substrateVerify: final });
+  check('caller air-gap override (honored) → HIGH, strength consumer-override + not independently verified (#69 B / P0-2)', r1b.verdict.result === 'VALID:HIGH' && r1b.verdict.identity.strength === 'consumer-override' && r1b.verdict.identity.independently_verified === false && r1b.verdict.publisher === 'wit-test.example');
+  // and WITHOUT the conscious opt-in, the raw override never earns authority — the overclaim is closed.
+  const r1c = await P.resolveByDiscovery(doc, { context: 'data', noForkConfirmed: true }, { fetchImpl: mk(null), substrateVerify: final });
+  check('P0-2: raw noForkConfirmed alone → consumer-override, NOT authoritative (overclaim closed)', r1c.verdict.identity.strength === 'consumer-override' && r1c.verdict.identity.independently_verified === false && r1c.verdict.result === 'VALID:LIGHT' && r1c.verdict.publisher === undefined);
 
   const r2 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(null), substrateVerify: final });
   check('witness unreachable = LIGHT + HIGH pending (never forged, W1)', r2.verdict.result === 'VALID:LIGHT' && r2.resolution.noFork.startsWith('HIGH pending'));
@@ -405,8 +416,8 @@ console.log('\n═════════════════════�
   const r5 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog) });   // no substrateVerify
   check('no substrate cross-check = never witness-confirmed (anchor unproven)', r5.verdict.result === 'VALID:LIGHT');
 
-  const r6 = await P.resolveByDiscovery(doc, { context: 'data', noForkConfirmed: true }, { fetchImpl: mk(null) });
-  check('explicit --no-fork-confirmed still overrides (air-gap) without witness', r6.verdict.result === 'VALID:HIGH');
+  const r6 = await P.resolveByDiscovery(doc, { context: 'data', noForkConfirmed: true, acceptConsumerOverride: true }, { fetchImpl: mk(null) });
+  check('explicit --no-fork-confirmed (honored) still overrides (air-gap) without witness → HIGH', r6.verdict.result === 'VALID:HIGH');
 }
 
 // ─── rc.15: combineSubstrates — heterogeneous witness substrates (#68). A verifier may speak several
@@ -527,13 +538,38 @@ console.log('\n═════════════════════�
   const docK = P.seal(P.buildState({ domain_shard: dom, ust_id: 'ust:20260628.20', key_id: K.key_id, class: 'observation' }, T, { sw: { kind: 'captured', value: { kp: '5' } } }), K.priv, K.pubB64);
   const Aft = '2026-06-28T14:45:00Z';
   check('#40 fresh log [add,revoke] → E-KEY (revocation still bites)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, revoke], anchorTime: Aft }).error === 'E-KEY');
-  check('#40 stale cache [add] REPORTS freshness:unverified (no longer silent)', (r => r.strength === 'authoritative' && r.freshness === 'unverified')(P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft })));
+  check('#40 stale cache [add] REPORTS freshness:unverified (no longer silent)', (r => r.strength === 'authoritative' && r.freshness === 'unverified')(P.resolveAuthority(docK, { genesis: gen, keylog: [add], ...nfe(gen), anchorTime: Aft })));
   check('#40 requireFreshKeylog on a stale cache → INDETERMINATE stale_keylog', (r => r.result === 'INDETERMINATE' && r.reason === 'stale_keylog')(P.verify(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, requireFreshKeylog: true, anchorTime: Aft, context: 'data' })));
   // rc.28 AUDIT FIX — a raw self-computed head hash proves nothing (derivable from a stale log): NOT attested.
   const headProof = { root: P.Hbytes('ust:leaf', Buffer.from(P.contentHash(add), 'utf8')), path: [], anchor: { substrate: 'bitcoin-ots' } };
   check('#40 keylogHeadAnchor WITHOUT substrateVerify → NOT attested (overclaim closed)', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, keylogHeadAnchor: headProof }).freshness !== 'attested');
   check('#40 VERIFIED keylogHeadAnchor (inclusion + substrate-final) → freshness:attested', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, keylogHeadAnchor: headProof, substrateVerify: () => ({ final: true, time: '2027-01-01T00:00:00Z' }) }).freshness === 'attested');
   check('#40 keylogFreshAsOf ≥ anchorTime → freshness:fresh', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, keylogFreshAsOf: '2026-06-28T15:00:00Z' }).freshness === 'fresh');
+  // ─── P0-2 (audit) — NAME NO-FORK EVIDENCE reclassification (UST-0l5). `authoritative` name-authority is EARNED
+  //     from a verified, CONSUMER-trusted witness statement bound to this domain + active genesis; a raw
+  //     `noForkConfirmed` boolean is only a transparent `consumer-override`, never silently authoritative.
+  {
+    const active = P.contentHash(gen);
+    const good = P.buildNoForkEvidence({ domain_shard: docK.state.id.domain_shard, active_genesis: active }, W.priv, W.pubB64);
+    const roots = { [W.key_id]: W.pubB64 };
+    const rEv = P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkEvidence: good, trustRoots: roots });
+    check('P0-2: verified noForkEvidence → authoritative + independently_verified + basis + witness_id',
+      rEv.strength === 'authoritative' && rEv.independently_verified === true && rEv.basis === 'accepted-external-witness' && rEv.witness_id === W.key_id);
+    const rRaw = P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true });
+    check('P0-2: raw noForkConfirmed → consumer-override (NOT authoritative), independently_verified:false',
+      rRaw.strength === 'consumer-override' && rRaw.independently_verified === false);
+    check('P0-2: witness NOT in the consumer trustRoots → not accepted (independence is consumer-owned)',
+      P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkEvidence: good, trustRoots: {} }).strength !== 'authoritative');
+    const tampered = JSON.parse(JSON.stringify(good)); tampered.claim.active_genesis = 'sha256:' + '00'.repeat(32);
+    check('P0-2: tampered no-fork claim (not bound to this active genesis) → NOT authoritative',
+      P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkEvidence: tampered, trustRoots: roots }).strength !== 'authoritative');
+    const selfDom = { claim: { ...good.claim, trust_domain: 'independent-7' }, issuer_id: W.key_id, sig: good.sig };
+    check('P0-2: self-declared trust_domain inside the signed claim → rejected (verifyNoForkEvidence)',
+      P.verifyNoForkEvidence(selfDom, { domain_shard: docK.state.id.domain_shard, active_genesis: active, trustRoots: roots }).ok === false);
+    const wrongGen = P.buildNoForkEvidence({ domain_shard: docK.state.id.domain_shard, active_genesis: 'sha256:' + 'ab'.repeat(32) }, W.priv, W.pubB64);
+    check('P0-2: no-fork evidence not bound to this active genesis (cross-epoch replay) → NOT authoritative',
+      P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkEvidence: wrongGen, trustRoots: roots }).strength !== 'authoritative');
+  }
 }
 
 // ─── #41 CROSS-LANGUAGE CANON ARBITER — the vectors ARE the contract; guard that the edge-case set stays present
@@ -545,7 +581,159 @@ console.log('\n═════════════════════�
   check('#41 non-ASCII stays literal UTF-8 in canon (not \\u-escaped)', (v => v && P.canon(v.input) === v.expect_canon && !v.expect_canon.includes('\\u'))(canonV.find((x) => x.id === 'canon-10-unicode-astral-not-escaped')));
 }
 
+// ─── #76 Phase A — CONNECTOR EVIDENCE ALGEBRA. Facts-only evidence, core-derived class (transparency-log ≠ non-
+//     membership), `compareEvidenceOrder` as a PROOF RELATION, quorum by DISTINCT consumer-resolved trust domains.
+{
+  const ev = (proof_kind, facts, source_id = 's') => P.verifiedEvidence({ proof_kind, subject: 'ust:x', source_id, facts });
+  check('PhA facts-only: connector self-declaring assurance → E-EVIDENCE', (() => { try { P.verifiedEvidence({ proof_kind: 'k', subject: 'x', source_id: 's', facts: { assurance: 'attested' } }); return false; } catch (e) { return e.code === 'E-EVIDENCE'; } })());
+  check('PhA facts-only: connector self-declaring trust_domain → E-EVIDENCE', (() => { try { P.verifiedEvidence({ proof_kind: 'k', subject: 'x', source_id: 's', facts: { trust_domain: 'me' } }); return false; } catch (e) { return e.code === 'E-EVIDENCE'; } })());
+  check('PhA class: transparency-log → append-only (NOT non-membership)', P.evidenceClass('transparency-log') === 'append-only-inclusion+consistency');
+  check('PhA class: authenticated-map → keyed non-membership', P.evidenceClass('authenticated-map') === 'keyed-membership+non-membership');
+  check('PhA class: unknown proof-kind → opaque', P.evidenceClass('made-up') === 'opaque');
+  const btc = (h) => ev('pow-header-chain', { substrate: 'bitcoin', position: String(h) });
+  check('PhA order: same substrate a.pos>b.pos → proven-after', P.compareEvidenceOrder(btc(900), btc(800)) === 'proven-after');
+  check('PhA order: same substrate a.pos<b.pos → not-after', P.compareEvidenceOrder(btc(800), btc(900)) === 'not-after');
+  check('PhA order: a.not_before ≥ b.not_after → proven-after', P.compareEvidenceOrder(ev('t', { not_before: '2027-01-02T00:00:00Z' }), ev('t', { not_after: '2027-01-01T00:00:00Z' })) === 'proven-after');
+  check('PhA order: b.not_before ≥ a.not_after → not-after', P.compareEvidenceOrder(ev('t', { not_after: '2027-01-01T00:00:00Z' }), ev('t', { not_before: '2027-01-02T00:00:00Z' })) === 'not-after');
+  check('PhA order: two not_after upper bounds alone → unproven', P.compareEvidenceOrder(ev('t', { not_after: '2027-01-02T00:00:00Z' }), ev('t', { not_after: '2027-01-01T00:00:00Z' })) === 'unproven');
+  check('PhA order: cross-substrate positions → unproven', P.compareEvidenceOrder(ev('t', { substrate: 'bitcoin', position: '900' }), ev('t', { substrate: 'rekor', position: '5' })) === 'unproven');
+  const domains = { a1: 'op-a', a2: 'op-a', b1: 'op-b', c1: 'op-c' };
+  check('PhA quorum: two sources in one domain → count 1', P.quorumTrustDomains([ev('k', {}, 'a1'), ev('k', {}, 'a2')], { domains }).count === 1);
+  check('PhA quorum: three domains → count 3, threshold 2 met', (q => q.count === 3 && q.met === true)(P.quorumTrustDomains([ev('k', {}, 'a1'), ev('k', {}, 'b1'), ev('k', {}, 'c1')], { domains, threshold: 2 })));
+  check('PhA quorum: source not in consumer config → not counted', P.quorumTrustDomains([ev('k', {}, 'a1'), ev('k', {}, 'unknown')], { domains }).count === 1);
+  check('PhA quorum: self-declared trust_domain on evidence ignored (only consumer config counts)', P.quorumTrustDomains([{ source_id: 'x', facts: { trust_domain: 'fake' } }], { domains }).count === 0);
+}
+
+// ─── #76/#77 AUTHORITY CHECKPOINT — three-layer object + NON-CIRCULAR in-band authority state machine. genesis
+//     authorizes C₀; Cₙ₋₁ authorizes Cₙ; a checkpoint never authorizes itself. Signer resolved from PRIOR state first.
+{
+  const K0 = kp('01'.repeat(32)), K1 = kp('02'.repeat(32)), K2 = kp('03'.repeat(32)), KX = kp('0f'.repeat(32));
+  const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
+  const EP = 'sha256:' + 'aa'.repeat(32), AG = 'sha256:' + 'bb'.repeat(32);
+  const KL = (l, tag) => ({ length: String(l), root: 'sha256:' + (tag + '0').repeat(16).slice(0, 64), head: 'sha256:' + (tag + '1').repeat(16).slice(0, 64) });
+  const bc = (seq, prev, cur, nxt, D = 'noosphere.md', ep = EP) => P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: ep, sequence: seq, previous_checkpoint: prev, active_genesis: AG, current_key_id: cur.key_id, ...(nxt ? { next_key_id: nxt.k.key_id, next_pub: nxt.k.pubB64, effective_sequence: nxt.at } : {}), keylog: KL(5 + Number(seq), 'c') });
+  const C0 = P.sealAuthorityCheckpoint(bc('0', null, K0, { k: K1, at: '1' }), K0.priv, K0.pubB64); const id0 = P.authorityCheckpointId(C0);
+  const C1 = P.sealAuthorityCheckpoint(bc('1', id0, K1, { k: K2, at: '2' }), K1.priv, K1.pubB64); const id1 = P.authorityCheckpointId(C1);
+  const C2 = P.sealAuthorityCheckpoint(bc('2', id1, K2, null), K2.priv, K2.pubB64);
+
+  check('AC valid genesis-rooted chain C0→C1→C2 (in-band rotation) → VALID', (r => r.result === 'VALID' && r.head === P.authorityCheckpointId(C2) && r.length === '3')(P.verifyAuthorityCheckpointChain([C0, C1, C2], { genesisAuthority: gAuth })));
+  check('AC cold verifier, no genesis/pinned authority → INDETERMINATE(authority_unresolved)', (r => r.result === 'INDETERMINATE' && r.reason === 'authority_unresolved')(P.verifyAuthorityCheckpointChain([C0, C1, C2], {})));
+  // pinned prior: the pin carries the authority IN FORCE for the NEXT checkpoint (K2, what C1 committed), not C1's signer
+  check('AC pinned prior C1 → verify only the C1→C2 transition → VALID', (r => r.result === 'VALID')(P.verifyAuthorityCheckpointChain([C2], { pinnedPrior: { checkpoint_id: id1, authority: { key_id: K2.key_id, pub: K2.pubB64 }, sequence: '1' } })));
+  // signer NOT authorized by the prior checkpoint
+  check('AC Cₙ signed by a key not authorized by Cₙ₋₁ → INVALID(E-AUTHORITY)', (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C0, P.sealAuthorityCheckpoint(bc('1', id0, K1, { k: K2, at: '2' }), KX.priv, KX.pubB64)], { genesisAuthority: gAuth })));
+  // retroactive self-authorization: C1 signed by ITS OWN declared next key (K2), not the prior-authorized K1
+  check('AC checkpoint signed by its own declared next key → INVALID (no retroactive self-auth)', (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C0, P.sealAuthorityCheckpoint(bc('1', id0, K1, { k: K2, at: '2' }), K2.priv, K2.pubB64)], { genesisAuthority: gAuth })));
+  // carried current_key_id ≠ the prior-authorized signer (diagnostic field must not resolve authority)
+  check('AC carried current_key_id ≠ prior-authorized signer → INVALID(E-AUTHORITY)', (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C0, P.sealAuthorityCheckpoint(bc('1', id0, KX, { k: K2, at: '2' }), K1.priv, K1.pubB64)], { genesisAuthority: gAuth })));
+  // linkage + sequence
+  check('AC previous_checkpoint ≠ prior id → INVALID(E-PREV)', (r => r.error === 'E-PREV')(P.verifyAuthorityCheckpointChain([C0, P.sealAuthorityCheckpoint(bc('1', 'sha256:' + 'ee'.repeat(32), K1, null), K1.priv, K1.pubB64)], { genesisAuthority: gAuth })));
+  check('AC sequence skip (0→2) → INVALID(E-SEQ)', (r => r.error === 'E-SEQ')(P.verifyAuthorityCheckpointChain([C0, P.sealAuthorityCheckpoint(bc('2', id0, K1, null), K1.priv, K1.pubB64)], { genesisAuthority: gAuth })));
+  // rotation exactness
+  check('AC keyId(next_pub) ≠ next_key_id → INVALID(E-KEY)', (r => r.error === 'E-KEY')(P.verifyAuthorityCheckpointChain([P.sealAuthorityCheckpoint({ ...bc('0', null, K0, { k: K1, at: '1' }), checkpoint_authority: { current_key_id: K0.key_id, next_key_id: K2.key_id, next_pub: K1.pubB64, effective_sequence: '1' } }, K0.priv, K0.pubB64)], { genesisAuthority: gAuth })));
+  check('AC effective_sequence ≠ seq+1 → INVALID(E-SEQ)', (r => r.error === 'E-SEQ')(P.verifyAuthorityCheckpointChain([P.sealAuthorityCheckpoint(bc('0', null, K0, { k: K1, at: '5' }), K0.priv, K0.pubB64)], { genesisAuthority: gAuth })));
+  check('AC partial rotation (next_key_id without next_pub) → INVALID(E-MALFORMED)', (r => r.error === 'E-MALFORMED')(P.verifyAuthorityCheckpointChain([P.sealAuthorityCheckpoint({ ...bc('0', null, K0, null), checkpoint_authority: { current_key_id: K0.key_id, next_key_id: K1.key_id } }, K0.priv, K0.pubB64)], { genesisAuthority: gAuth })));
+  // three-layer id: external evidence is NOT part of checkpoint_id (same checkpoint, two anchor receipts ⇒ same id)
+  check('AC checkpoint_id excludes attached external evidence (stable id)', P.authorityCheckpointId({ ...C2, anchor: { substrate: 'bitcoin-ots', receipt: 'a' } }) === P.authorityCheckpointId({ ...C2, anchor: { substrate: 'rekor', receipt: 'b' } }));
+  // tampered body ⇒ signature no longer matches the preimage
+  const C2t = { body: { ...C2.body, active_genesis: 'sha256:' + '00'.repeat(32) }, sig: C2.sig };
+  check('AC tampered body (sig over the pre-tamper preimage) → INVALID(E-AUTHORITY)', (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C2t], { pinnedPrior: { checkpoint_id: id1, authority: { key_id: K2.key_id, pub: K2.pubB64 }, sequence: '1' } })));
+  // domain must not change within one chain
+  check('AC domain_shard changes within the chain → INVALID(E-MALFORMED)', (r => r.error === 'E-MALFORMED')(P.verifyAuthorityCheckpointChain([C0, P.sealAuthorityCheckpoint(bc('1', id0, K1, null, 'evil.example'), K1.priv, K1.pubB64)], { genesisAuthority: gAuth })));
+}
+
+// ─── #76 Phase B — publisher-checkpoint CORROBORATED freshness (authorized chain × head∈root × proven-after target).
+//     Closes the P0-05 stale-prefix overclaim: earns `corroborated`, NEVER `attested` (no independent anti-equivocation).
+{
+  const K0 = kp('21'.repeat(32)), KX = kp('2f'.repeat(32));
+  const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
+  const EP = 'sha256:' + '11'.repeat(32), AG = 'sha256:' + '22'.repeat(32), D = 'noosphere.md';
+  const head = 'sha256:' + 'ab'.repeat(32), root = P.merkleRoot([head]);
+  const keylog = { length: '1', root, head };
+  const tp = { path: [] };                                                   // single-leaf key-log: head → root directly
+  const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), K0.priv, K0.pubB64);
+  const headId = P.authorityCheckpointId(C0);
+  const btc = (pos, subj) => P.verifiedEvidence({ proof_kind: 'pow-header-chain', subject: subj, source_id: 'btc', facts: { substrate: 'bitcoin', position: String(pos) } });
+  const commit = btc(900, headId);
+  const target = { active_genesis: AG, domain_shard: D, anchor: btc(800, 'ust:target') };
+  const F = (opts) => P.deriveCheckpointFreshness([C0], { genesisAuthority: gAuth, ...opts });
+
+  check('PhB all conjuncts (authorized × head∈root × proven-after) → corroborated', (r => r.result === 'VALID' && r.keylog_freshness === 'corroborated' && r.head === headId)(F({ target, commitment: commit, terminalityProof: tp })));
+  check('PhB CEILING: corroborated carries anti_equivocation:unverified and is NEVER attested', (r => r.keylog_freshness === 'corroborated' && r.anti_equivocation === 'unverified' && r.keylog_freshness !== 'attested')(F({ target, commitment: commit, terminalityProof: tp })));
+  check('PhB commitment NOT proven-after target → INDETERMINATE(order_unproven)', (r => r.result === 'INDETERMINATE' && r.reason === 'order_unproven')(F({ target, commitment: btc(700, headId), terminalityProof: tp })));
+  check('PhB two not_after upper bounds → unproven → order_unproven', (r => r.reason === 'order_unproven')(F({ target: { active_genesis: AG, domain_shard: D, anchor: P.verifiedEvidence({ proof_kind: 't', subject: 'ust:target', source_id: 'x', facts: { not_after: '2027-01-01T00:00:00Z' } }) }, commitment: P.verifiedEvidence({ proof_kind: 't', subject: headId, source_id: 'y', facts: { not_after: '2027-02-01T00:00:00Z' } }), terminalityProof: tp })));
+  check('PhB terminality missing → INDETERMINATE(terminality_unproven)', (r => r.reason === 'terminality_unproven')(F({ target, commitment: commit })));
+  check('PhB commitment not bound to checkpoint id → INDETERMINATE(unavailable)', (r => r.result === 'INDETERMINATE' && r.reason === 'unavailable')(F({ target, commitment: btc(900, 'sha256:' + '00'.repeat(32)), terminalityProof: tp })));
+  check('PhB unauthorized chain (wrong signer) → INVALID, freshness unverified', (r => r.result === 'INVALID' && r.keylog_freshness === 'unverified')(P.deriveCheckpointFreshness([P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), KX.priv, KX.pubB64)], { genesisAuthority: gAuth, target, commitment: commit, terminalityProof: tp })));
+  check('PhB checkpoint active_genesis ≠ target → INVALID(E-GENESIS)', (r => r.result === 'INVALID' && r.error === 'E-GENESIS')(F({ target: { active_genesis: 'sha256:' + '99'.repeat(32), domain_shard: D, anchor: btc(800, 'ust:target') }, commitment: commit, terminalityProof: tp })));
+  check('PhB cold verifier (no root) → INDETERMINATE(authority_unresolved)', (r => r.reason === 'authority_unresolved')(P.deriveCheckpointFreshness([C0], { target, commitment: commit, terminalityProof: tp })));
+}
+
+// ─── #76 Phase C — `attested` via INDEPENDENT anti-equivocation (accepted-witness-quorum). attested = corroborated ∧
+//     independent-uniqueness; witnesses sign the BYTE-IDENTICAL typed claim; independence = DISTINCT consumer-resolved domains.
+{
+  const K0 = kp('31'.repeat(32)), KX = kp('3f'.repeat(32)), Wa = kp('41'.repeat(32)), Wb = kp('42'.repeat(32)), Wc = kp('43'.repeat(32));
+  const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
+  const EP = 'sha256:' + '55'.repeat(32), AG = 'sha256:' + '66'.repeat(32), D = 'noosphere.md';
+  const head = 'sha256:' + 'cd'.repeat(32), keylog = { length: '1', root: P.merkleRoot([head]), head }, tp = { path: [] };
+  const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), K0.priv, K0.pubB64);
+  const headId = P.authorityCheckpointId(C0);
+  const btc = (pos, subj) => P.verifiedEvidence({ proof_kind: 'pow-header-chain', subject: subj, source_id: 'btc', facts: { substrate: 'bitcoin', position: String(pos) } });
+  const commit = btc(900, headId), target = { active_genesis: AG, domain_shard: D, anchor: btc(800, 'ust:target') };
+  const domains = { [Wa.key_id]: 'op-a', [Wb.key_id]: 'op-b', [Wc.key_id]: 'op-a' };   // Wa & Wc share a domain; Wb is distinct
+  const trustRoots = { [Wa.key_id]: Wa.pubB64, [Wb.key_id]: Wb.pubB64, [Wc.key_id]: Wc.pubB64 };
+  const ua = (W, extra) => P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, ...extra }, W.priv, W.pubB64);
+  const uOpts = (atts) => ({ attestations: atts, trustRoots, domains, threshold: 2 });
+  const F = (uniq) => P.deriveCheckpointFreshness([C0], { genesisAuthority: gAuth, target, commitment: commit, terminalityProof: tp, uniqueness: uniq });
+  const VU = (atts) => P.verifyCheckpointUniqueness(atts, { domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, trustRoots, domains, threshold: 2 });
+
+  check('PhC 2 witnesses, DISTINCT domains → attested (accepted-witness-quorum), anti_equivocation attested', (r => r.result === 'VALID' && r.keylog_freshness === 'attested' && r.basis === 'accepted-witness-quorum' && r.anti_equivocation === 'attested' && r.trust_domains.length === 2)(F(uOpts([ua(Wa), ua(Wb)]))));
+  check('PhC 2 witnesses, SAME domain → quorum not met → stays corroborated', (r => r.keylog_freshness === 'corroborated')(F(uOpts([ua(Wa), ua(Wc)]))));
+  check('PhC uniqueness on an UNAUTHORIZED checkpoint → INVALID, never attested', (r => r.result === 'INVALID' && r.keylog_freshness !== 'attested')(P.deriveCheckpointFreshness([P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), KX.priv, KX.pubB64)], { genesisAuthority: gAuth, target, commitment: commit, terminalityProof: tp, uniqueness: uOpts([ua(Wa), ua(Wb)]) })));
+  check('PhC bare observation (wrong purpose) is NOT uniqueness → not admitted', VU([{ claim: { purpose: 'ust:observed', domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId }, issuer_id: Wa.key_id, sig: { alg: 'Ed25519', key_id: Wa.key_id, pub: Wa.pubB64, sig: 'x' } }, ua(Wb)]).attested === false);
+  check('PhC witnesses signing NON-identical claims → mismatches dropped → quorum not met', VU([ua(Wa, { observed_map_root: 'sha256:' + 'a1'.repeat(32) }), ua(Wb, { observed_map_root: 'sha256:' + 'b2'.repeat(32) })]).attested === false);
+  check('PhC witness NOT in consumer trustRoots → not admitted', P.verifyCheckpointUniqueness([ua(Wa), ua(Wb)], { domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, trustRoots: { [Wa.key_id]: Wa.pubB64 }, domains, threshold: 2 }).attested === false);
+  check('PhC self-declared trust_domain inside the claim → rejected', VU([{ claim: { ...P.checkpointUniquenessClaim({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId }), trust_domain: 'independent-7' }, issuer_id: Wa.key_id, sig: ua(Wa).sig }, ua(Wb)]).attested === false);
+  check('PhC uniqueness for a DIFFERENT checkpoint → not admitted (binding)', VU([P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: 'sha256:' + '00'.repeat(32) }, Wa.priv, Wa.pubB64), ua(Wb)]).attested === false);
+}
+
+// ─── #76/#42 AUTHENTICATED-MAP UNIQUENESS — independent (non-publisher) non-membership via a sparse Merkle map. Same
+//     predicates as the witness quorum, different basis; TWO typed key spaces (checkpoint→attested, name→authoritative).
+{
+  const K0 = kp('51'.repeat(32)), KX = kp('5f'.repeat(32));
+  const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
+  const EP = 'sha256:' + '77'.repeat(32), AG = 'sha256:' + '88'.repeat(32), D = 'noosphere.md';
+  const head = 'sha256:' + 'de'.repeat(32), keylog = { length: '1', root: P.merkleRoot([head]), head }, tp = { path: [] };
+  const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), K0.priv, K0.pubB64);
+  const headId = P.authorityCheckpointId(C0);
+  const btc = (pos, subj) => P.verifiedEvidence({ proof_kind: 'pow-header-chain', subject: subj, source_id: 'btc', facts: { substrate: 'bitcoin', position: String(pos) } });
+  const target = { active_genesis: AG, domain_shard: D, anchor: btc(800, 'ust:target') };
+  const cpLeaf = P.checkpointMapLeaf({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId });
+  const cmap = P.buildVerifiableMap([cpLeaf, P.checkpointMapLeaf({ domain_shard: D, genesis_epoch: EP, sequence: '1', checkpoint: 'sha256:' + 'ab'.repeat(32) })]);
+  const cproof = cmap.prove(cpLeaf.key);
+  const Fmap = (uniq) => P.deriveCheckpointFreshness([C0], { genesisAuthority: gAuth, target, commitment: btc(900, headId), terminalityProof: tp, uniqueness: uniq });
+
+  check('#42 checkpoint-map inclusion → attested (basis authenticated-map-uniqueness)', (r => r.keylog_freshness === 'attested' && r.basis === 'authenticated-map-uniqueness' && r.map_root === cmap.root)(Fmap({ map: { proof: cproof, mapRoot: cmap.root } })));
+  const rivalMap = P.buildVerifiableMap([P.checkpointMapLeaf({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: 'sha256:' + '99'.repeat(32) })]);
+  check('#42 map shows a RIVAL at the same sequence → not attested → stays corroborated', (r => r.keylog_freshness === 'corroborated')(Fmap({ map: { proof: rivalMap.prove(cpLeaf.key), mapRoot: rivalMap.root } })));
+  check('#42 map uniqueness on an UNAUTHORIZED chain → INVALID, never attested', (r => r.result === 'INVALID' && r.keylog_freshness !== 'attested')(P.deriveCheckpointFreshness([P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), KX.priv, KX.pubB64)], { genesisAuthority: gAuth, target, commitment: btc(900, headId), terminalityProof: tp, uniqueness: { map: { proof: cproof, mapRoot: cmap.root } } })));
+
+  const G = kp('cc'.repeat(32)), K = kp('dd'.repeat(32)), signG = (s) => P.seal(s, G.priv, G.pubB64);
+  const gen = signG(P.buildGenesis({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.19', key_id: G.key_id }, T, G.pubB64));
+  const add = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1901', key_id: G.key_id }, T, { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(gen)));
+  const docK = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.20', key_id: K.key_id, class: 'observation' }, T, { sw: { kind: 'captured', value: { kp: '5' } } }), K.priv, K.pubB64);
+  const nLeaf = P.nameMapLeaf({ domain_shard: 'noosphere.md', active_genesis: P.contentHash(gen) });
+  const nmap = P.buildVerifiableMap([nLeaf]), nproof = nmap.prove(nLeaf.key), emptyMap = P.buildVerifiableMap([]);
+  check('#42 name-map inclusion → identity authoritative (independently_verified, basis map)', (r => r.strength === 'authoritative' && r.independently_verified === true && r.basis === 'authenticated-map-uniqueness')(P.resolveAuthority(docK, { genesis: gen, keylog: [add], nameMap: { proof: nproof, mapRoot: nmap.root } })));
+  check('#42 name-map absent (empty map non-membership) → NOT authoritative', (r => r.strength !== 'authoritative')(P.resolveAuthority(docK, { genesis: gen, keylog: [add], nameMap: { proof: emptyMap.prove(nLeaf.key), mapRoot: emptyMap.root } })));
+  check('#42 name-map inclusion via verify() composes to VALID:HIGH (authoritative name)', P.verify(docK, { genesis: gen, keylog: [add], nameMap: { proof: nproof, mapRoot: nmap.root }, context: 'data' }).result === 'VALID:HIGH');
+  check('#42 typed key spaces: a name-map proof is rejected as a checkpoint-map proof (no collision)', P.verifyCheckpointMapUniqueness(nproof, { domain_shard: 'noosphere.md', genesis_epoch: EP, sequence: '0', checkpoint: headId, mapRoot: nmap.root }).attested === false);
+  check('#42 SMT non-membership: absent key → proven non-membership (absent:true), not authoritative', (r => r.authoritative === false && r.absent === true)(P.verifyActiveGenesisUniqueness(emptyMap.prove(nLeaf.key), { domain_shard: 'noosphere.md', active_genesis: P.contentHash(gen), mapRoot: emptyMap.root })));
+  check('#42 SMT rival-value-bound is NOT non-membership (absent falsy) — distinct from an absent key', (r => r.authoritative === false && !r.absent)(P.verifyActiveGenesisUniqueness(nproof, { domain_shard: 'noosphere.md', active_genesis: 'sha256:' + '00'.repeat(32), mapRoot: nmap.root })));
+}
+
 console.log('  ust-protocol ' + P.VERSION.spec + ' conformance vs ' + V.version);
 console.log('  PASS ' + pass + '   FAIL ' + fail + '   NOTES ' + note);
 if (fails.length) { console.log('\n  FAILURES:'); fails.forEach(f => console.log('    ✗ ' + f)); }
 else console.log('  ✓ all exercised checks pass (primitives + 6 findings + Gemini-B + HIGH + TOP)');
+process.exit(fail ? 1 : 0);                                              // fail-closed for CI / `npm test`

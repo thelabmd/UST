@@ -264,6 +264,64 @@ non-membership on the time axis: both are F.3.1 authenticated non-membership ove
 structure already commits (the frame grid for completeness, the anchored name-map for no-fork). The strong word
 is EARNED by bringing that non-membership coordinate into `ℐ`, not bought by weakening the definition.
 
+## F.5a.1 Independence is CONSUMER-owned; the raw override is a distinct axiom (P0-2, REV 44)
+
+F.5a gives ONE independent-authority witness (the anchored name-map, mechanism b). REV 44 adds a second — an
+accepted external witness — and in doing so pins down WHAT makes an authority "independent". The answer is not a
+property of the signed statement; it is a property of the CONSUMER.
+
+**Consumer configuration.** Fix `C = (roots_C, dom_C)`: a partial map `roots_C : issuer_id ⇀ pub` (the witnesses
+this consumer accepts) and `dom_C : issuer_id → trustDomain` (which independent domain each admitted issuer sits
+in). The assurance-relevant information set is not the raw `ℐ` but a `C`-indexed sub-σ-algebra
+`ℐ_C = σ( e : e is cryptographically verified ∧ e is admitted under C )`. This is the formal reading of CAPPED in
+"earned, capped, quorum": bytes a consumer can fetch are not yet in `ℐ_C` — admission under `C` is required.
+
+**Admitted no-fork evidence.** `e = (claim, issuer, sig)` is ADMITTED for target `(n, g)` under `C`, written
+`Admit_C(e, n, g) = 1`, iff (1) `claim.purpose = "ust:name-no-fork"` ∧ `claim.domain_shard = n` ∧
+`claim.active_genesis = g` (typed, domain- and epoch-bound); (2) `claim` declares no `trust_domain` and no
+`issuer_id` of its own (independence is not self-granted); (3) `issuer ∈ dom(roots_C)` ∧
+`EdVerify(roots_C[issuer], canon(claim), sig)` (consumer-accepted AND cryptographically valid).
+
+**Theorem F.5a.1 (independence is earned from `C`, never self-declared).** `authoritative(n)` is measurable in
+`ℐ_C` iff `K_n` holds and either (a) `∃ e : Admit_C(e, n, activeGenesis(n)) = 1`, or (b) an anchored name-map
+coordinate for `n` (F.5a b). A witness's OWN `trust_domain`/`issuer_id` field never contributes: it is
+producer-supplied, so it fails clause (2) and is excluded from `ℐ_C`. Hence no signed statement can raise its own
+verdict — the "assurance is never self-declared" invariant, transposed onto the independence dimension.
+*Proof.* Clause (3) conditions admission on `roots_C` and the signature, both outside the producer's control at
+verification time (the consumer chooses `roots_C`; the key is fixed). The only producer-controlled independence
+claim is a `trust_domain`/`issuer_id` INSIDE `claim`, which clause (2) discards. So the independence coordinate
+enters `ℐ_C` only through `C` (or the map's `Fₜ` root, F.5a), never through `e`'s payload. ∎
+
+**Consumer-override is a side axiom, not a rung.** A raw caller flag `noForkConfirmed` supplies no evidence: it is
+a 0/1 axiom `Ax_C` the consumer adjoins to its OWN view at its own responsibility, yielding the DISTINCT strength
+`consumer-override` with `independently_verified = ⊥`.
+
+**Proposition F.5a.1 (the override never silently equals `authoritative`).** `consumer-override` is decided by
+`Ax_C` alone, by no coordinate of `ℐ_C` (neither the served list of `corroborated` nor the admitted-witness/map of
+`authoritative`). So on the identity axis the σ-algebra order stays `σ(self-asserted) ⊊ σ(corroborated) ⊊
+σ(authoritative)`, and `consumer-override` sits OFF this chain as a labelled consumer axiom. It maps onto the
+name-authoritative TIER only under an explicit projection `π_override` (`acceptConsumerOverride`), and the verdict
+always carries `independently_verified = false`. In particular `noForkConfirmed = 1` alone never yields the label
+`authoritative` — the REV 44 overclaim (a raw boolean earning `authoritative`) is closed by construction.
+
+**Realization.** `Admit_C` = `verifyNoForkEvidence(e, {domain_shard, active_genesis, trustRoots})`; the build side
+is `buildNoForkEvidence`/`noForkClaim`. The earned/override split is the two terminal branches of
+`resolveAuthority`: an admitted `e` → `{strength:"authoritative", basis:"accepted-external-witness", witness_id,
+independently_verified:true}`; a raw flag → `{strength:"consumer-override", independently_verified:false}`. The
+projection `π_override` is `acceptConsumerOverride` in `verify` (default off). (The general `ℐ_C` product-lattice
+over all axes — identity × freshness × time — is the F.5 revision tracked in #78; F.5a.1 is its no-fork instance,
+realized now.)
+
+**Conformance (each claim is a running property — math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
+- Theorem F.5a.1(a): *"P0-2: verified noForkEvidence → authoritative + independently_verified + basis + witness_id"*.
+- clause (2), self-declared domain excluded: *"P0-2: self-declared trust_domain inside the signed claim → rejected"*.
+- clause (3), issuer ∉ `roots_C`: *"P0-2: witness NOT in the consumer trustRoots → not accepted"*.
+- clause (1), typed epoch binding: *"P0-2: tampered no-fork claim ... → NOT authoritative"* and *"... not bound to this active genesis (cross-epoch replay) → NOT authoritative"*.
+- Proposition F.5a.1: *"P0-2: raw noForkConfirmed → consumer-override (NOT authoritative), independently_verified:false"* and *"... raw noForkConfirmed alone → consumer-override, NOT authoritative (overclaim closed)"*.
+- `π_override` (tier only on opt-in): *"caller air-gap override (honored) → HIGH, strength consumer-override + not independently verified"* and *"explicit --no-fork-confirmed (honored) still overrides ... → HIGH"*.
+
+All green at REV 44 (conformance 228/0, cli 130/0, mcp live 11/0).
+
 ## F.5b Downgrade resistance is the consumer's floor, not the producer's promise
 
 The tiers are totally ordered, `LIGHT < HIGH < TOP`, and by Theorem F.5 each is a coarser σ-algebra than the
@@ -419,6 +477,223 @@ not a new protocol primitive. (c) The remaining `latest-head` freshness (P0-05) 
 non-membership — the one composition problem that genuinely needs the anchored monitorable single-head, tracked
 separately. The audit's manifest collapses, by the math, to "per-frame `K_A` + `A`-signed cadence + the existing
 substrate anchor" — less machinery, each omission proven, not cut.
+
+## F.5g Connector evidence algebra — facts are generators, order is a proof relation, quorum is domain-cardinality (#76 Phase A)
+
+F.5a.1 pinned admission for ONE evidence kind (no-fork). Phase A states the same discipline for ANY connector, plus
+the two algebra operations the checkpoint layer runs on admitted evidence.
+
+**Evidence is a generator, not a verdict.** A connector is a map `κ : proof ↦ VerifiedEvidence`, a bundle of
+VERIFIED FACTS `(proof_kind, subject, source_id, facts)` — never an assurance label. The class is a CORE map
+`cls : proof_kind → (a σ-sub-algebra of world-coordinates)`, applied by the verifier: `pow-header-chain ↦`
+external-commitment/order/time, `transparency-log ↦` append-only inclusion+consistency (NOT non-membership),
+`authenticated-map ↦` keyed membership+non-membership, `content-addressed ↦` content-equality/availability,
+otherwise `opaque` ⇒ `INDETERMINATE(unsupported)`. Because `cls` is core-owned, a connector cannot inject a class:
+a `facts` payload carrying `assurance`/`strength`/`trust_domain`/`independent` is rejected at construction
+(`E-EVIDENCE`) — the F.5a.1 "never self-declared" rule, now at the evidence boundary. `transparency-log ≠
+non-membership` is exactly F.3.1/F.5a: inclusion+consistency generate the append-only event, not the `¬∃ rival`
+event, so `cls(transparency-log)` deliberately omits non-membership.
+
+**Order is a proof relation, `After(a,b) = {ω : t(a) > t(b)}`.** This event is `ℐ`-measurable only when the
+evidence pins both events into ONE order: (i) the same substrate's total order — `a.position > b.position` at a
+shared `substrate` ⇒ `proven-after`, `≤` ⇒ `not-after`; or (ii) disjoint intervals — `a.not_before ≥ b.not_after`
+⇒ `proven-after`, `b.not_before ≥ a.not_after` ⇒ `not-after`. Two upper bounds (`not_after`) alone, or positions on
+DIFFERENT substrates, generate no order event in `ℐ` ⇒ `unproven` (⇒ `INDETERMINATE(order_unproven)` upstream).
+This is the F.3 filtration read as a 3-valued relation: comparing two signed RFC3339 fields is NOT a measurement of
+`After` (F.2 — a timestamp is a claim), so `compareEvidenceOrder` never does it.
+
+**Quorum is the cardinality of the admitted domain-image.** Independence is the partition `dom_C` of F.5a.1 lifted
+to all sources: from a consumer map `dom_C : source_id ⇀ trustDomain`, quorum over an evidence multiset `E` is
+`q(E) = |{ dom_C(source_id(e)) : e ∈ E, source_id(e) ∈ dom(dom_C) }| ≥ threshold`. The σ-algebra sees the DOMAIN,
+not the endpoint: many connectors/URLs/mirrors under one `dom_C`-value count ONCE; a source absent from `dom_C` is
+unadmitted (0); a `trust_domain` carried on the evidence is producer-supplied and never read (F.5a.1 clause 2).
+This is the formal content of "strengthened by quorum across INDEPENDENT sources": independence is consumer-defined
+domain-distinctness, not connector count and not a self-declared field.
+
+**Realization.** `κ`/facts-only guard = `verifiedEvidence(...)` (throws `E-EVIDENCE` on a self-declared class);
+`cls` = `evidenceClass(proof_kind)`; `After` = `compareEvidenceOrder(a, b) → proven-after | not-after | unproven`;
+`q` = `quorumTrustDomains(list, { domains, threshold }) → { count, domains, met }`.
+
+**Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
+- facts-only (no self-declared class/independence): *"PhA facts-only: connector self-declaring assurance → E-EVIDENCE"*, *"... trust_domain → E-EVIDENCE"*.
+- `cls`, transparency-log ≠ non-membership: *"PhA class: transparency-log → append-only (NOT non-membership)"*, *"... authenticated-map → keyed non-membership"*, *"... unknown proof-kind → opaque"*.
+- `After` proof relation: *"PhA order: same substrate a.pos>b.pos → proven-after"* / *"... a.pos<b.pos → not-after"* / *"... a.not_before ≥ b.not_after → proven-after"* / *"... b.not_before ≥ a.not_after → not-after"* / *"... two not_after upper bounds alone → unproven"* / *"... cross-substrate positions → unproven"*.
+- `q` domain-cardinality: *"PhA quorum: two sources in one domain → count 1"* / *"... three domains → count 3, threshold 2 met"* / *"... source not in consumer config → not counted"* / *"... self-declared trust_domain on evidence ignored"*.
+
+All green at REV 44 (conformance 243/0).
+
+## F.5h The authority-checkpoint chain is a well-founded ADAPTED authority process (non-circular latest-head, #76/#77)
+
+The `latest-head` fact (P0-05: which key-log head is current for a name at sequence `n`) is F.5a/F.5d authenticated
+non-membership. Establishing it needs a checkpoint whose own AUTHORITY does not depend on the head it asserts —
+else the naive "the head `Hₙ` signs the checkpoint that says `Hₙ` is current" is circular. F.5h formalizes the chain
+that carries checkpoint-signing authority non-circularly.
+
+**Three layers — the "sign your own signature" fixpoint is unexpressible.** A checkpoint is a body `b`, a preimage
+`π(b) = canon({purpose:"ust:authority-checkpoint-signature", b})`, a transcript `(b, sig)`, and an identifier
+`id = H("ust:authority-checkpoint", canon({b, sig}))`. Since `sig` signs `π(b)` and `π` EXCLUDES `sig`, no transcript
+can commit its own signature (F.2: a document cannot fix its own hash). And `id` is a function of `(b, sig)` ALONE,
+so external evidence (anchor receipts, map proofs) is outside `id`: one checkpoint under two different anchors has
+ONE `id` — immutable protocol state, distinct from evidence ABOUT it.
+
+**Authority is `𝓕_{n-1}`-adapted.** Define `Auth(0) = genesis.checkpoint_authority` (or a pinned prior's committed
+next); `Auth(n) =` the key `Cₙ₋₁` committed for `n` (its `next_*` with `effective_sequence = n`), else `Auth(n-1)`.
+The signer of `Cₙ` is REQUIRED to equal `Auth(n)`, and `Auth(n)` is a function of `C₀…Cₙ₋₁` only — an ADAPTED
+process (F.4), measurable in the past σ-algebra `𝓕_{n-1}`. `Cₙ`'s own body cannot set `Auth(n)`: its declared next
+is `effective_sequence = n+1`, authorizing only `Cₙ₊₁`. So the authority relation is WELL-FOUNDED — `Auth(n) ≺ Cₙ`
+in causal order, no cycle — which is precisely the F.4 adaptedness the naive self-authorizing head violated.
+
+**Resolve-before-trust; the carried field is redundant.** Verification computes `Auth(n)` from prior state, THEN
+checks `sig` against it; the body's `current_key_id` is a diagnostic that MUST equal `Auth(n)` and NEVER resolves
+it. A forged `current_key_id` therefore cannot move authority (checked, not used) — the F.5a.1 "never self-declared"
+rule on the authority coordinate. Rotation is a deterministic total function (all-or-none; `keyId(next_pub) =
+next_key_id`; effective at `n+1`), so `Auth` is a deterministic function of the chain: two verifiers agree (F.5c).
+Absent a root for `Auth(0)` (no genesis authority, no pinned prior) the process is unresolved ⇒
+`INDETERMINATE(authority_unresolved)`, NEVER a fallback to `Cₙ`'s carried key.
+
+*(F.5h is the AUTHORIZATION backbone; the `corroborated`-freshness derivation on top — terminality + consistency +
+external commitment + `proven-after` the target, F.5d × F.5g — is Phase B proper, the next increment.)*
+
+**Realization.** `buildAuthorityCheckpoint` (body), `sealAuthorityCheckpoint` (`π`-preimage sign),
+`authorityCheckpointId` (`id` over `{body, sig}` only), `verifyAuthorityCheckpointChain(chain, {genesisAuthority |
+pinnedPrior})` (the adapted resolver + resolve-before-trust + rotation totality).
+
+**Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
+- adaptedness / well-founded authority: *"AC valid genesis-rooted chain C0→C1→C2 (in-band rotation) → VALID"*, *"AC Cₙ signed by a key not authorized by Cₙ₋₁ → INVALID(E-AUTHORITY)"*, *"AC checkpoint signed by its own declared next key → INVALID (no retroactive self-auth)"*.
+- resolve-before-trust (carried field redundant): *"AC carried current_key_id ≠ prior-authorized signer → INVALID(E-AUTHORITY)"*.
+- three-layer id / external evidence excluded: *"AC checkpoint_id excludes attached external evidence (stable id)"*, *"AC tampered body (sig over the pre-tamper preimage) → INVALID(E-AUTHORITY)"*.
+- linkage + sequence + rotation totality: *"AC previous_checkpoint ≠ prior id → INVALID(E-PREV)"*, *"AC sequence skip (0→2) → INVALID(E-SEQ)"*, *"AC keyId(next_pub) ≠ next_key_id → INVALID(E-KEY)"*, *"AC effective_sequence ≠ seq+1 → INVALID(E-SEQ)"*, *"AC partial rotation (next_key_id without next_pub) → INVALID(E-MALFORMED)"*.
+- cold start: *"AC cold verifier, no genesis/pinned authority → INDETERMINATE(authority_unresolved)"*; single-epoch: *"AC domain_shard changes within the chain → INVALID(E-MALFORMED)"*.
+
+All green at REV 44 (conformance 257/0).
+
+## F.5i Publisher-checkpoint `corroborated` freshness is a CONJUNCTION — and `corroborated` is the ceiling (P0-05 closed, #76 Phase B)
+
+F.5h authorized the checkpoint chain; F.5i derives the freshness verdict a target document `R` earns from it, and
+proves the ceiling that closes P0-05.
+
+**The conjunction.** For a target `R` and an authorized chain `C` (head `Cₙ`), define the events
+`Authorized(C)` (F.5h: `verifyAuthorityCheckpointChain = VALID`), `HeadInRoot(C)` (`keylog.head ∈ keylog.root`, a
+membership inclusion — F.3.1), `Committed(C)` (the checkpoint `id` carried by a VERIFIED external-commitment
+evidence `e_c` with `subject(e_c) = id`), `ProvenAfter(e_c, R)` (`compareEvidenceOrder(e_c, anchor(R)) =
+proven-after`, F.5g), and `Binds(C, R)` (`active_genesis(C) = active_genesis(R)` ∧ same domain). Then
+
+`CorroboratedFresh(R, C) = Authorized ∧ Binds ∧ HeadInRoot ∧ Committed ∧ ProvenAfter`.
+
+Each conjunct is separately measurable, so a MISSING coordinate names itself rather than forging the verdict:
+`¬Authorized ⇒ INVALID` (F.5h), `¬Binds ⇒ E-GENESIS`, `¬HeadInRoot ⇒ INDETERMINATE(terminality_unproven)`,
+`¬Committed ⇒ INDETERMINATE(unavailable)`, `¬ProvenAfter ⇒ INDETERMINATE(order_unproven)`. Because `ProvenAfter`
+is the F.5g proof relation, two `not_after` upper bounds give `unproven ⇒ order_unproven` — never a silent
+`corroborated` from comparing two RFC3339 fields (F.2).
+
+**The `corroborated` ceiling (P0-05 closed by construction).** `AttestedFresh = CorroboratedFresh ∧
+IndependentAntiEquivocation`, where the anti-equivocation event is `¬∃` a rival checkpoint at the same
+`(domain, genesis_epoch, sequence)` — itself authenticated non-membership (F.5a), which a SINGLE publisher does not
+control: it can anchor two branches at one sequence, so `IndependentAntiEquivocation ∉ σ(publisher-checkpoint)`.
+Therefore `CorroboratedFresh` is STRICTLY below `AttestedFresh`, and the publisher-checkpoint derivation returns
+`corroborated` with `anti_equivocation = unverified` — it CANNOT emit `attested`. This is the P0-05 overclaim
+removed by the type of the function: the false `attested` path does not exist here; `attested` requires the
+independent coordinate of Phase C/#42 (`authenticated-map-uniqueness` or `accepted-witness-quorum`, F.5g quorum).
+(Strict last-index terminality is the #77 refinement; F.5i uses the weaker, honestly-labelled `head ∈ root`.)
+
+**Realization.** `deriveCheckpointFreshness(chain, {genesisAuthority | pinnedPrior, target, commitment,
+terminalityProof})` composing `verifyAuthorityCheckpointChain` (F.5h) × `verifyAnchor` (membership) ×
+`compareEvidenceOrder` (F.5g); it returns `{keylog_freshness:"corroborated", anti_equivocation:"unverified"}` and
+has no `attested` branch.
+
+**Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
+- the conjunction holds ⇒ corroborated: *"PhB all conjuncts (authorized × head∈root × proven-after) → corroborated"*.
+- the ceiling: *"PhB CEILING: corroborated carries anti_equivocation:unverified and is NEVER attested"*.
+- named indeterminacy per missing conjunct: *"PhB commitment NOT proven-after target → INDETERMINATE(order_unproven)"*, *"PhB two not_after upper bounds → unproven → order_unproven"*, *"PhB terminality missing → INDETERMINATE(terminality_unproven)"*, *"PhB commitment not bound to checkpoint id → INDETERMINATE(unavailable)"*, *"PhB unauthorized chain (wrong signer) → INVALID, freshness unverified"*, *"PhB checkpoint active_genesis ≠ target → INVALID(E-GENESIS)"*, *"PhB cold verifier (no root) → INDETERMINATE(authority_unresolved)"*.
+
+All green at REV 44 (conformance 266/0).
+
+## F.5j `attested` freshness = `corroborated` ∧ INDEPENDENT uniqueness — the ladder completes (#76 Phase C)
+
+F.5i earned `corroborated` and proved the publisher cannot self-supply the uniqueness coordinate. F.5j brings that
+coordinate into `ℐ_C` from an INDEPENDENT source and completes the freshness ladder.
+
+**The conjunction.** `AttestedFresh(R, C) = CorroboratedFresh(R, C) ∧ IndependentUniqueness(C)`. The uniqueness event
+`Unique(C) = ¬∃` a rival checkpoint at `(domain, genesis_epoch, sequence)` is authenticated non-membership (F.5a),
+absent from `σ(publisher)`. It enters `ℐ_C` two ways (both `attested`, distinct basis): (a)
+`authenticated-map-uniqueness` — a verifiable map keyed by `(domain, genesis_epoch, sequence)` giving cryptographic
+non-membership (the map path, #42); or (b) `accepted-witness-quorum` — the F.5g quorum over a BYTE-IDENTICAL typed
+uniqueness claim `u = {purpose:"ust:checkpoint-uniqueness-attestation", domain, genesis_epoch, sequence,
+checkpoint=head}`, each witness admitted under `C` (issuer ∈ `trustRoots`, valid signature over `canon(u)`), counted
+by DISTINCT `dom_C` domains `≥ threshold`.
+
+**Assertion, not observation; independence, not count.** The typed `purpose` is load-bearing: a witness signing `u`
+ASSERTS uniqueness (`¬∃ rival`), whereas a co-signed bare observation (`"saw H1"`, a different purpose) is only
+membership — corroboration, not non-membership (F.5a). So a wrong-purpose statement is not admitted. And quorum is
+`|{dom_C(issuer)}| ≥ threshold` (F.5g): many endpoints under ONE `dom_C` value do not manufacture independence, and
+a `trust_domain` inside the signed claim is discarded (F.5a.1). The claims must be byte-identical, so no witness can
+weaken the shared statement.
+
+**`attested ⇒ corroborated` (conjunction, not replacement).** The derivation verifies the F.5i corroborated
+conjunction FIRST; `¬CorroboratedFresh ⇒ ¬AttestedFresh` regardless of any uniqueness proof — uniqueness on an
+unauthorized or unbound checkpoint is `INVALID`, never `attested` (the map proves a value occupies the key, not that
+the value is a valid authority transition). Uniqueness ALONE never earns `attested`.
+
+**The ladder completes.** `unverified ⊊ fresh ⊊ corroborated ⊊ attested`, each rung adding exactly one measurable
+coordinate — `fresh` (a recent authoritative fetch), `corroborated` (F.5i: authorized ∧ committed ∧ proven-after),
+`attested` (F.5j: ∧ independent uniqueness). No rung silently upgrades another (F.5a.1); each is earned by bringing
+its own coordinate into `ℐ_C`.
+
+**Realization.** `checkpointUniquenessClaim`/`buildUniquenessAttestation` (the typed claim `u`),
+`verifyCheckpointUniqueness` (byte-identical claim + consumer-admitted issuers + distinct-`dom_C` quorum), and the
+`attested` branch of `deriveCheckpointFreshness` (checked only after the F.5i corroborated conjunction).
+
+**Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
+- the conjunction upgrades: *"PhC 2 witnesses, DISTINCT domains → attested (accepted-witness-quorum), anti_equivocation attested"*.
+- independence is domain-distinctness: *"PhC 2 witnesses, SAME domain → quorum not met → stays corroborated"*.
+- `attested ⇒ corroborated`: *"PhC uniqueness on an UNAUTHORIZED checkpoint → INVALID, never attested"*.
+- assertion not observation: *"PhC bare observation (wrong purpose) is NOT uniqueness → not admitted"*.
+- byte-identical claim / consumer-admitted / binding: *"PhC witnesses signing NON-identical claims → mismatches dropped → quorum not met"*, *"PhC witness NOT in consumer trustRoots → not admitted"*, *"PhC self-declared trust_domain inside the claim → rejected"*, *"PhC uniqueness for a DIFFERENT checkpoint → not admitted (binding)"*.
+
+All green at REV 44 (conformance 274/0).
+
+## F.5k Authenticated-map uniqueness — position-uniqueness IS non-membership; two predicates, typed key spaces (#42)
+
+F.5j's witness quorum is one basis for the independent-uniqueness coordinate; F.5k is the other — a cryptographic
+verifiable map — and it closes the identity axis (`authoritative`) the same way it closes freshness (`attested`).
+
+**Position-uniqueness collapses the universal `¬∃`.** The map is a sparse Merkle tree indexed by `H(key)`: the key's
+path is a deterministic function of the key, so a key has EXACTLY ONE leaf. An inclusion proof for `k` returning `v`
+therefore proves `k ↦ v` AND `¬∃ v' ≠ v` at `k` — the universal non-membership over rival values collapses to a
+single positive lookup (F.5a's prefix-uniqueness, now realized). The map root rides the anchor substrate `Fₜ` (or a
+consumer-configured independent map operator), so this coordinate is INDEPENDENT of the publisher — exactly the
+`σ(publisher)`-external coordinate F.5i/F.5j required. The tree also decides non-membership of a key directly (an
+empty leaf at `H(key)`): `absent(k) ⟺ smtVerify(root, k, ⊥)`.
+
+**Two predicates, one infrastructure, TYPED key spaces (no collision).** The same map serves both, with
+domain-separated keys and values so a proof for one predicate is not a proof for the other:
+`checkpoint-map` — `key = H("ust:checkpoint-map-key", canon(domain, genesis_epoch, sequence))`, `value =
+H("ust:checkpoint-map-value", canon(checkpoint))` ⇒ `CheckpointUnique` ⇒ `attested` (freshness axis, F.5j);
+`name-map` — `key = H("ust:name-map-key", canon(domain))`, `value = H("ust:name-map-value", canon(active_genesis))`
+⇒ `ActiveGenesisUnique` ⇒ `authoritative` (identity axis, F.5a). These are SEPARATE predicates on ORTHOGONAL axes
+(F.5a.1): a map may prove one without the other, and a `name-map` proof presented as a `checkpoint-map` proof is
+rejected by the key-space type. There is NO generic `verifyMapInclusion(flag)` — the removed-boolean class.
+
+**Basis-agnostic rung tops.** Each axis reaches its top rung by EITHER independent basis: `attested` freshness ⇐
+`authenticated-map-uniqueness` (F.5k) ∨ `accepted-witness-quorum` (F.5j); `authoritative` identity ⇐ the name-map
+(F.5k) ∨ an accepted external witness (F.5a.1). The RUNG is the measurable coordinate; the BASIS records HOW it
+entered `ℐ_C`, and both remain distinguishable in the verdict (F.5a.1) — a witness quorum ATTESTS uniqueness, it does
+not become cryptographic map non-membership.
+
+**Realization.** `buildVerifiableMap` (sparse-SMT root + co-path prover), `smtVerify` (inclusion / non-membership),
+the typed `checkpointMapLeaf`/`nameMapLeaf`, `verifyCheckpointMapUniqueness` / `verifyActiveGenesisUniqueness`, and
+their composition into `deriveCheckpointFreshness` (map branch ⇒ `attested`) and `resolveAuthority`
+(`nameMap` branch ⇒ `authoritative`).
+
+**Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
+- position-uniqueness ⇒ attested: *"#42 checkpoint-map inclusion → attested (basis authenticated-map-uniqueness)"*.
+- a rival at the key ⇒ not unique: *"#42 map shows a RIVAL at the same sequence → not attested → stays corroborated"*.
+- conjunction with authorization: *"#42 map uniqueness on an UNAUTHORIZED chain → INVALID, never attested"*.
+- name axis authoritative: *"#42 name-map inclusion → identity authoritative (independently_verified, basis map)"*, *"#42 name-map inclusion via verify() composes to VALID:HIGH (authoritative name)"*.
+- non-membership (the SMT decides key ABSENCE directly, distinct from a rival value): *"#42 name-map absent (empty map non-membership) → NOT authoritative"*, *"#42 SMT non-membership: absent key → proven non-membership (absent:true)"*, *"#42 SMT rival-value-bound is NOT non-membership (absent falsy)"*.
+- typed key-space separation: *"#42 typed key spaces: a name-map proof is rejected as a checkpoint-map proof (no collision)"*.
+
+All green at REV 44 (conformance 282/0).
 
 ## F.6 Composition — the event algebra
 

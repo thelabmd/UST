@@ -18,7 +18,7 @@ graduated tiers (LIGHT / HIGH / TOP, §3.1). Every mechanism below serves that s
 judged by ONE question — *how much trust does this actually earn, and does the protocol say so honestly?* A
 tier must never let a consumer read "signed" as "true," "anchored" as "correct," or "agreeing" as "independent."
 
-Status: **Normative specification — 1.0 REV 43 (2026-07-14).** The SECURELY-STRUCTURED (namespaced) base that
+Status: **Normative specification — 1.0 REV 44 (2026-07-14).** The SECURELY-STRUCTURED (namespaced) base that
 closed all red-team findings STRUCTURALLY (I3 collision unrepresentable, I1 whole-State signature by
 construction, no stored-hash footgun), with ALL v0.29 FEATURES merged IN (not a flat-wire revert): per-partition
 captured/computed hashing (cross-engine corroboration for computed parts), `parent_ust` (hour-close timing),
@@ -867,20 +867,29 @@ a failure — `INDETERMINATE(unsupported)` discipline, §17):
   `unavailable` ⇒ the name-authority tier is DENIED and the LIGHT floor stands (INDETERMINATE discipline, §15) —
   reported explicitly (e.g. "HIGH pending witness"), NEVER silently dropped, NEVER guessed (W1).
 
-**`authoritative` requires INDEPENDENT non-membership**, one of: (a) an out-of-band caller assertion of no-fork
-(air-gapped verification), reported as `caller-asserted`; or (b) an **anchored name-keyed verifiable-map
-inclusion** — an authenticated dictionary `domain_shard ↦ activeGenesis` whose signed root is committed to the
-anchor substrate (§11), where prefix-uniqueness makes an inclusion proof for the name the non-membership proof
-for every rival (F.5a). Mechanism (b)'s wire format is a FUTURE revision (roadmap: an independent witness that
-is not the publisher); until it is served, the honest ceiling from the publisher's own surfaces is
-`corroborated`.
+**`authoritative` requires INDEPENDENT non-membership**, one of: (a) a **verified name no-fork evidence** — a
+typed, domain-separated claim (`purpose: "ust:name-no-fork"`, bound to `domain_shard` + `active_genesis`) signed
+by a witness the CONSUMER trusts, the issuer resolved against consumer-configured trust roots. Independence is
+CONSUMER-owned (`issuer_id ↦ trust_domain`); a `trust_domain` self-declared INSIDE the signed claim is rejected
+(a witness cannot grant itself independence — P0-2). Or (b) an **anchored name-keyed verifiable-map inclusion** —
+an authenticated dictionary `domain_shard ↦ activeGenesis` whose signed root is committed to the anchor substrate
+(§11), where prefix-uniqueness makes an inclusion proof for the name the non-membership proof for every rival
+(F.5a). Mechanism (b)'s wire format is a FUTURE revision (an independent witness/map that is not the publisher,
+#42); until it is served, the honest ceiling from the publisher's own surfaces is `corroborated`.
+
+A raw out-of-band caller assertion of no-fork (`noForkConfirmed`) is NOT independent evidence — it is a
+transparent **`consumer-override`** (`independently_verified: false`) that reaches the name-authoritative tier
+ONLY when the consumer CONSCIOUSLY honors it (`acceptConsumerOverride`); it is NEVER silently reported as
+`authoritative` (the removed overclaim, the same class as a raw `mapInclusion:true`).
 
 **Strength ladder (normative verdict values).** `self-asserted` / `pinned` (LIGHT) ⊊ `corroborated` (HIGH —
-served-list no-fork) ⊊ `authoritative` (HIGH — independent non-membership). Only `authoritative` surfaces the
-definitive `publisher` field and may compose to **TOP** (an anchored-but-only-corroborated name never
-overclaims TOP); `corroborated` surfaces `publisher_claimed` and a `no_fork` basis (`served-list` /
-`caller-asserted` / `map-inclusion`). A consumer needing independent authority sets `requireAuthoritative`,
-which rejects `corroborated`.
+served-list no-fork) ⊊ `authoritative` (HIGH — INDEPENDENT non-membership: verified no-fork evidence or an
+anchored name-map). A raw caller override surfaces as `consumer-override` (`independently_verified: false`),
+DISTINCT from `authoritative` and honored only on explicit opt-in. Only `authoritative` surfaces the definitive
+`publisher` field and may compose to **TOP** (an anchored-but-only-corroborated name never overclaims TOP);
+`corroborated` surfaces `publisher_claimed` and a `no_fork` basis (`served-list` / `accepted-external-witness` /
+`map-inclusion`). A consumer needing independent authority sets `requireAuthoritative`, which rejects
+`corroborated` (and any `consumer-override` not explicitly honored via `acceptConsumerOverride`).
 
 ### 12.2 Key log — a genesis-rooted, self-signed chain (M1)
 - A publisher's key log is a **sequenced stream (§11.3) of UST transcripts** — the SAME `{ust, state, sig,
@@ -1779,6 +1788,31 @@ provenance and will be lifted into this ledger when the spec is published.
   (§20, unsigned-deterministic — not a new protocol object). 4 executable composition vectors (`stream-authority`,
   `stream-grid`, `fork-choice`). P0-01/02/03/04 all reproduce SAFE; P0-05 (latest-head) remains the F.5a
   monitorable single-head. conformance 221/0, cli 130/0, mcp live 9/0.
+- **REV 44 (2026-07-14)** — **the P0-05 latest-head + connector + checkpoint assurance arc, built bottom-up** (#76
+  design / #42 map / #75 audit), each layer realized in code AND proven by conformance vectors, with a `model ↔
+  code` guard (`model-correspondence.mjs`, 62/62) that fails if any formal theorem cites a check the suite does not run:
+  - **P0-2 no-fork reclassification** (F.5a.1): `authoritative` name-authority is EARNED, never self-declared. A raw
+    `noForkConfirmed` boolean NO LONGER reaches `authoritative` — it is a transparent `consumer-override`
+    (`independently_verified:false`), honored only on explicit `acceptConsumerOverride`. Independent `authoritative`
+    needs a **verified name no-fork evidence** (typed `ust:name-no-fork` claim, consumer-resolved `issuer_id ↦
+    trust_domain`; a self-declared `trust_domain` is rejected). `buildNoForkEvidence`/`verifyNoForkEvidence`.
+  - **Connector evidence algebra** (F.5g): facts-only `VerifiedEvidence` (core derives the class; `transparency-log ≠
+    non-membership`), `compareEvidenceOrder` (order is a PROOF relation, not a timestamp compare), `quorumTrustDomains`
+    (independence = DISTINCT consumer-resolved trust domains, never connector count).
+  - **Authority-checkpoint chain** (F.5h): three-layer object (`body` / signature preimage / `checkpoint_id` over
+    `{body,sig}`; external evidence excluded), NON-CIRCULAR in-band authority (`Cₙ₋₁` authorizes `Cₙ`; a checkpoint
+    never authorizes itself), resolve-signer-before-trust, exact rotation. `verifyAuthorityCheckpointChain`.
+  - **Phase B `corroborated` freshness** (F.5i): `deriveCheckpointFreshness` — the conjunction (authorized ∧ head∈root
+    ∧ external-commitment ∧ proven-after target), capped at `corroborated` by construction (no `attested` branch) —
+    the P0-05 stale-prefix overclaim closed.
+  - **Phase C `attested` freshness** (F.5j, #42/F.5k): independent anti-equivocation upgrades to `attested` by EITHER
+    basis — `accepted-witness-quorum` (byte-identical typed claim, distinct trust domains) or
+    `authenticated-map-uniqueness` (sparse Merkle map, position-uniqueness = non-membership). The same map path earns
+    `authoritative` identity via the name-map (`verifyActiveGenesisUniqueness`, wired into `resolveAuthority`). Two
+    TYPED key spaces, no generic `verifyMapInclusion` flag.
+  The freshness ladder is complete (`unverified ⊊ fresh ⊊ corroborated ⊊ attested`), each rung one measurable
+  coordinate, no rung silently upgrading another. Formal model gains F.5a.1 and F.5g–F.5k. conformance 282/0, cli
+  130/0, mcp live 11/0, ssrf 7/0, model↔code 62/62.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.32', revision: 43 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.32', revision: 44 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -457,7 +457,10 @@ export function verify(doc, opts = {}) {
     // §Y3: `domain_shard` is surfaced as `publisher` ONLY at `authoritative` strength; otherwise it is a
     // self-asserted/pinned LABEL — `publisher_claimed` — so a consumer that never read Y3 cannot over-attribute.
     // (Pinning authenticates the KEY, not the name.)
-    const nameField = identity.strength === 'authoritative' ? { publisher: st.id.domain_shard } : { publisher_claimed: st.id.domain_shard };
+    // P0-2 audit — a raw `consumer-override` reaches the name-authoritative TIER only when the consumer CONSCIOUSLY
+    // honors its own out-of-band assertion (opts.acceptConsumerOverride); the verdict still carries independently_verified:false.
+    const nameAuthoritative = identity.strength === 'authoritative' || (identity.strength === 'consumer-override' && opts.acceptConsumerOverride && identity.status === 'verified');
+    const nameField = nameAuthoritative ? { publisher: st.id.domain_shard } : { publisher_claimed: st.id.domain_shard };
     // (the anchor was verified in phase 1 above; `timeField`/`provenAnchorTime` already carry its proven time.)
     // The verdict CARRIES ITS SCOPE: `VALID:LIGHT|HIGH|TOP`, so a consumer cannot read "valid" without reading
     // valid-AT-WHAT (a bare `=== 'VALID'` no longer matches — the same forcing function as publisher_claimed).
@@ -465,8 +468,8 @@ export function verify(doc, opts = {}) {
     // and `authoritative` (§12.1a F.5a) — both reach HIGH. The no-fork STRENGTH separates them: only `authoritative`
     // (independent non-membership) reaches TOP, so an anchored-but-only-corroborated name never overclaims TOP.
     const verified = identity.status === 'verified';
-    const authoritative = identity.strength === 'authoritative' && verified;
-    const nameBound = verified && (identity.strength === 'authoritative' || identity.strength === 'corroborated');
+    const authoritative = nameAuthoritative && verified;
+    const nameBound = verified && (nameAuthoritative || identity.strength === 'corroborated');
     // §3.1/§15 — TOP = authoritative identity + anchored time. HIGH = name-bound (corroborated or authoritative).
     // Stream COMPLETENESS is a separate RANGE verdict (verifyStream), never a single-document claim.
     const tier = authoritative && timeField.strength === 'anchored' ? 'TOP' : nameBound ? 'HIGH' : 'LIGHT';
@@ -593,7 +596,94 @@ export function resolveKeys(genesis, keylog = []) {
 
 // ─── §12 HIGH name-authority resolution. STATELESS: the caller (ustate/engine) supplies the genesis +
 //     key-log transcripts (retrieval is the stateful layer's job) and asserts no-fork from the witness (W1).
-export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, corroborated = false, anchorTime, keylogFreshAsOf, keylogHeadAnchor, substrateVerify } = {}) {
+// ─── §12.1a / P0-2 (audit) — NAME NO-FORK EVIDENCE. `authoritative` name-authority is EARNED, never self-declared:
+//     it requires a TYPED, domain-separated no-fork claim signed by a witness the CONSUMER trusts (resolved against
+//     `trustRoots`: issuer_id → pub | {pub[, trust_domain]}), bound to this domain + active genesis. The witness
+//     CANNOT grant itself a trust domain — it is NOT in the signed claim; the consumer owns the issuer→domain map
+//     (self-declared `trust_domain`/`issuer_id` inside a claim is rejected). A raw `noForkConfirmed` boolean is NOT
+//     evidence: it is a distinct `consumer-override` (independently_verified:false), never silently `authoritative`
+//     (the removed overclaim class — the same as `mapInclusion:true`). Independent-map `authoritative` stays #42.
+export function noForkClaim({ domain_shard, active_genesis, map_checkpoint, map_sequence, valid_as_of }) {
+  return { purpose: 'ust:name-no-fork', domain_shard, active_genesis,
+    ...(map_checkpoint !== undefined ? { map_checkpoint } : {}),
+    ...(map_sequence !== undefined ? { map_sequence } : {}),
+    ...(valid_as_of !== undefined ? { valid_as_of } : {}) };
+}
+export function buildNoForkEvidence(fields, privKeyObj, issuerPubB64url) {
+  const claim = noForkClaim(fields);
+  const sig = edSign(null, Buffer.from(canon(claim), 'utf8'), privKeyObj).toString('base64url');
+  return { claim, issuer_id: keyId(issuerPubB64url), sig: { alg: 'Ed25519', key_id: keyId(issuerPubB64url), pub: issuerPubB64url, sig } };
+}
+// Verify an envelope { claim, issuer_id, sig } against the target domain + active genesis and consumer trustRoots.
+// Independence is CONSUMER-OWNED: the issuer must be accepted in trustRoots; any trust_domain INSIDE the claim is
+// rejected (that would be self-declared independence, P0-2). Returns { ok, witness_id, trust_domain, detail }.
+export function verifyNoForkEvidence(evidence, { domain_shard, active_genesis, trustRoots = {} } = {}) {
+  if (!evidence || typeof evidence !== 'object') return { ok: false, detail: 'no evidence' };
+  const { claim, issuer_id, sig } = evidence;
+  if (!claim || typeof claim !== 'object' || !issuer_id || !sig || !sig.sig || !sig.pub) return { ok: false, detail: 'malformed envelope' };
+  if (claim.purpose !== 'ust:name-no-fork') return { ok: false, detail: 'wrong claim purpose' };
+  if ('trust_domain' in claim || 'issuer_id' in claim) return { ok: false, detail: 'self-declared trust_domain/issuer inside claim (P0-2)' };
+  if (claim.domain_shard !== domain_shard) return { ok: false, detail: 'claim domain_shard mismatch' };
+  if (claim.active_genesis !== active_genesis) return { ok: false, detail: 'claim not bound to this active genesis' };
+  const root = trustRoots[issuer_id];
+  if (!root) return { ok: false, detail: 'issuer not in consumer trustRoots' };
+  const rootPub = typeof root === 'string' ? root : root.pub;
+  if (rootPub !== sig.pub || keyId(sig.pub) !== issuer_id) return { ok: false, detail: 'issuer_id/pub not the configured trust root' };
+  if (strictB64url(sig.sig, 64) === null) return { ok: false, detail: 'sig not canonical b64url of a 64-byte Ed25519 signature' };
+  if (!edVerifyStrict(sig.pub, canon(claim), sig.sig)) return { ok: false, detail: 'Ed25519 verify failed' };
+  return { ok: true, witness_id: issuer_id, ...(typeof root === 'object' && root.trust_domain ? { trust_domain: root.trust_domain } : {}) };
+}
+
+// ─── #76 Phase A — CONNECTOR EVIDENCE ALGEBRA. A connector returns VERIFIED FACTS only (`VerifiedEvidence`), never
+//     an assurance label — the CORE derives the class. Two algebra ops the checkpoint/authority layers consume:
+//     `compareEvidenceOrder` (temporal order is a PROOF RELATION, not a comparison of RFC3339 fields) and
+//     `quorumTrustDomains` (quorum counts DISTINCT CONSUMER-resolved trust domains, never connectors/URLs/mirrors and
+//     never a self-declared `trust_domain`, P0-2). Faithful to "assurance is earned, capped by C, strengthened by quorum".
+export function verifiedEvidence({ proof_kind, subject, source_id, facts = {}, verifier_id, verifier_version }) {
+  if (!proof_kind || !subject || !source_id) throw Object.assign(new Error('E-EVIDENCE: proof_kind, subject, source_id required'), { code: 'E-EVIDENCE' });
+  for (const k of ['assurance', 'strength', 'trust_domain', 'independent'])            // facts-only: no self-declared class/independence
+    if (k in facts) throw Object.assign(new Error(`E-EVIDENCE: a connector must not self-declare '${k}' (facts only; the core derives it)`), { code: 'E-EVIDENCE' });
+  return { proof_kind, subject, source_id, facts, ...(verifier_id ? { verifier_id } : {}), ...(verifier_version ? { verifier_version } : {}) };
+}
+// The CORE derives the assurance CLASS from the proof_kind — never the connector. `transparency-log` inclusion+
+// consistency is NOT non-membership; only a keyed-uniqueness/map proof-kind yields non-membership. Unknown ⇒ opaque.
+export function evidenceClass(proof_kind) {
+  switch (proof_kind) {
+    case 'pow-header-chain':  return 'external-commitment+order+time';
+    case 'transparency-log':  return 'append-only-inclusion+consistency';   // NOT non-membership
+    case 'authenticated-map': return 'keyed-membership+non-membership';
+    case 'content-addressed': return 'content-equality+availability';
+    case 'rfc3161-tsa':       return 'trusted-timestamp';
+    default:                  return 'opaque';                               // ⇒ INDETERMINATE(unsupported) upstream
+  }
+}
+// compareEvidenceOrder(a, b): is `a` PROVEN to be after `b`? Same-substrate position (block height / log index) is a
+// total order; else an interval relation `a.not_before ≥ b.not_after` proves after, `b.not_before ≥ a.not_after`
+// proves not-after. Two `not_after` upper bounds ALONE (or cross-substrate positions) prove nothing ⇒ `unproven`.
+export function compareEvidenceOrder(a, b) {
+  const fa = a?.facts ?? a ?? {}, fb = b?.facts ?? b ?? {};
+  if (fa.substrate && fb.substrate && fa.substrate === fb.substrate && fa.position !== undefined && fb.position !== undefined)
+    return BigInt(fa.position) > BigInt(fb.position) ? 'proven-after' : 'not-after';   // one total order ⇒ decidable
+  const iso = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(s);
+  if (iso(fa.not_before) && iso(fb.not_after) && fa.not_before >= fb.not_after) return 'proven-after';
+  if (iso(fb.not_before) && iso(fa.not_after) && fb.not_before >= fa.not_after) return 'not-after';
+  return 'unproven';                                                                   // two upper bounds, or cross-substrate
+}
+// quorumTrustDomains(list, { domains, threshold }): count DISTINCT CONSUMER-resolved trust domains. `domains` maps a
+// verified source_id → trustDomain (consumer config). Sources absent from `domains` are NOT admitted; a `trust_domain`
+// carried on the evidence itself is ignored. Multiple sources in one domain count once.
+export function quorumTrustDomains(list, { domains = {}, threshold } = {}) {
+  const seen = new Set();
+  for (const e of Array.isArray(list) ? list : []) {
+    const sid = e?.source_id ?? e?.facts?.source_id;
+    const dom = sid !== undefined ? domains[sid] : undefined;                          // consumer-resolved ONLY
+    if (dom !== undefined) seen.add(dom);
+  }
+  const arr = [...seen];
+  return { count: arr.length, domains: arr, ...(threshold !== undefined ? { met: arr.length >= threshold } : {}) };
+}
+
+export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, noForkEvidence, nameMap, trustRoots, corroborated = false, anchorTime, keylogFreshAsOf, keylogHeadAnchor, substrateVerify } = {}) {
   if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
   if (genesis.state?.id?.domain_shard !== doc.state.id.domain_shard) return { error: 'E-GENESIS', detail: 'genesis domain mismatch' };
   const rk = resolveKeys(genesis, keylog);
@@ -650,12 +740,26 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
   //     of A in the published set), but NOT independent non-membership (the publisher can omit a rival, F.5a).
   //   · no no-fork evidence at all ⇒ DENIED (status unavailable → the name-authority tier is not reached, W1).
   const st2 = suspect ? 'suspect' : 'verified';
-  // #69 A2 P1 — `authoritative` requires INDEPENDENT non-membership. Until the name-map VERIFIER exists (#42),
-  // the ONLY authoritative path is an out-of-band caller assertion (noForkConfirmed = the caller takes
-  // responsibility, reported `caller-asserted`). There is deliberately NO `mapInclusion:true` boolean — a raw
-  // flag that is not a verified proof would be exactly the overclaim we removed. The map path returns here as
-  // `authoritative` only once a real VerifiedMapReceipt is checked (future revision).
-  if (noForkConfirmed) return { strength: 'authoritative', noFork: 'caller-asserted', status: st2, capacity, freshness };
+  // #69 A2 P1 / P0-2 audit — `authoritative` requires INDEPENDENT non-membership, EARNED not self-declared:
+  //   · a verified NAME NO-FORK EVIDENCE — a typed claim signed by a witness the CONSUMER trusts (trustRoots),
+  //     bound to this domain + active genesis ⇒ `authoritative`, independently_verified, basis accepted-external-witness.
+  //   · the independent name-map VERIFIER (#42) ⇒ `authoritative` once a real VerifiedMapReceipt is checked (future).
+  //   · a raw `noForkConfirmed` boolean is NOT evidence — the caller vouches out-of-band (air-gap). It is a distinct
+  //     `consumer-override` (independently_verified:false), NEVER silently `authoritative` (the removed overclaim,
+  //     same class as `mapInclusion:true`). A consumer consciously honoring its own override sets acceptConsumerOverride
+  //     at verify(); the verdict stays transparent. Present-but-invalid evidence never upgrades (fail-safe).
+  if (nameMap) {                                                                    // #42 — independent name-map inclusion (prefix-uniqueness ⇒ ¬∃ rival)
+    const nm = verifyActiveGenesisUniqueness(nameMap.proof, { domain_shard: doc.state.id.domain_shard, active_genesis: contentHash(genesis), mapRoot: nameMap.mapRoot });
+    if (nm.authoritative) return { strength: 'authoritative', noFork: 'map-inclusion', independently_verified: true,
+      basis: 'authenticated-map-uniqueness', map_root: nm.map_root, status: st2, capacity, freshness };
+  }
+  if (noForkEvidence !== undefined) {
+    const ev = verifyNoForkEvidence(noForkEvidence, { domain_shard: doc.state.id.domain_shard, active_genesis: contentHash(genesis), trustRoots: trustRoots || {} });
+    if (ev.ok) return { strength: 'authoritative', noFork: 'accepted-external-witness', independently_verified: true,
+      basis: 'accepted-external-witness', witness_id: ev.witness_id, ...(ev.trust_domain ? { trust_domain: ev.trust_domain } : {}), status: st2, capacity, freshness };
+  }
+  if (noForkConfirmed) return { strength: 'consumer-override', noFork: 'caller-asserted', independently_verified: false, status: st2, capacity, freshness,
+    ...(noForkEvidence !== undefined ? { detail: 'noForkEvidence rejected → consumer-override only (not independently verified)' } : {}) };
   if (corroborated) return { strength: 'corroborated', noFork: 'served-list', status: st2, capacity, freshness };
   return { strength: 'corroborated', noFork: 'unconfirmed', status: 'unavailable', capacity, freshness,
     detail: 'no independent no-fork evidence; a served witness only corroborates (§12.1a F.5a) → authority pending, retry' };
@@ -829,6 +933,207 @@ export function resolveCadence(genesis, cadenceLog = [], atTime, { keylog } = {}
     lastEff = effE; prev = contentHash(e);
   }
   return { cadence };
+}
+
+// ─── #76/#77 AUTHORITY CHECKPOINT — the latest-head authority object (distinct from the STREAM `buildCheckpoint`).
+//     THREE LAYERS (a signer cannot sign its own signature): unsigned CheckpointBody → preimage
+//     canon({purpose:"ust:authority-checkpoint-signature", body}) → signed {body, sig}, with
+//     authorityCheckpointId = H("ust:authority-checkpoint", canon({body, sig})). External evidence (anchors, map
+//     proofs) is NEVER inside the id. Authority is carried IN-BAND and NON-CIRCULARLY: genesis authorizes C₀'s
+//     signer; each Cₙ₋₁ authorizes the signer of Cₙ (its `checkpoint_authority.next_*`, effective at seq n); a
+//     checkpoint NEVER authorizes its own signer. The expected signer is resolved from PRIOR state BEFORE the
+//     signature is trusted; the carried `current_key_id` is diagnostic and MUST equal that resolved signer.
+export function buildAuthorityCheckpoint({ domain_shard, genesis_epoch, sequence, previous_checkpoint = null, active_genesis, current_key_id, next_key_id, next_pub, effective_sequence, keylog }) {
+  const ca = { current_key_id,
+    ...(next_key_id !== undefined ? { next_key_id } : {}),
+    ...(next_pub !== undefined ? { next_pub } : {}),
+    ...(effective_sequence !== undefined ? { effective_sequence } : {}) };
+  return { version: '1', purpose: 'ust:authority-checkpoint', domain_shard, genesis_epoch, sequence: String(sequence),
+    ...(previous_checkpoint !== undefined && previous_checkpoint !== null ? { previous_checkpoint } : {}),   // C₀ is genesis-rooted: no prior
+    active_genesis, checkpoint_authority: ca, keylog };
+}
+export function sealAuthorityCheckpoint(body, privKeyObj, pubB64url) {
+  const sig = edSign(null, Buffer.from(canon({ purpose: 'ust:authority-checkpoint-signature', body }), 'utf8'), privKeyObj).toString('base64url');
+  return { body, sig: { alg: 'Ed25519', key_id: keyId(pubB64url), pub: pubB64url, sig } };
+}
+export const authorityCheckpointId = (cp) => H('ust:authority-checkpoint', canon({ body: cp.body, sig: cp.sig }));   // ONLY body+sig — external evidence excluded
+const isSeq = (s) => typeof s === 'string' && /^(0|[1-9]\d*)$/.test(s);                                              // canonical decimal, no leading zeroes
+function authorityCheckpointSigOk(cp, expectedKeyId, expectedPub) {
+  const s = cp?.sig; if (!s || s.alg !== 'Ed25519' || !s.pub || !s.sig) return { ok: false, detail: 'malformed sig' };
+  if (s.key_id !== expectedKeyId || s.pub !== expectedPub) return { ok: false, detail: 'signer is not the authorized checkpoint authority' };
+  if (keyId(s.pub) !== s.key_id) return { ok: false, detail: 'sig.key_id ≠ keyId(pub)' };
+  if (strictB64url(s.sig, 64) === null) return { ok: false, detail: 'sig not canonical b64url of a 64-byte Ed25519 signature' };
+  if (!edVerifyStrict(s.pub, canon({ purpose: 'ust:authority-checkpoint-signature', body: cp.body }), s.sig)) return { ok: false, detail: 'Ed25519 verify failed' };
+  return { ok: true };
+}
+// Verify a chain of authority checkpoints. Root the FIRST element's signer in the genesis-authorized checkpoint key
+// (`genesisAuthority = {key_id, pub}`, the reference profile's dedicated key) OR a pinned prior checkpoint
+// (`pinnedPrior = {checkpoint_id, authority:{key_id, pub}, sequence}`). No root ⇒ INDETERMINATE(authority_unresolved).
+export function verifyAuthorityCheckpointChain(chain, { genesisAuthority, pinnedPrior } = {}) {
+  if (!Array.isArray(chain) || chain.length === 0) return { error: 'E-MALFORMED', detail: 'empty checkpoint chain' };
+  if (!genesisAuthority && !pinnedPrior) return { result: 'INDETERMINATE', reason: 'authority_unresolved', detail: 'no genesis-rooted or pinned-prior checkpoint authority to resolve the first signer' };
+  let prev = pinnedPrior ? { id: pinnedPrior.checkpoint_id, authority: pinnedPrior.authority, sequence: pinnedPrior.sequence, body: null } : null;
+  for (let i = 0; i < chain.length; i++) {
+    const cp = chain[i], b = cp?.body;
+    if (!b || b.purpose !== 'ust:authority-checkpoint') return { result: 'INVALID', error: 'E-MALFORMED', detail: 'not an authority-checkpoint body' };
+    if (!isSeq(b.sequence)) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'sequence is not a canonical decimal string' };
+    // 1) resolve the EXPECTED signer from PRIOR state (genesis / pinned / previous checkpoint) — before trusting cp
+    let expected;
+    if (prev === null) {
+      expected = { key_id: genesisAuthority.key_id, pub: genesisAuthority.pub };       // C₀ rooted in the genesis-authorized key
+    } else {
+      const pca = prev.body ? prev.body.checkpoint_authority : null;                    // the authority Cₙ₋₁ committed for THIS sequence, else unchanged
+      expected = (pca && pca.next_key_id !== undefined && pca.effective_sequence === b.sequence) ? { key_id: pca.next_key_id, pub: pca.next_pub } : prev.authority;
+      if (b.previous_checkpoint !== prev.id) return { result: 'INVALID', error: 'E-PREV', detail: 'previous_checkpoint ≠ id of the prior accepted checkpoint' };
+      if (b.sequence !== String(BigInt(prev.sequence) + 1n)) return { result: 'INVALID', error: 'E-SEQ', detail: 'sequence is not prev+1' };
+      if (b.domain_shard !== prev.body?.domain_shard && prev.body) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'domain_shard changes within the chain' };
+      if (b.genesis_epoch !== prev.body?.genesis_epoch && prev.body) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'genesis_epoch changes within the chain (needs an epoch-transition)' };
+    }
+    if (!expected || !expected.key_id || !expected.pub) return { result: 'INDETERMINATE', reason: 'authority_unresolved', detail: 'cannot resolve the expected signer for sequence ' + b.sequence };
+    // 2) verify the signature against the RESOLVED signer (never the carried key)
+    const sv = authorityCheckpointSigOk(cp, expected.key_id, expected.pub);
+    if (!sv.ok) return { result: 'INVALID', error: 'E-AUTHORITY', detail: sv.detail };
+    // 3) the carried current_key_id is diagnostic — it must EQUAL the resolved signer, never resolve it
+    if (b.checkpoint_authority?.current_key_id !== expected.key_id) return { result: 'INVALID', error: 'E-AUTHORITY', detail: 'carried current_key_id ≠ the prior-authorized signer' };
+    // 4) rotation exactness — all-or-none; keyId(next_pub)==next_key_id; effective_sequence == seq+1 (no arbitrary future activation)
+    const ca = b.checkpoint_authority || {};
+    const rot = [ca.next_key_id, ca.next_pub, ca.effective_sequence].filter((x) => x !== undefined).length;
+    if (rot !== 0 && rot !== 3) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'checkpoint_authority rotation fields must be all-present or all-absent' };
+    if (rot === 3) {
+      if (keyId(ca.next_pub) !== ca.next_key_id) return { result: 'INVALID', error: 'E-KEY', detail: 'keyId(next_pub) ≠ next_key_id' };
+      if (ca.effective_sequence !== String(BigInt(b.sequence) + 1n)) return { result: 'INVALID', error: 'E-SEQ', detail: 'effective_sequence ≠ sequence+1' };
+    }
+    prev = { id: authorityCheckpointId(cp), authority: expected, sequence: b.sequence, body: b };
+  }
+  const lb = chain[chain.length - 1].body, lca = lb.checkpoint_authority || {};
+  const activeAuthority = (lca.next_key_id !== undefined) ? { key_id: lca.next_key_id, pub: lca.next_pub, effective_sequence: lca.effective_sequence } : prev.authority;
+  return { result: 'VALID', head: prev.id, length: String(chain.length), sequence: lb.sequence, active_genesis: lb.active_genesis, keylog: lb.keylog, activeAuthority };
+}
+
+// ─── #76 Phase C — CHECKPOINT UNIQUENESS (independent anti-equivocation). `attested` needs a `¬∃ rival at
+//     (domain, genesis_epoch, sequence)` proof the PUBLISHER does not control: an `accepted-witness-quorum` (≥
+//     threshold DISTINCT consumer-resolved trust domains signing the BYTE-IDENTICAL typed uniqueness claim) — or the
+//     `authenticated-map-uniqueness` map path (#42). Independence is CONSUMER-owned (issuer→domain), never
+//     self-declared; a bare-observation co-sign is corroboration, not uniqueness (wrong purpose ⇒ not admitted).
+export function checkpointUniquenessClaim({ domain_shard, genesis_epoch, sequence, checkpoint, observed_map_root, as_of }) {
+  return { purpose: 'ust:checkpoint-uniqueness-attestation', domain_shard, genesis_epoch, sequence: String(sequence), checkpoint,
+    ...(observed_map_root !== undefined ? { observed_map_root } : {}), ...(as_of !== undefined ? { as_of } : {}) };
+}
+export function buildUniquenessAttestation(fields, privKeyObj, issuerPubB64url) {
+  const claim = checkpointUniquenessClaim(fields);
+  const sig = edSign(null, Buffer.from(canon(claim), 'utf8'), privKeyObj).toString('base64url');
+  return { claim, issuer_id: keyId(issuerPubB64url), sig: { alg: 'Ed25519', key_id: keyId(issuerPubB64url), pub: issuerPubB64url, sig } };
+}
+export function verifyCheckpointUniqueness(attestations, { domain_shard, genesis_epoch, sequence, checkpoint, trustRoots = {}, domains = {}, threshold = 2 } = {}) {
+  if (!Array.isArray(attestations) || attestations.length === 0) return { attested: false, detail: 'no attestations' };
+  let ref = null; const seenDomains = new Set(), seenIssuers = new Set(), witnesses = [];
+  for (const a of attestations) {
+    const { claim, issuer_id, sig } = a || {};
+    if (!claim || !issuer_id || !sig || !sig.sig || !sig.pub) continue;
+    if (claim.purpose !== 'ust:checkpoint-uniqueness-attestation') continue;            // uniqueness, not bare observation
+    if ('trust_domain' in claim || 'issuer_id' in claim) continue;                      // self-declared independence rejected (P0-2)
+    if (claim.domain_shard !== domain_shard || claim.genesis_epoch !== genesis_epoch || String(claim.sequence) !== String(sequence) || claim.checkpoint !== checkpoint) continue;
+    const cc = canon(claim);
+    if (ref === null) ref = cc; else if (cc !== ref) continue;                          // all witnesses sign the BYTE-IDENTICAL claim
+    const root = trustRoots[issuer_id]; const pub = typeof root === 'string' ? root : root?.pub;
+    if (!pub || pub !== sig.pub || keyId(sig.pub) !== issuer_id) continue;              // consumer-accepted issuer only
+    if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, cc, sig.sig)) continue;
+    if (seenIssuers.has(issuer_id)) continue;                                           // one issuer counts once
+    const dom = domains[issuer_id]; if (dom === undefined) continue;                    // consumer-resolved trust domain, else unadmitted
+    seenIssuers.add(issuer_id); seenDomains.add(dom); witnesses.push(issuer_id);
+  }
+  return seenDomains.size >= threshold
+    ? { attested: true, basis: 'accepted-witness-quorum', threshold: String(threshold), accepted_witnesses: witnesses, trust_domains: [...seenDomains] }
+    : { attested: false, detail: 'quorum not met: ' + seenDomains.size + ' distinct trust domains < ' + threshold };
+}
+
+// ─── #76/#42 AUTHENTICATED-MAP UNIQUENESS — the INDEPENDENT (non-publisher) non-membership coordinate, via a sparse
+//     Merkle tree keyed by H(typed-key): the key's position is a deterministic function of the key, so an inclusion
+//     proof for a key returning a value IS the non-membership proof for every rival value at that key (prefix/position
+//     uniqueness). Two TYPED, domain-separated key/value spaces (NEVER a generic flag): checkpoint-map (attested
+//     freshness) and name-map (authoritative identity). The consumer trusts the (anchored, independent) map root.
+const SMT_DEPTH = 256;
+const smtDefaults = (() => { const d = new Array(SMT_DEPTH + 1); d[SMT_DEPTH] = H('ust:smt-empty', ''); for (let i = SMT_DEPTH - 1; i >= 0; i--) d[i] = H('ust:smt-node', d[i + 1] + '|' + d[i + 1]); return d; })();
+const smtHex = (kh) => kh.replace(/^sha256:/, '');
+const smtBit = (hex, i) => (parseInt(hex[i >> 2], 16) >> (3 - (i & 3))) & 1;                 // MSB-first bit i of the 256-bit key hash
+const smtLeaf = (kh, vh) => H('ust:smt-leaf', kh + '|' + vh);
+function smtRoot(depth, entries) {                                                          // entries: [{hex, kh, vh}]
+  if (entries.length === 0) return smtDefaults[depth];
+  if (depth === SMT_DEPTH) return smtLeaf(entries[0].kh, entries[0].vh);
+  const L = entries.filter((e) => smtBit(e.hex, depth) === 0), R = entries.filter((e) => smtBit(e.hex, depth) === 1);
+  return H('ust:smt-node', smtRoot(depth + 1, L) + '|' + smtRoot(depth + 1, R));
+}
+// Build a verifiable map from typed leaves; returns the root and a prover (inclusion co-path, top→bottom).
+export function buildVerifiableMap(leaves) {
+  const entries = leaves.map((l) => ({ hex: smtHex(l.key), kh: l.key, vh: l.value }));
+  const root = smtRoot(0, entries);
+  const prove = (key) => { const hex = smtHex(key); const sib = []; let ents = entries;
+    for (let d = 0; d < SMT_DEPTH; d++) { const goR = smtBit(hex, d) === 1;
+      const L = ents.filter((e) => smtBit(e.hex, d) === 0), R = ents.filter((e) => smtBit(e.hex, d) === 1);
+      sib.push(smtRoot(d + 1, goR ? L : R)); ents = goR ? R : L; }
+    return { siblings: sib }; };
+  return { root, prove };
+}
+// verify inclusion (value present) or non-membership (value=null) of key under root, using the co-path
+function smtVerify(root, key, value, proof) {
+  if (!proof || !Array.isArray(proof.siblings) || proof.siblings.length !== SMT_DEPTH) return false;
+  const hex = smtHex(key);
+  let node = value === null ? smtDefaults[SMT_DEPTH] : smtLeaf(key, value);
+  for (let d = SMT_DEPTH - 1; d >= 0; d--) node = smtBit(hex, d) === 0 ? H('ust:smt-node', node + '|' + proof.siblings[d]) : H('ust:smt-node', proof.siblings[d] + '|' + node);
+  return node === root;
+}
+// TYPED, domain-separated key/value spaces — one map may serve both predicates with NO collision (a checkpoint proof
+// is not a name proof). Exported so operators/verifiers build leaves without recomputing the hashing.
+export const checkpointMapLeaf = ({ domain_shard, genesis_epoch, sequence, checkpoint }) => ({ key: H('ust:checkpoint-map-key', canon({ domain_shard, genesis_epoch, sequence: String(sequence) })), value: H('ust:checkpoint-map-value', canon({ checkpoint })) });
+export const nameMapLeaf = ({ domain_shard, active_genesis }) => ({ key: H('ust:name-map-key', canon({ domain_shard })), value: H('ust:name-map-value', canon({ active_genesis })) });
+// TWO distinct TYPED predicates over the SAME map infra — never a generic `verifyMapInclusion(flag)`:
+export function verifyCheckpointMapUniqueness(proof, { domain_shard, genesis_epoch, sequence, checkpoint, mapRoot } = {}) {
+  const { key, value } = checkpointMapLeaf({ domain_shard, genesis_epoch, sequence, checkpoint });
+  if (smtVerify(mapRoot, key, value, proof)) return { attested: true, basis: 'authenticated-map-uniqueness', map_root: mapRoot };
+  if (smtVerify(mapRoot, key, null, proof)) return { attested: false, absent: true, detail: 'no checkpoint bound at (domain, genesis_epoch, sequence) under mapRoot (proven non-membership)' };
+  return { attested: false, detail: 'checkpoint not the unique value at (domain, genesis_epoch, sequence) under mapRoot (a rival value is bound)' };
+}
+export function verifyActiveGenesisUniqueness(proof, { domain_shard, active_genesis, mapRoot } = {}) {
+  const { key, value } = nameMapLeaf({ domain_shard, active_genesis });
+  if (smtVerify(mapRoot, key, value, proof)) return { authoritative: true, basis: 'authenticated-map-uniqueness', map_root: mapRoot };
+  if (smtVerify(mapRoot, key, null, proof)) return { authoritative: false, absent: true, detail: 'domain has no active_genesis binding under mapRoot (proven non-membership)' };
+  return { authoritative: false, detail: 'active_genesis not the unique value for domain under mapRoot (a rival value is bound)' };
+}
+
+// ─── #76 Phase B — publisher-checkpoint CORROBORATED freshness. Compose the AUTHORIZED chain (F.5h) with the key-log
+//     head's membership in the committed root + a VERIFIED external commitment ordered AFTER the target document
+//     (F.5g `compareEvidenceOrder`, never a timestamp compare). This CLOSES the P0-05 stale-prefix overclaim by
+//     earning `corroborated`, NEVER `attested`: a single publisher cannot prove split-view absence — independent
+//     anti-equivocation is Phase C/#42. (Strict last-index terminality is the #77 refinement; here `head ∈ root`.)
+export function deriveCheckpointFreshness(chain, { genesisAuthority, pinnedPrior, target, commitment, terminalityProof, uniqueness } = {}) {
+  const chn = verifyAuthorityCheckpointChain(chain, { genesisAuthority, pinnedPrior });
+  if (chn.result !== 'VALID') return chn.result === 'INDETERMINATE' ? chn
+    : { result: 'INVALID', error: chn.error, detail: 'checkpoint chain not authorized: ' + (chn.detail || chn.error), keylog_freshness: 'unverified' };
+  const b = chain[chain.length - 1].body, headId = chn.head;
+  if (target) {                                                                         // bind to the target's authority epoch + domain
+    if (target.active_genesis !== undefined && b.active_genesis !== target.active_genesis) return { result: 'INVALID', error: 'E-GENESIS', detail: 'checkpoint active_genesis ≠ target', keylog_freshness: 'unverified' };
+    if (target.domain_shard !== undefined && b.domain_shard !== target.domain_shard) return { result: 'INVALID', error: 'E-GENESIS', detail: 'checkpoint domain ≠ target', keylog_freshness: 'unverified' };
+  }
+  if (!terminalityProof || verifyAnchor(b.keylog?.head, { ...terminalityProof, root: b.keylog?.root }).inclusion !== true)  // head ∈ committed key-log root
+    return { result: 'INDETERMINATE', reason: 'terminality_unproven', detail: 'key-log head not proven a member of the committed root', keylog_freshness: 'unverified' };
+  if (!commitment || commitment.subject !== headId)                                     // external commitment must be VERIFIED evidence BOUND to this checkpoint id
+    return { result: 'INDETERMINATE', reason: 'unavailable', detail: 'no external-commitment evidence bound to the checkpoint id', keylog_freshness: 'unverified' };
+  if (!target || !target.anchor) return { result: 'INDETERMINATE', reason: 'unavailable', detail: 'no target anchor evidence to order against', keylog_freshness: 'unverified' };
+  const ord = compareEvidenceOrder(commitment, target.anchor);                          // F.5g proof relation, NOT a timestamp compare
+  if (ord !== 'proven-after') return { result: 'INDETERMINATE', reason: 'order_unproven', detail: 'checkpoint commitment not proven-after the target (' + ord + ')', keylog_freshness: 'unverified' };
+  // corroborated holds. Phase C — an INDEPENDENT anti-equivocation proof over THIS checkpoint upgrades to `attested`.
+  // Uniqueness on an UNAUTHORIZED/UNBOUND checkpoint never reaches here (the corroborated conjunction above already
+  // failed) ⇒ `attested ⇒ corroborated ∧ independent-uniqueness`; uniqueness alone never earns `attested`.
+  if (uniqueness) {
+    let uq = null;                                                                       // two INDEPENDENT bases for the SAME predicate
+    if (uniqueness.map) uq = verifyCheckpointMapUniqueness(uniqueness.map.proof, { domain_shard: b.domain_shard, genesis_epoch: b.genesis_epoch, sequence: b.sequence, checkpoint: headId, mapRoot: uniqueness.map.mapRoot });
+    if ((!uq || !uq.attested) && uniqueness.attestations) uq = verifyCheckpointUniqueness(uniqueness.attestations, { domain_shard: b.domain_shard, genesis_epoch: b.genesis_epoch, sequence: b.sequence, checkpoint: headId, trustRoots: uniqueness.trustRoots, domains: uniqueness.domains, threshold: uniqueness.threshold });
+    if (uq && uq.attested) return { result: 'VALID', keylog_freshness: 'attested', basis: uq.basis, anti_equivocation: 'attested',
+      ...(uq.threshold ? { threshold: uq.threshold, accepted_witnesses: uq.accepted_witnesses, trust_domains: uq.trust_domains } : {}),
+      ...(uq.map_root ? { map_root: uq.map_root } : {}), head: headId, sequence: b.sequence, active_genesis: b.active_genesis };
+  }
+  return { result: 'VALID', keylog_freshness: 'corroborated', basis: 'publisher-checkpoint', anti_equivocation: 'unverified',  // ceiling without independent uniqueness
+    head: headId, sequence: b.sequence, active_genesis: b.active_genesis };
 }
 
 // ─── TOP §11.3 completeness: a sequenced stream is prev-chained; first frame's prev = genesis content_hash
@@ -1067,16 +1372,20 @@ export async function resolveByDiscovery(doc, opts = {}, { fetchImpl = fetch, su
   // #69 B / F.5a — the publisher's OWN served witness list is CORROBORATION, not independent non-membership: a
   // confirmed served list ⇒ `corroborated` (HIGH, honest), NOT `authoritative`. Only a caller air-gap assertion
   // (out-of-band responsibility) or a future anchored map-inclusion reaches `authoritative`. A fork ⇒ E-GENESIS.
-  let witnessConfirmed = false, noFork = opts.noForkConfirmed ? 'caller-asserted (authoritative)' : 'unconfirmed';
-  if (!opts.noForkConfirmed && !opts.offline) {
+  // P0-2 — a caller-supplied no-fork basis (verified `noForkEvidence`, or the raw `noForkConfirmed` override) skips the
+  // witness auto-query; otherwise the served genesis-log is queried and only ever CORROBORATES (never independent).
+  let witnessConfirmed = false, noFork = 'unconfirmed';
+  const callerNoFork = opts.noForkEvidence !== undefined || opts.noForkConfirmed;
+  if (!callerNoFork && !opts.offline) {
     const w = await witnessNoFork(shard, genesisHash, { fetchImpl, substrateVerify });
     if (w.status === 'fork') return { verdict: bad('E-GENESIS', w.detail), resolution: { publisher: shard, fork: true, detail: w.detail } };
     witnessConfirmed = w.status === 'confirmed';
     noFork = witnessConfirmed ? 'served-list (corroborated)' : 'HIGH pending — ' + w.detail;
   }
-  const authOpts = { genesis, keylog, noForkConfirmed: opts.noForkConfirmed, corroborated: witnessConfirmed };
+  const authOpts = { genesis, keylog, noForkConfirmed: opts.noForkConfirmed, noForkEvidence: opts.noForkEvidence, trustRoots: opts.trustRoots, corroborated: witnessConfirmed };
   const auth = resolveAuthority(doc, authOpts);
   if (auth.error) return { verdict: base, resolution: { error: auth.error + (auth.detail ? ' — ' + auth.detail : '') } };
+  if (callerNoFork) noFork = auth.independently_verified ? 'accepted-external-witness (authoritative)' : 'caller-asserted (consumer-override)';
   const verdict = await verifyAsync(doc, { ...opts, genesis, keylog, noForkConfirmed: opts.noForkConfirmed, corroborated: witnessConfirmed, capacity: auth.capacity, substrateVerify });   // #69 E1 — await the doc's own anchor substrate (TOP)
   return { verdict, resolution: { publisher: auth.publisher ?? shard, strength: auth.strength, capacity: auth.capacity, noFork, source: `https://${shard}/.well-known/ (§20.1 discovery + §12.1a witness)` } };
 }

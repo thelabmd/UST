@@ -6,11 +6,19 @@ import { readFileSync } from 'node:fs';
 import * as C from './index.mjs';
 import * as P from 'ust-protocol';
 import * as W from '@ust-protocol/web-signer';
+import { createPrivateKey, createPublicKey } from 'node:crypto';
 
 let pass = 0, fail = 0, note = 0; const fails = [];
 const check = (id, ok, d) => { if (ok) pass++; else { fail++; fails.push(id + (d ? ' — ' + d : '')); } };
 const threw = async (fn) => { try { await fn(); return false; } catch { return true; } };
 const DOMAIN = 'genesis-test.invalid';   // RFC 2606 test name — no real domain touched
+// P0-2 — `authoritative` name-authority is EARNED from a verified, consumer-trusted NO-FORK EVIDENCE, never a raw
+// `noForkConfirmed` boolean (now only a `consumer-override`). `nfe(genesis)` mints a consumer-trusted witness's
+// evidence bound to this domain + active genesis, to reach authoritative in these ceremony regressions.
+const _wpriv = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.from('cc'.repeat(32), 'hex')]), format: 'der', type: 'pkcs8' });
+const _wpub = createPublicKey(_wpriv).export({ format: 'der', type: 'spki' }).slice(-32).toString('base64url');
+const _wid = P.keyId(_wpub);
+const nfe = (genesis) => ({ noForkEvidence: P.buildNoForkEvidence({ domain_shard: genesis.state.id.domain_shard, active_genesis: P.contentHash(genesis) }, _wpriv, _wpub), trustRoots: { [_wid]: _wpub } });
 
 // A CF mock: a zone that exists, an existing/absent _ust record, and a DoH readback that confirms-or-not.
 const mkCf = ({ existing, dohConfirms, genHash }) => {
@@ -326,8 +334,8 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   // ceremony's own artifacts (genesis + keylog[0] + capacity grant from authority resolution)
   const t = (iso) => ({ generated_at: iso, valid_from: iso, valid_to: iso });
   const obs = await W.seal(P.buildState({ domain_shard: DOMAIN, ust_id: 'ust:20260712.14', key_id: g.op.key_id, class: 'observation' }, t('2026-07-12T14:00:00Z'), { probe: { kind: 'captured', value: { ok: 'true' } } }), g.op);
-  const auth = P.resolveAuthority(obs, { genesis: g.genesis, keylog: [g.keylog0], noForkConfirmed: true });
-  const high = P.verify(obs, { context: 'data', genesis: g.genesis, keylog: [g.keylog0], noForkConfirmed: true, capacity: auth.capacity });
+  const auth = P.resolveAuthority(obs, { genesis: g.genesis, keylog: [g.keylog0], ...nfe(g.genesis) });
+  const high = P.verify(obs, { context: 'data', genesis: g.genesis, keylog: [g.keylog0], ...nfe(g.genesis), capacity: auth.capacity });
   check('ceremony_artifacts_reach_high', high.result === 'VALID:HIGH' && high.publisher === DOMAIN);
 }
 
@@ -382,8 +390,8 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   const obs = await W.seal(P.buildState({ domain_shard: DOMAIN, ust_id: 'ust:20260712.15', key_id: g.op.key_id, class: 'observation' }, t('2026-07-12T15:00:00Z'), { probe: { kind: 'captured', value: { ok: 'true' } } }), g.op);
   const served = JSON.parse(klArr);
   check('served_keylog_is_append_shaped', Array.isArray(served) && P.isValid(P.verify(served[0], { context: 'key' })));
-  const auth = P.resolveAuthority(obs, { genesis: g.genesis, keylog: served, noForkConfirmed: true });
-  const high = P.verify(obs, { context: 'data', genesis: g.genesis, keylog: served, noForkConfirmed: true, capacity: auth.capacity });
+  const auth = P.resolveAuthority(obs, { genesis: g.genesis, keylog: served, ...nfe(g.genesis) });
+  const high = P.verify(obs, { context: 'data', genesis: g.genesis, keylog: served, ...nfe(g.genesis), capacity: auth.capacity });
   check('served_keylog_resolves_to_high', high.result === 'VALID:HIGH');
 }
 
@@ -609,8 +617,8 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   const kl0 = await W.seal(P.buildKeyLogEntry({ domain_shard: dom, ust_id: 'ust:20260628.1001', key_id: root.key_id }, Tr, { op: 'add', pub: K1.pub, new_key_id: K1.key_id }, P.contentHash(genesis)), root);
   const docBy = async (s) => W.seal(await W.buildState({ domain_shard: dom, ust_id: 'ust:20260628.1010', key_id: s.key_id, class: 'observation' }, Tr, { r: { kind: 'captured', value: { x: '1' } } }), s);
   const r = await C.rotateKeylog({ genesis, keylog: [kl0], rootSigner: root, time: Tr, ustId: 'ust:20260628.1002' });
-  check('rotate_new_key_authoritative', P.resolveAuthority(await docBy(r.newOp), { genesis, keylog: r.keylog, noForkConfirmed: true }).strength === 'authoritative');
-  check('rotate_old_key_still_valid_continuity', P.resolveAuthority(await docBy(K1), { genesis, keylog: r.keylog, noForkConfirmed: true }).strength === 'authoritative');
+  check('rotate_new_key_authoritative', P.resolveAuthority(await docBy(r.newOp), { genesis, keylog: r.keylog, ...nfe(genesis) }).strength === 'authoritative');
+  check('rotate_old_key_still_valid_continuity', P.resolveAuthority(await docBy(K1), { genesis, keylog: r.keylog, ...nfe(genesis) }).strength === 'authoritative');
   check('rotate_appends_never_rewrites', P.contentHash(r.keylog[0]) === P.contentHash(kl0) && r.keylog.length === 2);
   const rv = await C.rotateKeylog({ genesis, keylog: [kl0], rootSigner: root, reason: 'retired', time: Tr, ustId: 'ust:20260628.1002' });
   check('rotate_reason_retired_revokes', !!rv.revokedPub && rv.keylog.length === 3);
