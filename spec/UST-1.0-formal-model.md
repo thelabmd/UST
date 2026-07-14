@@ -20,10 +20,13 @@
 > Its purpose is rigor: to make the *meaning* of "verify," of the trust tiers, and of "fixation, not truth"
 > precise enough to outlive any single implementation, and to give reviewers a formal target.
 >
-> **Review status (honest, 2026-07-12).** This formal model has been reviewed iteratively by AI systems acting
-> as adversarial auditors (18 rounds to date, including three independent measure-theory red-teams). It has **not**
-> been machine-checked in a proof assistant, and no professional human mathematician has refereed it yet. The
-> error-categories identified in §F.5 (document-as-data vs world-as-randomness) remain an active area of
+> **Review status (honest, 2026-07-14).** This formal model has been red-teamed iteratively by AI systems acting
+> as adversarial auditors (18+ rounds, including three independent measure-theory red-teams), and was EXTENDED on
+> 2026-07-14 with the authority-checkpoint theorems (§F.5g–§F.5n) and the assurance product-lattice (§F.5.0). It
+> has **not** been machine-checked in a proof assistant, and **no professional human mathematician has refereed it
+> yet**. A mechanical `model ↔ code` guard now binds every theorem the model cites to a running conformance check
+> (97/97) — this enforces lockstep with the implementation, but it is a CORRESPONDENCE check, **not** a proof of the
+> mathematics. The §F.5 error-categories (document-as-data vs world-as-randomness) remain an active area of
 > refinement. **Users should treat the model as a conceptual framework, not a theorem.** The open assurance
 > gates — an independent measure-theory review and a machine-checked core — are tracked alongside the pending
 > human cryptographic audit.
