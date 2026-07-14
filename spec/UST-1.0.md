@@ -1370,7 +1370,7 @@ cross-document nonce reuse, so the operator must); size bounds
 (within §13 ceilings); metadata-minimization policy. A profile SHOULD publish §12.1 recovery events in a
 changelog: unanchored records near a recovery boundary fail HIGH by design (X3) — consumers must be able to
 see why, not guess. The protocol fixes the mechanism; the profile carries the
-operator. Reference operator (noosphere.md) profile: `noosphere-engine/rnd/noosphere-operator-profile.md`.
+operator. Each operator publishes its own profile (substrates, cadence, custody, disclosure) alongside its genesis.
 
 ### 20.1 Genesis discovery — the publisher SERVING contract
 
