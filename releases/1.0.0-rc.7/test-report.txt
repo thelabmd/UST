@@ -1,9 +1,0 @@
-
-> ust@1.0.0-rc.7 test
-> node packages/ust-protocol/conformance.mjs
-
-
-════════════════════════════════════════════
-  ust-protocol 1.0.0-rc.7 conformance vs UST 1.0 conformance vectors (rc.7 — rc.6 + explicit completeness:not_evaluated in the single-doc verdict)
-  PASS 74   FAIL 0   NOTES 0
-  ✓ all exercised checks pass (primitives + 6 findings + Gemini-B + HIGH + TOP)
