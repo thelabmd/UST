@@ -1,7 +1,22 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# REPO POLICY — this is the PUBLIC protocol repo. It contains ONLY:
+#   (1) the protocol itself — spec, formal model, conformance vectors, packages, docs; and
+#   (2) DEPERSONALIZED, operator-facing material (generic operator tasks/tooling).
+# Everything else — personal AI-agent config, private task trackers, internal research,
+# red-team notes, commercial/operator strategy — is gitignored and NEVER committed here.
+# When in doubt: if it isn't protocol or depersonalized-operator, it does not belong in git.
+# ─────────────────────────────────────────────────────────────────────────────
+
 # dependencies
 node_modules/
 packages/*/node_modules/
 package-lock.json
+
+# private — personal AI-agent config + instructions (not protocol; never public)
+CLAUDE.md
+AGENTS.md
+.claude/
+.agents/
 
 # private — operator toolkit (never published, not part of the public standard)
 packages/ustate/
@@ -13,5 +28,14 @@ packages/ust-mcp/demo-mcp-ladder.mjs
 rnd/
 INTERNAL-*
 
+# private — local beads task db (never leak a private tracker into the public protocol repo)
+.beads/
+
 # os
 .DS_Store
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
