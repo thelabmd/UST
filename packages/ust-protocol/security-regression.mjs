@@ -160,6 +160,22 @@ sec('rc35-P0f', 'UST-6vj', 'a non-canonical (publisher-chosen) genesis_epoch is 
   return P.verifyAuthorityCheckpointChain([cp0], { genesisAuthority: { key_id: K0.key_id, pub: K0.pub } }).result !== 'VALID';
 });
 
+// rc.35 round-2 (M3 refactor) — verifiedEvidence-forge: `verifiedEvidence()` was an exported constructor ANY caller
+// could invoke; deriveCheckpointFreshness trusted its facts (substrate/position) and granted `corroborated` from a
+// MINTED object no connector ever verified. Post-M3, evidence enters only through the seam (a SIGNED receipt of a
+// consumer-admitted connector, scope+subject-bound); a minted look-alike earns nothing.
+sec('rc35-P0g', 'UST-6vj', 'a caller-minted evidence object (no signed receipt, no admission) cannot earn corroborated freshness', () => {
+  const AG = 'sha256:' + '33'.repeat(32), EPg = P.genesisEpoch(AG);
+  const klc = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);
+  const cp0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPg, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog: { root: klc.root, length: klc.length, head: klc.head } }), K0.priv, K0.pub);
+  const headId = P.authorityCheckpointId(cp0);
+  const mint = (subj, pos) => P.verifiedEvidence({ proof_kind: 'pow-header-chain', subject: subj, source_id: 'btc', facts: { substrate: 'bitcoin', position: String(pos) } });
+  const r = P.deriveCheckpointFreshness([cp0], { genesisAuthority: { key_id: K0.key_id, pub: K0.pub },
+    target: { active_genesis: AG, domain_shard: D, subject: 'ust:target', anchor: mint('ust:target', 800) },
+    commitment: mint(headId, 900), terminality: { headProof: klc.headProof, successorProof: klc.successorProof } });
+  return r.keylog_freshness !== 'corroborated' && r.keylog_freshness !== 'attested' && r.result !== 'VALID';
+});
+
 // ─── report ────────────────────────────────────────────────────────────────────────────────────
 console.log('\n  rc.33 audit — security regression (Phase 0, epic UST-1o6): SECURE-expectation gate');
 for (const [s, id, bd, d] of rows) console.log(s + '  ' + id.padEnd(8) + bd.padEnd(9) + d);

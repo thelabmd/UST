@@ -678,20 +678,56 @@ console.log('\n═════════════════════�
   const keylog = { length: kl.length, root: kl.root, head: kl.head }, term = { headProof: kl.headProof, successorProof: kl.successorProof };
   const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), K0.priv, K0.pubB64);
   const headId = P.authorityCheckpointId(C0);
-  const btc = (pos, subj) => P.verifiedEvidence({ proof_kind: 'pow-header-chain', subject: subj, source_id: 'btc', facts: { substrate: 'bitcoin', position: String(pos) } });
+  const KC = kp('61'.repeat(32));                                            // the consumer-admitted connector (M3)
+  const connectors = { [KC.key_id]: { pub: KC.pubB64, trust_domain: 'btc-watch', allowed_proof_kinds: ['pow-header-chain', 'rfc3161-tsa'] } };
+  const trust = { connectors };
+  const rcpt = (subj, facts, kind = 'pow-header-chain') => P.buildEvidenceReceipt({ domain_shard: D, active_genesis: AG, subject: subj, proof_kind: kind, facts, issued_at: '2026-01-01T00:00:00Z' }, KC.priv, KC.pubB64);
+  const btc = (pos, subj) => rcpt(subj, { substrate: 'bitcoin', position: String(pos) });
   const commit = btc(900, headId);
-  const target = { active_genesis: AG, domain_shard: D, anchor: btc(800, 'ust:target') };
-  const F = (opts) => P.deriveCheckpointFreshness([C0], { genesisAuthority: gAuth, ...opts });
+  const target = { active_genesis: AG, domain_shard: D, subject: 'ust:target', anchor: btc(800, 'ust:target') };
+  const F = (opts) => P.deriveCheckpointFreshness([C0], { genesisAuthority: gAuth, trust, ...opts });
 
   check('PhB all conjuncts (authorized × head∈root × proven-after) → corroborated', (r => r.result === 'VALID' && r.keylog_freshness === 'corroborated' && r.head === headId)(F({ target, commitment: commit, terminality: term })));
   check('PhB CEILING: corroborated carries anti_equivocation:unverified and is NEVER attested', (r => r.keylog_freshness === 'corroborated' && r.anti_equivocation === 'unverified' && r.keylog_freshness !== 'attested')(F({ target, commitment: commit, terminality: term })));
   check('PhB commitment NOT proven-after target → INDETERMINATE(order_unproven)', (r => r.result === 'INDETERMINATE' && r.reason === 'order_unproven')(F({ target, commitment: btc(700, headId), terminality: term })));
-  check('PhB two not_after upper bounds → unproven → order_unproven', (r => r.reason === 'order_unproven')(F({ target: { active_genesis: AG, domain_shard: D, anchor: P.verifiedEvidence({ proof_kind: 't', subject: 'ust:target', source_id: 'x', facts: { not_after: '2027-01-01T00:00:00Z' } }) }, commitment: P.verifiedEvidence({ proof_kind: 't', subject: headId, source_id: 'y', facts: { not_after: '2027-02-01T00:00:00Z' } }), terminality: term })));
+  check('PhB two not_after upper bounds → unproven → order_unproven', (r => r.reason === 'order_unproven')(F({ target: { active_genesis: AG, domain_shard: D, subject: 'ust:target', anchor: rcpt('ust:target', { not_after: '2027-01-01T00:00:00Z' }, 'rfc3161-tsa') }, commitment: rcpt(headId, { not_after: '2027-02-01T00:00:00Z' }, 'rfc3161-tsa'), terminality: term })));
   check('PhB terminality missing → INDETERMINATE(terminality_unproven)', (r => r.reason === 'terminality_unproven')(F({ target, commitment: commit })));
-  check('PhB commitment not bound to checkpoint id → INDETERMINATE(unavailable)', (r => r.result === 'INDETERMINATE' && r.reason === 'unavailable')(F({ target, commitment: btc(900, 'sha256:' + '00'.repeat(32)), terminality: term })));
+  check('PhB commitment not bound to checkpoint id → INDETERMINATE(evidence_unverified)', (r => r.result === 'INDETERMINATE' && r.reason === 'evidence_unverified')(F({ target, commitment: btc(900, 'sha256:' + '00'.repeat(32)), terminality: term })));
   check('PhB unauthorized chain (wrong signer) → INVALID, freshness unverified', (r => r.result === 'INVALID' && r.keylog_freshness === 'unverified')(P.deriveCheckpointFreshness([P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), KX.priv, KX.pubB64)], { genesisAuthority: gAuth, target, commitment: commit, terminality: term })));
   check('PhB checkpoint active_genesis ≠ target → INVALID(E-GENESIS)', (r => r.result === 'INVALID' && r.error === 'E-GENESIS')(F({ target: { active_genesis: 'sha256:' + '99'.repeat(32), domain_shard: D, anchor: btc(800, 'ust:target') }, commitment: commit, terminality: term })));
   check('PhB cold verifier (no root) → INDETERMINATE(authority_unresolved)', (r => r.reason === 'authority_unresolved')(P.deriveCheckpointFreshness([C0], { target, commitment: commit, terminality: term })));
+
+  // ── M3 (UST-6vj C2) — THE EVIDENCE SEAM: provenance is verified, not assumed. VerifyEvidence_C = 7 ordered checks;
+  //    only its image carries capability; the caller-minted look-alike (rc.35 round-2 forge) earns nothing.
+  const scope = { domain_shard: D, active_genesis: AG, genesis_epoch: EP };
+  const vr = (r, o = {}) => P.verifyEvidenceReceipt(r, { subject: r?.claim?.subject, scope, connectors, ...o });
+  check('M3 receipt: admitted connector receipt → VerifiedEvidence (verified_facts, consumer trust_domain, basis admitted-connector-receipt)',
+    (r => r.result === 'VALID' && r.evidence.basis === 'admitted-connector-receipt' && r.evidence.trust_domain === 'btc-watch' && r.evidence.verified_facts.position === '900' && r.evidence.subject_id === headId && r.evidence.issuer_id === KC.key_id)(vr(commit)));
+  check('M3 receipt: tampered claim (sig over the pre-tamper preimage) → INVALID(E-EVIDENCE)',
+    (r => r.result === 'INVALID' && r.error === 'E-EVIDENCE')(vr({ ...commit, claim: { ...commit.claim, facts: { substrate: 'bitcoin', position: '999999' } } })));
+  check('M3 receipt: facts self-declaring assurance/trust_domain/capability → INVALID(E-EVIDENCE) at build AND verify',
+    (() => { try { P.buildEvidenceReceipt({ domain_shard: D, active_genesis: AG, subject: 'x', proof_kind: 'k', facts: { assurance: 'attested' }, issued_at: '2026-01-01T00:00:00Z' }, KC.priv, KC.pubB64); return false; } catch (e) {
+      const forged = { ...commit, claim: { ...commit.claim, facts: { ...commit.claim.facts, capability: 'time' } } };
+      return e.code === 'E-EVIDENCE' && vr(forged).result === 'INVALID'; } })());
+  check('M3 receipt: non-canonical genesis_epoch → INVALID(E-EVIDENCE) (M2 hygiene is uniform)',
+    (r => r.result === 'INVALID' && r.error === 'E-EVIDENCE')(vr({ ...commit, claim: { ...commit.claim, genesis_epoch: 'sha256:' + 'ee'.repeat(32) } })));
+  check('M3 admission: issuer not in consumer connectors → INDETERMINATE(evidence_unverified)',
+    (r => r.result === 'INDETERMINATE' && r.reason === 'evidence_unverified')(vr(commit, { connectors: {} })));
+  check('M3 admission: proof_kind outside allowed_proof_kinds → INDETERMINATE(evidence_unverified) (B4: a content connector never contributes order/time)',
+    (r => r.result === 'INDETERMINATE' && r.reason === 'evidence_unverified')(vr(commit, { connectors: { [KC.key_id]: { pub: KC.pubB64, allowed_proof_kinds: ['content-addressed'] } } })));
+  check('M3 binding: receipt subject ≠ required subject → evidence_unverified',
+    (r => r.reason === 'evidence_unverified')(vr(commit, { subject: 'sha256:' + '00'.repeat(32) })));
+  check('M3 binding: receipt scope ≠ authority scope → evidence_unverified',
+    (r => r.reason === 'evidence_unverified')(vr(commit, { scope: { ...scope, active_genesis: 'sha256:' + '99'.repeat(32) } })));
+  check('M3 forge: a caller-minted evidence object cannot earn corroborated (freshness → evidence_unverified)',
+    (r => r.result === 'INDETERMINATE' && r.reason === 'evidence_unverified' && r.keylog_freshness === 'unverified')(F({ target, commitment: P.verifiedEvidence({ proof_kind: 'pow-header-chain', subject: headId, source_id: 'btc', facts: { substrate: 'bitcoin', position: '900' } }), terminality: term })));
+  check('M3 forge: a look-alike VerifiedEvidence (correct fields, no provenance) earns nothing',
+    (r => r.reason === 'evidence_unverified')(F({ target, commitment: { evidence_id: 'sha256:' + '11'.repeat(32), authority_scope_id: P.authorityScopeId({ domain: D, active_genesis: AG, genesis_epoch: EP }), subject_id: headId, proof_kind: 'pow-header-chain', verified_facts: { substrate: 'bitcoin', position: '900' }, issuer_id: KC.key_id, trust_domain: 'btc-watch', basis: 'admitted-connector-receipt' }, terminality: term })));
+  check('M3 token: a core-verified VerifiedEvidence token is accepted without re-verification (WeakSet witness)',
+    (r => r.result === 'VALID' && r.keylog_freshness === 'corroborated')(F({ target: { ...target, anchor: vr(target.anchor).evidence }, commitment: vr(commit).evidence, terminality: term })));
+  check('M3 token: a verified token bound to a DIFFERENT subject is rejected at admission',
+    (r => r.reason === 'evidence_unverified')(F({ target, commitment: vr(btc(900, 'sha256:' + '77'.repeat(32)), { subject: 'sha256:' + '77'.repeat(32) }).evidence, terminality: term })));
+  check('M3 id: evidenceReceiptId is stable over {claim, sig} only', P.evidenceReceiptId(commit) === P.evidenceReceiptId({ claim: commit.claim, sig: commit.sig, extra: 'ignored' }));
 }
 
 // ─── #76 Phase C — `attested` via INDEPENDENT anti-equivocation (accepted-witness-quorum). attested = corroborated ∧
@@ -703,13 +739,15 @@ console.log('\n═════════════════════�
   const kl = P.buildKeylogCommitment(['sha256:' + 'cd'.repeat(32)]), keylog = { length: kl.length, root: kl.root, head: kl.head }, term = { headProof: kl.headProof, successorProof: kl.successorProof };
   const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), K0.priv, K0.pubB64);
   const headId = P.authorityCheckpointId(C0);
-  const btc = (pos, subj) => P.verifiedEvidence({ proof_kind: 'pow-header-chain', subject: subj, source_id: 'btc', facts: { substrate: 'bitcoin', position: String(pos) } });
-  const commit = btc(900, headId), target = { active_genesis: AG, domain_shard: D, anchor: btc(800, 'ust:target') };
+  const KC = kp('62'.repeat(32));                                            // consumer-admitted connector (M3)
+  const trust = { connectors: { [KC.key_id]: { pub: KC.pubB64, trust_domain: 'btc-watch', allowed_proof_kinds: ['pow-header-chain'] } } };
+  const btc = (pos, subj) => P.buildEvidenceReceipt({ domain_shard: D, active_genesis: AG, subject: subj, proof_kind: 'pow-header-chain', facts: { substrate: 'bitcoin', position: String(pos) }, issued_at: '2026-01-01T00:00:00Z' }, KC.priv, KC.pubB64);
+  const commit = btc(900, headId), target = { active_genesis: AG, domain_shard: D, subject: 'ust:target', anchor: btc(800, 'ust:target') };
   const domains = { [Wa.key_id]: 'op-a', [Wb.key_id]: 'op-b', [Wc.key_id]: 'op-a' };   // Wa & Wc share a domain; Wb is distinct
   const trustRoots = { [Wa.key_id]: Wa.pubB64, [Wb.key_id]: Wb.pubB64, [Wc.key_id]: Wc.pubB64 };
   const ua = (W, extra) => P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, ...extra }, W.priv, W.pubB64);
   const uOpts = (atts) => ({ attestations: atts, trustRoots, domains, threshold: 2 });
-  const F = (uniq) => P.deriveCheckpointFreshness([C0], { genesisAuthority: gAuth, target, commitment: commit, terminality: term, uniqueness: uniq });
+  const F = (uniq) => P.deriveCheckpointFreshness([C0], { genesisAuthority: gAuth, target, commitment: commit, terminality: term, trust, uniqueness: uniq });
   const VU = (atts) => P.verifyCheckpointUniqueness(atts, { domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, trustRoots, domains, threshold: 2 });
 
   check('PhC 2 witnesses, DISTINCT domains → attested (accepted-witness-quorum), anti_equivocation attested', (r => r.result === 'VALID' && r.keylog_freshness === 'attested' && r.basis === 'accepted-witness-quorum' && r.anti_equivocation === 'attested' && r.trust_domains.length === 2)(F(uOpts([ua(Wa), ua(Wb)]))));
@@ -731,12 +769,14 @@ console.log('\n═════════════════════�
   const kl = P.buildKeylogCommitment(['sha256:' + 'de'.repeat(32)]), keylog = { length: kl.length, root: kl.root, head: kl.head }, term = { headProof: kl.headProof, successorProof: kl.successorProof };
   const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), K0.priv, K0.pubB64);
   const headId = P.authorityCheckpointId(C0);
-  const btc = (pos, subj) => P.verifiedEvidence({ proof_kind: 'pow-header-chain', subject: subj, source_id: 'btc', facts: { substrate: 'bitcoin', position: String(pos) } });
-  const target = { active_genesis: AG, domain_shard: D, anchor: btc(800, 'ust:target') };
+  const KC = kp('63'.repeat(32));                                            // consumer-admitted connector (M3)
+  const connectors = { [KC.key_id]: { pub: KC.pubB64, trust_domain: 'btc-watch', allowed_proof_kinds: ['pow-header-chain'] } };
+  const btc = (pos, subj) => P.buildEvidenceReceipt({ domain_shard: D, active_genesis: AG, subject: subj, proof_kind: 'pow-header-chain', facts: { substrate: 'bitcoin', position: String(pos) }, issued_at: '2026-01-01T00:00:00Z' }, KC.priv, KC.pubB64);
+  const target = { active_genesis: AG, domain_shard: D, subject: 'ust:target', anchor: btc(800, 'ust:target') };
   const cpLeaf = P.checkpointMapLeaf({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId });
   const cmap = P.buildVerifiableMap([cpLeaf, P.checkpointMapLeaf({ domain_shard: D, genesis_epoch: EP, sequence: '1', checkpoint: 'sha256:' + 'ab'.repeat(32) })]);
   const cproof = cmap.prove(cpLeaf.key);
-  const Fmap = (uniq) => P.deriveCheckpointFreshness([C0], { genesisAuthority: gAuth, target, commitment: btc(900, headId), terminality: term, uniqueness: uniq, trust: { mapRoots: uniq?.map ? [uniq.map.mapRoot] : [] } });   // Phase 1: consumer admits the root it holds
+  const Fmap = (uniq) => P.deriveCheckpointFreshness([C0], { genesisAuthority: gAuth, target, commitment: btc(900, headId), terminality: term, uniqueness: uniq, trust: { connectors, mapRoots: uniq?.map ? [uniq.map.mapRoot] : [] } });   // Phase 1: consumer admits the root it holds
 
   check('#42 checkpoint-map inclusion → attested (basis authenticated-map-uniqueness)', (r => r.keylog_freshness === 'attested' && r.basis === 'authenticated-map-uniqueness' && r.map_root === cmap.root)(Fmap({ map: { proof: cproof, mapRoot: cmap.root } })));
   const rivalMap = P.buildVerifiableMap([P.checkpointMapLeaf({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: 'sha256:' + '99'.repeat(32) })]);

@@ -33,24 +33,34 @@ const add = (id, op, fields) => V.push({ id, op, ...fields });
   add('ac-cold-start-unresolved', 'verifyAuthorityCheckpointChain', { chain: [C0, C1, C2], opts: {}, expect: { result: 'INDETERMINATE', reason: 'authority_unresolved' } });
 }
 
-// ─── freshness (F.5i/F.5j/F.5k) — corroborated conjunction + attested via witness quorum and via map ───
+// ─── freshness (F.5i/F.5j/F.5k) — corroborated conjunction + attested via witness quorum and via map. M3: the
+//     commitment/anchor evidence is a SIGNED CONNECTOR RECEIPT verified against consumer-admitted connectors
+//     (trust.connectors) — a caller-minted facts object is the rc.35 round-2 forge and earns nothing. ───
 {
-  const K0 = kp(s(0x11)), Wa = kp(s(0x21)), Wb = kp(s(0x22));
+  const K0 = kp(s(0x11)), Wa = kp(s(0x21)), Wb = kp(s(0x22)), KC = kp(s(0x31)), KU = kp(s(0x32));
   const kl = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);
   const keylog = { length: kl.length, root: kl.root, head: kl.head }, term = { headProof: kl.headProof, successorProof: kl.successorProof };
   const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), K0.priv, K0.pub);
   const headId = P.authorityCheckpointId(C0);
-  const btc = (pos, subj) => P.verifiedEvidence({ proof_kind: 'pow-header-chain', subject: subj, source_id: 'btc', facts: { substrate: 'bitcoin', position: String(pos) } });
-  const target = { active_genesis: AG, domain_shard: D, anchor: btc(800, 'ust:target') };
-  const base = { chain: [C0], genesisAuthority: gAuth(K0), target, commitment: btc(900, headId), terminality: term };
-  add('fresh-corroborated', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(900, headId), terminality: term }, expect: { keylog_freshness: 'corroborated' } });
-  add('fresh-order-unproven', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(700, headId), terminality: term }, expect: { result: 'INDETERMINATE', reason: 'order_unproven' } });
+  const connectors = { [KC.key_id]: { pub: KC.pub, trust_domain: 'btc-watch', allowed_proof_kinds: ['pow-header-chain'] } };
+  const rcpt = (K, pos, subj) => P.buildEvidenceReceipt({ domain_shard: D, active_genesis: AG, subject: subj, proof_kind: 'pow-header-chain', facts: { substrate: 'bitcoin', position: String(pos) }, issued_at: '2026-01-01T00:00:00Z' }, K.priv, K.pub);
+  const btc = (pos, subj) => rcpt(KC, pos, subj);
+  const target = { active_genesis: AG, domain_shard: D, subject: 'ust:target', anchor: btc(800, 'ust:target') };
+  const scope = { domain_shard: D, active_genesis: AG, genesis_epoch: EP };
+  add('evidence-receipt-verify', 'verifyEvidenceReceipt', { receipt: btc(900, headId), opts: { subject: headId, scope, connectors }, expect: { result: 'VALID' } });
+  add('evidence-receipt-tampered', 'verifyEvidenceReceipt', { receipt: { ...btc(900, headId), claim: { ...btc(900, headId).claim, facts: { substrate: 'bitcoin', position: '999999' } } }, opts: { subject: headId, scope, connectors }, expect: { result: 'INVALID', error: 'E-EVIDENCE' } });
+  add('evidence-receipt-unadmitted-issuer', 'verifyEvidenceReceipt', { receipt: rcpt(KU, 900, headId), opts: { subject: headId, scope, connectors }, expect: { result: 'INDETERMINATE', reason: 'evidence_unverified' } });
+  add('evidence-receipt-kind-not-allowed', 'verifyEvidenceReceipt', { receipt: btc(900, headId), opts: { subject: headId, scope, connectors: { [KC.key_id]: { pub: KC.pub, allowed_proof_kinds: ['content-addressed'] } } }, expect: { result: 'INDETERMINATE', reason: 'evidence_unverified' } });
+  add('fresh-corroborated', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(900, headId), terminality: term, trust: { connectors } }, expect: { keylog_freshness: 'corroborated' } });
+  add('fresh-order-unproven', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(700, headId), terminality: term, trust: { connectors } }, expect: { result: 'INDETERMINATE', reason: 'order_unproven' } });
+  add('fresh-evidence-forge-rejected', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: { proof_kind: 'pow-header-chain', subject: headId, source_id: 'btc', facts: { substrate: 'bitcoin', position: '900' } }, terminality: term, trust: { connectors } }, expect: { result: 'INDETERMINATE', reason: 'evidence_unverified', keylog_freshness: 'unverified' } });
+  add('fresh-unadmitted-connector-rejected', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: rcpt(KU, 900, headId), terminality: term, trust: { connectors } }, expect: { result: 'INDETERMINATE', reason: 'evidence_unverified' } });
   const ua = (W) => P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId }, W.priv, W.pub);
   const domains = { [Wa.key_id]: 'op-a', [Wb.key_id]: 'op-b' }, trustRoots = { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub };
-  add('fresh-attested-witness-quorum', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(900, headId), terminality: term, uniqueness: { attestations: [ua(Wa), ua(Wb)], trustRoots, domains, threshold: 2 } }, expect: { keylog_freshness: 'attested', basis: 'accepted-witness-quorum' } });
+  add('fresh-attested-witness-quorum', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(900, headId), terminality: term, trust: { connectors }, uniqueness: { attestations: [ua(Wa), ua(Wb)], trustRoots, domains, threshold: 2 } }, expect: { keylog_freshness: 'attested', basis: 'accepted-witness-quorum' } });
   const cpLeaf = P.checkpointMapLeaf({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId });
   const cmap = P.buildVerifiableMap([cpLeaf, P.checkpointMapLeaf({ domain_shard: D, genesis_epoch: EP, sequence: '1', checkpoint: 'sha256:' + 'ee'.repeat(32) })]);
-  add('fresh-attested-map', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(900, headId), terminality: term, uniqueness: { map: { proof: cmap.prove(cpLeaf.key), mapRoot: cmap.root } }, trust: { mapRoots: [cmap.root] } }, expect: { keylog_freshness: 'attested', basis: 'authenticated-map-uniqueness' } });
+  add('fresh-attested-map', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(900, headId), terminality: term, uniqueness: { map: { proof: cmap.prove(cpLeaf.key), mapRoot: cmap.root } }, trust: { connectors, mapRoots: [cmap.root] } }, expect: { keylog_freshness: 'attested', basis: 'authenticated-map-uniqueness' } });
 }
 
 // ─── recovery (F.5l) + epoch (F.5m) + terminality (F.5n) ───

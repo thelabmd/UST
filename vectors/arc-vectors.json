@@ -1,7 +1,7 @@
 {
   "version": "UST 1.0 assurance-arc vectors (1.0.0-rc.36)",
   "note": "language-neutral contract: pre-signed inputs + expected verdict, executable by any implementation (see run-arc-vectors.mjs)",
-  "count": 44,
+  "count": 50,
   "vectors": [
     {
       "id": "ac-valid-chain",
@@ -400,6 +400,196 @@
       }
     },
     {
+      "id": "evidence-receipt-verify",
+      "op": "verifyEvidenceReceipt",
+      "receipt": {
+        "claim": {
+          "version": "1",
+          "purpose": "ust:evidence-receipt",
+          "domain_shard": "noosphere.md",
+          "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+          "proof_kind": "pow-header-chain",
+          "facts": {
+            "substrate": "bitcoin",
+            "position": "900"
+          },
+          "issued_at": "2026-01-01T00:00:00Z"
+        },
+        "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+        "sig": {
+          "alg": "Ed25519",
+          "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+          "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+          "sig": "9Oe2desGK-tCrOv1AFCxc-siDUa959uZjnlCHRfOmb2fVAKRQZox3Q1PkiwkdlD1YzSA_-1mK9kYPqGZwmfSBQ"
+        }
+      },
+      "opts": {
+        "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+        "scope": {
+          "domain_shard": "noosphere.md",
+          "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f"
+        },
+        "connectors": {
+          "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97": {
+            "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+            "trust_domain": "btc-watch",
+            "allowed_proof_kinds": [
+              "pow-header-chain"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "result": "VALID"
+      }
+    },
+    {
+      "id": "evidence-receipt-tampered",
+      "op": "verifyEvidenceReceipt",
+      "receipt": {
+        "claim": {
+          "version": "1",
+          "purpose": "ust:evidence-receipt",
+          "domain_shard": "noosphere.md",
+          "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+          "proof_kind": "pow-header-chain",
+          "facts": {
+            "substrate": "bitcoin",
+            "position": "999999"
+          },
+          "issued_at": "2026-01-01T00:00:00Z"
+        },
+        "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+        "sig": {
+          "alg": "Ed25519",
+          "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+          "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+          "sig": "9Oe2desGK-tCrOv1AFCxc-siDUa959uZjnlCHRfOmb2fVAKRQZox3Q1PkiwkdlD1YzSA_-1mK9kYPqGZwmfSBQ"
+        }
+      },
+      "opts": {
+        "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+        "scope": {
+          "domain_shard": "noosphere.md",
+          "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f"
+        },
+        "connectors": {
+          "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97": {
+            "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+            "trust_domain": "btc-watch",
+            "allowed_proof_kinds": [
+              "pow-header-chain"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "result": "INVALID",
+        "error": "E-EVIDENCE"
+      }
+    },
+    {
+      "id": "evidence-receipt-unadmitted-issuer",
+      "op": "verifyEvidenceReceipt",
+      "receipt": {
+        "claim": {
+          "version": "1",
+          "purpose": "ust:evidence-receipt",
+          "domain_shard": "noosphere.md",
+          "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+          "proof_kind": "pow-header-chain",
+          "facts": {
+            "substrate": "bitcoin",
+            "position": "900"
+          },
+          "issued_at": "2026-01-01T00:00:00Z"
+        },
+        "issuer_id": "sha256:58bf312e6df210805bc9e514eb8cf4a971eaca03e2a5b880c2f65b513d34dfee",
+        "sig": {
+          "alg": "Ed25519",
+          "key_id": "sha256:58bf312e6df210805bc9e514eb8cf4a971eaca03e2a5b880c2f65b513d34dfee",
+          "pub": "XiEsCYDks5_AlyETSqAhCTdO39JgwNPQPLUByNZUV6k",
+          "sig": "aUf7vQ6x2n_fV3408zFt7Z9Jm-UBGUPa8JRNfZTAdxSNGZ9nWbrVw-FK_ZBMYgSIGVMclspB-IUbRojr6abSBg"
+        }
+      },
+      "opts": {
+        "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+        "scope": {
+          "domain_shard": "noosphere.md",
+          "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f"
+        },
+        "connectors": {
+          "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97": {
+            "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+            "trust_domain": "btc-watch",
+            "allowed_proof_kinds": [
+              "pow-header-chain"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "result": "INDETERMINATE",
+        "reason": "evidence_unverified"
+      }
+    },
+    {
+      "id": "evidence-receipt-kind-not-allowed",
+      "op": "verifyEvidenceReceipt",
+      "receipt": {
+        "claim": {
+          "version": "1",
+          "purpose": "ust:evidence-receipt",
+          "domain_shard": "noosphere.md",
+          "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+          "proof_kind": "pow-header-chain",
+          "facts": {
+            "substrate": "bitcoin",
+            "position": "900"
+          },
+          "issued_at": "2026-01-01T00:00:00Z"
+        },
+        "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+        "sig": {
+          "alg": "Ed25519",
+          "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+          "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+          "sig": "9Oe2desGK-tCrOv1AFCxc-siDUa959uZjnlCHRfOmb2fVAKRQZox3Q1PkiwkdlD1YzSA_-1mK9kYPqGZwmfSBQ"
+        }
+      },
+      "opts": {
+        "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+        "scope": {
+          "domain_shard": "noosphere.md",
+          "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f"
+        },
+        "connectors": {
+          "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97": {
+            "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+            "allowed_proof_kinds": [
+              "content-addressed"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "result": "INDETERMINATE",
+        "reason": "evidence_unverified"
+      }
+    },
+    {
       "id": "fresh-corroborated",
       "op": "deriveCheckpointFreshness",
       "chain": [
@@ -436,29 +626,69 @@
         "target": {
           "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
           "domain_shard": "noosphere.md",
+          "subject": "ust:target",
           "anchor": {
-            "proof_kind": "pow-header-chain",
-            "subject": "ust:target",
-            "source_id": "btc",
-            "facts": {
-              "substrate": "bitcoin",
-              "position": "800"
+            "claim": {
+              "version": "1",
+              "purpose": "ust:evidence-receipt",
+              "domain_shard": "noosphere.md",
+              "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+              "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+              "subject": "ust:target",
+              "proof_kind": "pow-header-chain",
+              "facts": {
+                "substrate": "bitcoin",
+                "position": "800"
+              },
+              "issued_at": "2026-01-01T00:00:00Z"
+            },
+            "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "sig": {
+              "alg": "Ed25519",
+              "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "sig": "fYNR824L_AhNKcpQiiT6EIDx0Jog_FpccznWcYfCgCuOjC8sYUBNoGtL3sb-0yoF_5d9gjMzg0vgIPWKvnxTBQ"
             }
           }
         },
         "commitment": {
-          "proof_kind": "pow-header-chain",
-          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
-          "source_id": "btc",
-          "facts": {
-            "substrate": "bitcoin",
-            "position": "900"
+          "claim": {
+            "version": "1",
+            "purpose": "ust:evidence-receipt",
+            "domain_shard": "noosphere.md",
+            "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+            "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+            "proof_kind": "pow-header-chain",
+            "facts": {
+              "substrate": "bitcoin",
+              "position": "900"
+            },
+            "issued_at": "2026-01-01T00:00:00Z"
+          },
+          "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+          "sig": {
+            "alg": "Ed25519",
+            "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+            "sig": "9Oe2desGK-tCrOv1AFCxc-siDUa959uZjnlCHRfOmb2fVAKRQZox3Q1PkiwkdlD1YzSA_-1mK9kYPqGZwmfSBQ"
           }
         },
         "terminality": {
           "headProof": {
             "index": "0",
             "siblings": []
+          }
+        },
+        "trust": {
+          "connectors": {
+            "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97": {
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "trust_domain": "btc-watch",
+              "allowed_proof_kinds": [
+                "pow-header-chain"
+              ]
+            }
           }
         }
       },
@@ -503,13 +733,136 @@
         "target": {
           "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
           "domain_shard": "noosphere.md",
+          "subject": "ust:target",
           "anchor": {
+            "claim": {
+              "version": "1",
+              "purpose": "ust:evidence-receipt",
+              "domain_shard": "noosphere.md",
+              "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+              "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+              "subject": "ust:target",
+              "proof_kind": "pow-header-chain",
+              "facts": {
+                "substrate": "bitcoin",
+                "position": "800"
+              },
+              "issued_at": "2026-01-01T00:00:00Z"
+            },
+            "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "sig": {
+              "alg": "Ed25519",
+              "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "sig": "fYNR824L_AhNKcpQiiT6EIDx0Jog_FpccznWcYfCgCuOjC8sYUBNoGtL3sb-0yoF_5d9gjMzg0vgIPWKvnxTBQ"
+            }
+          }
+        },
+        "commitment": {
+          "claim": {
+            "version": "1",
+            "purpose": "ust:evidence-receipt",
+            "domain_shard": "noosphere.md",
+            "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+            "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
             "proof_kind": "pow-header-chain",
-            "subject": "ust:target",
-            "source_id": "btc",
             "facts": {
               "substrate": "bitcoin",
-              "position": "800"
+              "position": "700"
+            },
+            "issued_at": "2026-01-01T00:00:00Z"
+          },
+          "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+          "sig": {
+            "alg": "Ed25519",
+            "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+            "sig": "wty6KJrRc87w9kEBgnCLgVOparhsHeBnPPaefUgy56O7a7mN7lqRULwt0i2wuC6gahbBsbWy8qlYgW6YOXV1Bw"
+          }
+        },
+        "terminality": {
+          "headProof": {
+            "index": "0",
+            "siblings": []
+          }
+        },
+        "trust": {
+          "connectors": {
+            "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97": {
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "trust_domain": "btc-watch",
+              "allowed_proof_kinds": [
+                "pow-header-chain"
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": "INDETERMINATE",
+        "reason": "order_unproven"
+      }
+    },
+    {
+      "id": "fresh-evidence-forge-rejected",
+      "op": "deriveCheckpointFreshness",
+      "chain": [
+        {
+          "body": {
+            "version": "1",
+            "purpose": "ust:authority-checkpoint",
+            "domain_shard": "noosphere.md",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+            "sequence": "0",
+            "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+            "checkpoint_authority": {
+              "current_key_id": "sha256:0d88742630d4b9fee75b57ea828a074f70bdbbca7780477e2396f56610e564d0"
+            },
+            "keylog": {
+              "length": "1",
+              "root": "sha256:42a9e2df0a9137e153baf34043b41d9f6c9bb3d3bd49d7a4ba34fb06c4b2ba49",
+              "head": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          },
+          "sig": {
+            "alg": "Ed25519",
+            "key_id": "sha256:0d88742630d4b9fee75b57ea828a074f70bdbbca7780477e2396f56610e564d0",
+            "pub": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+            "sig": "GQzRZRNaM0k1zwLuXR49whGZqJaOKjuS-3j0e6G5DOZKiFXrwvAyTz3cQMGK6Z7NwXVCdX1KOEor-xCML4B1CQ"
+          }
+        }
+      ],
+      "opts": {
+        "genesisAuthority": {
+          "key_id": "sha256:0d88742630d4b9fee75b57ea828a074f70bdbbca7780477e2396f56610e564d0",
+          "pub": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+        },
+        "target": {
+          "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "domain_shard": "noosphere.md",
+          "subject": "ust:target",
+          "anchor": {
+            "claim": {
+              "version": "1",
+              "purpose": "ust:evidence-receipt",
+              "domain_shard": "noosphere.md",
+              "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+              "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+              "subject": "ust:target",
+              "proof_kind": "pow-header-chain",
+              "facts": {
+                "substrate": "bitcoin",
+                "position": "800"
+              },
+              "issued_at": "2026-01-01T00:00:00Z"
+            },
+            "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "sig": {
+              "alg": "Ed25519",
+              "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "sig": "fYNR824L_AhNKcpQiiT6EIDx0Jog_FpccznWcYfCgCuOjC8sYUBNoGtL3sb-0yoF_5d9gjMzg0vgIPWKvnxTBQ"
             }
           }
         },
@@ -519,7 +872,7 @@
           "source_id": "btc",
           "facts": {
             "substrate": "bitcoin",
-            "position": "700"
+            "position": "900"
           }
         },
         "terminality": {
@@ -527,11 +880,131 @@
             "index": "0",
             "siblings": []
           }
+        },
+        "trust": {
+          "connectors": {
+            "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97": {
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "trust_domain": "btc-watch",
+              "allowed_proof_kinds": [
+                "pow-header-chain"
+              ]
+            }
+          }
         }
       },
       "expect": {
         "result": "INDETERMINATE",
-        "reason": "order_unproven"
+        "reason": "evidence_unverified",
+        "keylog_freshness": "unverified"
+      }
+    },
+    {
+      "id": "fresh-unadmitted-connector-rejected",
+      "op": "deriveCheckpointFreshness",
+      "chain": [
+        {
+          "body": {
+            "version": "1",
+            "purpose": "ust:authority-checkpoint",
+            "domain_shard": "noosphere.md",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+            "sequence": "0",
+            "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+            "checkpoint_authority": {
+              "current_key_id": "sha256:0d88742630d4b9fee75b57ea828a074f70bdbbca7780477e2396f56610e564d0"
+            },
+            "keylog": {
+              "length": "1",
+              "root": "sha256:42a9e2df0a9137e153baf34043b41d9f6c9bb3d3bd49d7a4ba34fb06c4b2ba49",
+              "head": "sha256:abababababababababababababababababababababababababababababababab"
+            }
+          },
+          "sig": {
+            "alg": "Ed25519",
+            "key_id": "sha256:0d88742630d4b9fee75b57ea828a074f70bdbbca7780477e2396f56610e564d0",
+            "pub": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+            "sig": "GQzRZRNaM0k1zwLuXR49whGZqJaOKjuS-3j0e6G5DOZKiFXrwvAyTz3cQMGK6Z7NwXVCdX1KOEor-xCML4B1CQ"
+          }
+        }
+      ],
+      "opts": {
+        "genesisAuthority": {
+          "key_id": "sha256:0d88742630d4b9fee75b57ea828a074f70bdbbca7780477e2396f56610e564d0",
+          "pub": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc"
+        },
+        "target": {
+          "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+          "domain_shard": "noosphere.md",
+          "subject": "ust:target",
+          "anchor": {
+            "claim": {
+              "version": "1",
+              "purpose": "ust:evidence-receipt",
+              "domain_shard": "noosphere.md",
+              "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+              "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+              "subject": "ust:target",
+              "proof_kind": "pow-header-chain",
+              "facts": {
+                "substrate": "bitcoin",
+                "position": "800"
+              },
+              "issued_at": "2026-01-01T00:00:00Z"
+            },
+            "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "sig": {
+              "alg": "Ed25519",
+              "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "sig": "fYNR824L_AhNKcpQiiT6EIDx0Jog_FpccznWcYfCgCuOjC8sYUBNoGtL3sb-0yoF_5d9gjMzg0vgIPWKvnxTBQ"
+            }
+          }
+        },
+        "commitment": {
+          "claim": {
+            "version": "1",
+            "purpose": "ust:evidence-receipt",
+            "domain_shard": "noosphere.md",
+            "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+            "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+            "proof_kind": "pow-header-chain",
+            "facts": {
+              "substrate": "bitcoin",
+              "position": "900"
+            },
+            "issued_at": "2026-01-01T00:00:00Z"
+          },
+          "issuer_id": "sha256:58bf312e6df210805bc9e514eb8cf4a971eaca03e2a5b880c2f65b513d34dfee",
+          "sig": {
+            "alg": "Ed25519",
+            "key_id": "sha256:58bf312e6df210805bc9e514eb8cf4a971eaca03e2a5b880c2f65b513d34dfee",
+            "pub": "XiEsCYDks5_AlyETSqAhCTdO39JgwNPQPLUByNZUV6k",
+            "sig": "aUf7vQ6x2n_fV3408zFt7Z9Jm-UBGUPa8JRNfZTAdxSNGZ9nWbrVw-FK_ZBMYgSIGVMclspB-IUbRojr6abSBg"
+          }
+        },
+        "terminality": {
+          "headProof": {
+            "index": "0",
+            "siblings": []
+          }
+        },
+        "trust": {
+          "connectors": {
+            "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97": {
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "trust_domain": "btc-watch",
+              "allowed_proof_kinds": [
+                "pow-header-chain"
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": "INDETERMINATE",
+        "reason": "evidence_unverified"
       }
     },
     {
@@ -571,29 +1044,69 @@
         "target": {
           "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
           "domain_shard": "noosphere.md",
+          "subject": "ust:target",
           "anchor": {
-            "proof_kind": "pow-header-chain",
-            "subject": "ust:target",
-            "source_id": "btc",
-            "facts": {
-              "substrate": "bitcoin",
-              "position": "800"
+            "claim": {
+              "version": "1",
+              "purpose": "ust:evidence-receipt",
+              "domain_shard": "noosphere.md",
+              "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+              "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+              "subject": "ust:target",
+              "proof_kind": "pow-header-chain",
+              "facts": {
+                "substrate": "bitcoin",
+                "position": "800"
+              },
+              "issued_at": "2026-01-01T00:00:00Z"
+            },
+            "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "sig": {
+              "alg": "Ed25519",
+              "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "sig": "fYNR824L_AhNKcpQiiT6EIDx0Jog_FpccznWcYfCgCuOjC8sYUBNoGtL3sb-0yoF_5d9gjMzg0vgIPWKvnxTBQ"
             }
           }
         },
         "commitment": {
-          "proof_kind": "pow-header-chain",
-          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
-          "source_id": "btc",
-          "facts": {
-            "substrate": "bitcoin",
-            "position": "900"
+          "claim": {
+            "version": "1",
+            "purpose": "ust:evidence-receipt",
+            "domain_shard": "noosphere.md",
+            "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+            "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+            "proof_kind": "pow-header-chain",
+            "facts": {
+              "substrate": "bitcoin",
+              "position": "900"
+            },
+            "issued_at": "2026-01-01T00:00:00Z"
+          },
+          "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+          "sig": {
+            "alg": "Ed25519",
+            "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+            "sig": "9Oe2desGK-tCrOv1AFCxc-siDUa959uZjnlCHRfOmb2fVAKRQZox3Q1PkiwkdlD1YzSA_-1mK9kYPqGZwmfSBQ"
           }
         },
         "terminality": {
           "headProof": {
             "index": "0",
             "siblings": []
+          }
+        },
+        "trust": {
+          "connectors": {
+            "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97": {
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "trust_domain": "btc-watch",
+              "allowed_proof_kinds": [
+                "pow-header-chain"
+              ]
+            }
           }
         },
         "uniqueness": {
@@ -684,23 +1197,52 @@
         "target": {
           "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
           "domain_shard": "noosphere.md",
+          "subject": "ust:target",
           "anchor": {
-            "proof_kind": "pow-header-chain",
-            "subject": "ust:target",
-            "source_id": "btc",
-            "facts": {
-              "substrate": "bitcoin",
-              "position": "800"
+            "claim": {
+              "version": "1",
+              "purpose": "ust:evidence-receipt",
+              "domain_shard": "noosphere.md",
+              "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+              "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+              "subject": "ust:target",
+              "proof_kind": "pow-header-chain",
+              "facts": {
+                "substrate": "bitcoin",
+                "position": "800"
+              },
+              "issued_at": "2026-01-01T00:00:00Z"
+            },
+            "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "sig": {
+              "alg": "Ed25519",
+              "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "sig": "fYNR824L_AhNKcpQiiT6EIDx0Jog_FpccznWcYfCgCuOjC8sYUBNoGtL3sb-0yoF_5d9gjMzg0vgIPWKvnxTBQ"
             }
           }
         },
         "commitment": {
-          "proof_kind": "pow-header-chain",
-          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
-          "source_id": "btc",
-          "facts": {
-            "substrate": "bitcoin",
-            "position": "900"
+          "claim": {
+            "version": "1",
+            "purpose": "ust:evidence-receipt",
+            "domain_shard": "noosphere.md",
+            "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+            "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
+            "proof_kind": "pow-header-chain",
+            "facts": {
+              "substrate": "bitcoin",
+              "position": "900"
+            },
+            "issued_at": "2026-01-01T00:00:00Z"
+          },
+          "issuer_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+          "sig": {
+            "alg": "Ed25519",
+            "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+            "sig": "9Oe2desGK-tCrOv1AFCxc-siDUa959uZjnlCHRfOmb2fVAKRQZox3Q1PkiwkdlD1YzSA_-1mK9kYPqGZwmfSBQ"
           }
         },
         "terminality": {
@@ -975,6 +1517,15 @@
           }
         },
         "trust": {
+          "connectors": {
+            "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97": {
+              "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+              "trust_domain": "btc-watch",
+              "allowed_proof_kinds": [
+                "pow-header-chain"
+              ]
+            }
+          },
           "mapRoots": [
             "sha256:90eca5f0c058a71045a273b6a3649bbe12333daa2bcf5a0ed32cf13c6a05a9c9"
           ]

@@ -14,6 +14,8 @@ const blocks = {
   'evidence-order': tick(REGISTRY.evidenceOrder).join(' | '),
   'verified-evidence-fields': 'required ' + tick(REGISTRY.verifiedEvidenceFields.required).join(', ')
     + '; optional ' + tick(REGISTRY.verifiedEvidenceFields.optional).join(', '),
+  'evidence-receipt-fields': 'required ' + tick(REGISTRY.evidenceReceiptClaimFields.required).join(', ')
+    + '; optional ' + tick(REGISTRY.evidenceReceiptClaimFields.optional).join(', '),
   'hash-domains': tick(REGISTRY.hashDomains).join(' | '),
 };
 

@@ -14,6 +14,7 @@ const call = {
   quorumTrustDomains: (v) => P.quorumTrustDomains(v.list, v.opts),
   evidenceClass: (v) => P.evidenceClass(v.proof_kind),
   verifiedEvidence: (v) => P.verifiedEvidence(v.fields),
+  verifyEvidenceReceipt: (v) => P.verifyEvidenceReceipt(v.receipt, v.opts),    // M3 — the evidence seam (signed connector receipt → VerifiedEvidence)
   verifyNoForkEvidence: (v) => P.verifyNoForkEvidence(v.evidence, v.opts),
   verifyCheckpointUniqueness: (v) => P.verifyCheckpointUniqueness(v.attestations, v.opts),
   verifyCheckpointMapUniqueness: (v) => P.verifyCheckpointMapUniqueness(v.proof, v.opts),

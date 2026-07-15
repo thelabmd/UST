@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 50 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 51 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -190,6 +190,10 @@ export function resolveCheckpointRoots(genesis) {
 // M2 (rc.35 refactor, UST-985) — the canonical genesis_epoch is DERIVED from the active genesis; the publisher can never
 // choose the uniqueness namespace (epoch-split). Everything downstream reads this, never a body field.
 export const genesisEpoch = (activeGenesis) => H('ust:genesis-epoch', activeGenesis);
+// M2 — the ONE canonical scope identifier: every scope-bound object (context, evidence) derives it from the SAME
+// canon triple, so a publisher (or connector) can never choose the namespace two verifiers key by.
+export const authorityScopeId = ({ domain, active_genesis, genesis_epoch }) =>
+  H('ust:authority-scope', canon({ domain, active_genesis, genesis_epoch }));
 // M2 — the SOLE producer of an authority SCOPE. verifyGenesis (§2.1 design record): verify the doc, then DERIVE the
 // immutable scope {domain, active_genesis, genesis_epoch, scope_id}. Returns null iff the genesis does not verify as a
 // self-signed class:"genesis"; otherwise the context every checkpoint/uniqueness/recovery predicate is a function of.
@@ -198,7 +202,7 @@ export function verifiedGenesisContext(genesis) {
   if (!roots) return null;
   const active_genesis = contentHash(genesis), domain = genesis.state.id.domain_shard;
   const genesis_epoch = genesisEpoch(active_genesis);
-  const scope_id = H('ust:authority-scope', canon({ domain, active_genesis, genesis_epoch }));
+  const scope_id = authorityScopeId({ domain, active_genesis, genesis_epoch });
   return { scope_id, domain, active_genesis, genesis_epoch,
     checkpoint_authority: roots.genesisAuthority,
     ...(roots.recoveryKeys ? { recoveryKeys: roots.recoveryKeys, recoveryThreshold: roots.recoveryThreshold } : {}) };
@@ -704,11 +708,13 @@ export function verifyNoForkEvidence(evidence, { domain_shard, active_genesis, t
   return { ok: true, witness_id: issuer_id, ...(typeof root === 'object' && root.trust_domain ? { trust_domain: root.trust_domain } : {}) };
 }
 
-// ─── #76 Phase A — CONNECTOR EVIDENCE ALGEBRA. A connector returns VERIFIED FACTS only (`VerifiedEvidence`), never
-//     an assurance label — the CORE derives the class. Two algebra ops the checkpoint/authority layers consume:
-//     `compareEvidenceOrder` (temporal order is a PROOF RELATION, not a comparison of RFC3339 fields) and
-//     `quorumTrustDomains` (quorum counts DISTINCT CONSUMER-resolved trust domains, never connectors/URLs/mirrors and
-//     never a self-declared `trust_domain`, P0-2). Faithful to "assurance is earned, capped by C, strengthened by quorum".
+// ─── #76 Phase A — CONNECTOR EVIDENCE ALGEBRA. A connector returns VERIFIED FACTS only, never an assurance label —
+//     the CORE derives the class. Two algebra ops the checkpoint/authority layers consume: `compareEvidenceOrder`
+//     (temporal order is a PROOF RELATION, not a comparison of RFC3339 fields) and `quorumTrustDomains` (quorum counts
+//     DISTINCT CONSUMER-resolved trust domains, never connectors/URLs/mirrors, never a self-declared `trust_domain`).
+//     M3 (rc.36): `verifiedEvidence()` builds the RAW facts shape only — its output is NOT VerifiedEvidence and no
+//     strong rung accepts it (the rc.35 round-2 forge). Provenance-bearing evidence = buildEvidenceReceipt (a signed
+//     connector receipt) verified through verifyEvidenceReceipt against consumer-admitted connectors.
 export function verifiedEvidence({ proof_kind, subject, source_id, facts = {}, verifier_id, verifier_version }) {
   if (!proof_kind || !subject || !source_id) throw Object.assign(new Error('E-EVIDENCE: proof_kind, subject, source_id required'), { code: 'E-EVIDENCE' });
   for (const k of ['assurance', 'strength', 'trust_domain', 'independent'])            // facts-only: no self-declared class/independence
@@ -738,12 +744,82 @@ const EVIDENCE_CAPS = {
   'rfc3161-tsa':       ['time'],
 };
 export const evidenceCaps = (proof_kind) => EVIDENCE_CAPS[proof_kind] || [];
+
+// ─── M3 (UST-6vj C2) — THE EVIDENCE SEAM. Provenance is a THEOREM, not an assumption: a strong rung consumes
+//     evidence only from image(VerifyEvidence_C) — either a proof the core verifies inline (terminality / map /
+//     attestation verifiers = the DirectCryptographicProof arm of RawEvidence) or a SIGNED CONNECTOR RECEIPT admitted
+//     by CONSUMER config (this block). A caller-minted look-alike (rc.35 round-2 verifiedEvidence-forge) is not in
+//     the image, carries no capability, and lifts no rung. trust_domain flows from the CONSUMER config, never the
+//     receipt; the receipt carries FACTS only — a capability/assurance/independence/threshold field is rejected.
+const BANNED_EVIDENCE_FACTS = ['assurance', 'strength', 'trust_domain', 'independent', 'capability', 'attested', 'threshold'];
+const RFC3339Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+export function evidenceReceiptClaim({ domain_shard, active_genesis, genesis_epoch, subject, proof_kind, facts = {}, payload_digest, issued_at }) {
+  if (typeof domain_shard !== 'string' || !domain_shard || !isHashStr(active_genesis)) throw Object.assign(new Error('E-EVIDENCE: domain_shard/active_genesis required'), { code: 'E-EVIDENCE' });
+  if (typeof subject !== 'string' || !subject || typeof proof_kind !== 'string' || !proof_kind) throw Object.assign(new Error('E-EVIDENCE: subject and proof_kind required'), { code: 'E-EVIDENCE' });
+  if (!facts || typeof facts !== 'object' || Array.isArray(facts)) throw Object.assign(new Error('E-EVIDENCE: facts must be an object'), { code: 'E-EVIDENCE' });
+  for (const k of BANNED_EVIDENCE_FACTS)                                             // facts-only, extended ban (design §2.2)
+    if (k in facts) throw Object.assign(new Error(`E-EVIDENCE: a receipt must not carry '${k}' (facts only; capability/class is core-derived, trust_domain is consumer config)`), { code: 'E-EVIDENCE' });
+  if (typeof issued_at !== 'string' || !RFC3339Z.test(issued_at)) throw Object.assign(new Error('E-EVIDENCE: issued_at must be RFC3339 Z (a SIGNED claim, never proven time)'), { code: 'E-EVIDENCE' });
+  return { version: '1', purpose: 'ust:evidence-receipt', domain_shard, active_genesis,
+    genesis_epoch: genesis_epoch ?? genesisEpoch(active_genesis),                    // canonical by construction (M2); verify re-checks
+    subject, proof_kind, facts, ...(payload_digest !== undefined ? { payload_digest } : {}), issued_at };
+}
+export function buildEvidenceReceipt(fields, privKeyObj, issuerPubB64url) {
+  const claim = evidenceReceiptClaim(fields);
+  const sig = edSign(null, Buffer.from(canon({ purpose: 'ust:evidence-receipt-signature', claim }), 'utf8'), privKeyObj).toString('base64url');
+  return { claim, issuer_id: keyId(issuerPubB64url), sig: { alg: 'Ed25519', key_id: keyId(issuerPubB64url), pub: issuerPubB64url, sig } };
+}
+export const evidenceReceiptId = (r) => H('ust:evidence-receipt', canon({ claim: r.claim, sig: r.sig }));
+// The in-process witness that VerifyEvidence_C produced a value (M3 / design §2.3): membership here IS the runtime
+// representation of a genuinely verified receipt. Portability = the signed receipt; safety = this token.
+const VERIFIED_EVIDENCE = new WeakSet();
+// VerifyEvidence_C — the ONLY producer of VerifiedEvidence. Seven checks IN ORDER (M3.2): bounds/shape → signature →
+// subject binding → scope binding → admission (consumer connectors) → role (allowed_proof_kinds, B4) → total.
+// Tamper/malformation ⇒ INVALID(E-EVIDENCE); not-admitted-for-THIS-consumer/scope/subject ⇒ INDETERMINATE
+// (evidence_unverified) — absence of admission is not proof of fraud, but it earns nothing (fail-closed).
+export function verifyEvidenceReceipt(receipt, { subject, scope = {}, connectors = {} } = {}) {
+  try {
+    const c = receipt?.claim, s = receipt?.sig;
+    const bad = (detail) => ({ result: 'INVALID', error: 'E-EVIDENCE', detail });
+    const unv = (detail) => ({ result: 'INDETERMINATE', reason: 'evidence_unverified', detail });
+    if (!c || typeof c !== 'object' || !s || s.alg !== 'Ed25519' || typeof s.pub !== 'string' || typeof s.sig !== 'string') return bad('malformed receipt (claim/sig shape)');
+    if (c.version !== '1' || c.purpose !== 'ust:evidence-receipt') return bad('not an evidence-receipt claim (version/purpose)');
+    if (typeof c.subject !== 'string' || !c.subject || typeof c.proof_kind !== 'string' || !c.proof_kind) return bad('subject/proof_kind missing');
+    if (!c.facts || typeof c.facts !== 'object' || Array.isArray(c.facts)) return bad('facts must be an object');
+    for (const k of BANNED_EVIDENCE_FACTS) if (k in c.facts) return bad(`receipt facts must not carry '${k}' (facts only)`);
+    if (!isHashStr(c.active_genesis) || c.genesis_epoch !== genesisEpoch(c.active_genesis)) return bad('genesis_epoch ≠ canonical H("ust:genesis-epoch", active_genesis) (M2)');
+    if (typeof c.issued_at !== 'string' || !RFC3339Z.test(c.issued_at)) return bad('issued_at not RFC3339 Z');
+    if (keyId(s.pub) !== s.key_id || receipt.issuer_id !== s.key_id) return bad('issuer_id ≠ keyId(sig.pub)');
+    if (strictB64url(s.sig, 64) === null) return bad('sig not canonical b64url of a 64-byte Ed25519 signature');
+    if (!edVerifyStrict(s.pub, canon({ purpose: 'ust:evidence-receipt-signature', claim: c }), s.sig)) return bad('Ed25519 verify failed');
+    if (subject !== undefined && c.subject !== subject) return unv('receipt subject is not the required subject (binding, M3.2/3)');
+    if (c.domain_shard !== scope.domain_shard || c.active_genesis !== scope.active_genesis || c.genesis_epoch !== scope.genesis_epoch) return unv('receipt scope ≠ the authority scope (binding, M3.2/4)');
+    const conn = connectors?.[s.key_id];
+    if (!conn || conn.pub !== s.pub) return unv('issuer is not a consumer-admitted connector (admission, M3.2/5)');
+    if (!Array.isArray(conn.allowed_proof_kinds) || !conn.allowed_proof_kinds.includes(c.proof_kind)) return unv(`connector is not admitted for proof_kind '${c.proof_kind}' (role, M3.2/6 — B4)`);
+    const evidence = Object.freeze({ evidence_id: evidenceReceiptId(receipt),
+      authority_scope_id: authorityScopeId({ domain: scope.domain_shard, active_genesis: scope.active_genesis, genesis_epoch: scope.genesis_epoch }),
+      subject_id: c.subject, proof_kind: c.proof_kind, verified_facts: Object.freeze({ ...c.facts }), issuer_id: s.key_id,
+      ...(conn.trust_domain !== undefined ? { trust_domain: conn.trust_domain } : {}), basis: 'admitted-connector-receipt' });
+    VERIFIED_EVIDENCE.add(evidence);
+    return { result: 'VALID', evidence };
+  } catch (e) { return { result: 'INVALID', error: 'E-EVIDENCE', detail: 'receipt verification threw: ' + (e?.message || e) }; }   // M3.2/7 — total
+}
+// Freshness-side admission: a pre-verified token re-checks only its BINDING (scope + subject, never the crypto);
+// a raw {claim, sig} receipt goes through the full seam; anything else is the forge and earns nothing.
+function admitFreshnessEvidence(x, subject, scope, trust) {
+  if (x && typeof x === 'object' && VERIFIED_EVIDENCE.has(x))
+    return x.authority_scope_id === authorityScopeId({ domain: scope.domain_shard, active_genesis: scope.active_genesis, genesis_epoch: scope.genesis_epoch }) && x.subject_id === subject
+      ? { evidence: x } : { detail: 'core-verified evidence is bound to a different scope/subject' };
+  if (x && typeof x === 'object' && x.claim && x.sig) { const r = verifyEvidenceReceipt(x, { subject, scope, connectors: trust?.connectors }); return r.evidence ? { evidence: r.evidence } : { detail: r.detail }; }
+  return { detail: 'caller-supplied evidence is neither a signed connector receipt nor core-verified (M3 — a minted look-alike earns nothing)' };
+}
 const temporalOrderCapable = (ev) => { const c = evidenceCaps(ev?.proof_kind); return c.includes('order') || c.includes('time'); };
 // compareEvidenceOrder(a, b): is `a` PROVEN to be after `b`? Same-substrate position (block height / log index) is a
 // total order; else an interval relation `a.not_before ≥ b.not_after` proves after, `b.not_before ≥ a.not_after`
 // proves not-after. Two `not_after` upper bounds ALONE (or cross-substrate positions) prove nothing ⇒ `unproven`.
 export function compareEvidenceOrder(a, b) {
-  const fa = a?.facts ?? a ?? {}, fb = b?.facts ?? b ?? {};
+  const fa = a?.verified_facts ?? a?.facts ?? a ?? {}, fb = b?.verified_facts ?? b?.facts ?? b ?? {};   // M3: VerifiedEvidence carries verified_facts
   const decint = (s) => typeof s === 'string' && /^(0|[1-9]\d*)$/.test(s);            // P1-02: canonical unsigned decimal — total/fail-closed, never BigInt(NaN)
   if (fa.substrate && fb.substrate && fa.substrate === fb.substrate && decint(fa.position) && decint(fb.position))
     return BigInt(fa.position) > BigInt(fb.position) ? 'proven-after' : 'not-after';   // one total order ⇒ decidable
@@ -1378,12 +1454,20 @@ export function deriveCheckpointFreshness(chain, { genesis, genesisAuthority, pi
   }
   const term = verifyKeylogTerminality({ root: b.keylog?.root, length: b.keylog?.length, head: b.keylog?.head }, terminality || {});  // head = LAST entry (position L-1) AND no successor at L
   if (!term.terminal) return { result: 'INDETERMINATE', reason: 'terminality_unproven', detail: term.detail || 'key-log head terminality not proven', keylog_freshness: 'unverified' };
-  if (!commitment || commitment.subject !== headId)                                     // external commitment must be VERIFIED evidence BOUND to this checkpoint id
-    return { result: 'INDETERMINATE', reason: 'unavailable', detail: 'no external-commitment evidence bound to the checkpoint id', keylog_freshness: 'unverified' };
+  if (!commitment) return { result: 'INDETERMINATE', reason: 'unavailable', detail: 'no external-commitment evidence supplied for the checkpoint id', keylog_freshness: 'unverified' };
   if (!target || !target.anchor) return { result: 'INDETERMINATE', reason: 'unavailable', detail: 'no target anchor evidence to order against', keylog_freshness: 'unverified' };
-  if (!temporalOrderCapable(commitment) || !temporalOrderCapable(target.anchor))       // Phase 2: proof_kind must ESTABLISH temporal order (content-addressed / map / opaque cannot)
-    return { result: 'INDETERMINATE', reason: 'order_unproven', detail: 'commitment/anchor evidence class does not establish temporal order (capability check: ' + evidenceClass(commitment?.proof_kind) + ')', keylog_freshness: 'unverified' };
-  const ord = compareEvidenceOrder(commitment, target.anchor);                          // F.5g proof relation, NOT a timestamp compare
+  if (typeof target.subject !== 'string' || !target.subject) return { result: 'INDETERMINATE', reason: 'unavailable', detail: 'no target.subject id to bind the anchor evidence to', keylog_freshness: 'unverified' };
+  // M3 — evidence enters ONLY through the seam: a signed receipt of a consumer-admitted connector (or a pre-verified
+  // token), scope-bound to THIS chain's authority scope and subject-bound to the checkpoint id / target subject.
+  // A caller-minted facts object (the rc.35 round-2 forge) is not in image(VerifyEvidence_C) and earns nothing.
+  const scope = { domain_shard: b.domain_shard, active_genesis: b.active_genesis, genesis_epoch: b.genesis_epoch };
+  const cAdm = admitFreshnessEvidence(commitment, headId, scope, trust);
+  if (!cAdm.evidence) return { result: 'INDETERMINATE', reason: 'evidence_unverified', detail: 'commitment: ' + cAdm.detail, keylog_freshness: 'unverified' };
+  const aAdm = admitFreshnessEvidence(target.anchor, target.subject, scope, trust);
+  if (!aAdm.evidence) return { result: 'INDETERMINATE', reason: 'evidence_unverified', detail: 'anchor: ' + aAdm.detail, keylog_freshness: 'unverified' };
+  if (!temporalOrderCapable(cAdm.evidence) || !temporalOrderCapable(aAdm.evidence))    // Phase 2: proof_kind must ESTABLISH temporal order (content-addressed / map / opaque cannot)
+    return { result: 'INDETERMINATE', reason: 'order_unproven', detail: 'commitment/anchor evidence class does not establish temporal order (capability check: ' + evidenceClass(cAdm.evidence.proof_kind) + ')', keylog_freshness: 'unverified' };
+  const ord = compareEvidenceOrder(cAdm.evidence, aAdm.evidence);                       // F.5g proof relation, NOT a timestamp compare
   if (ord !== 'proven-after') return { result: 'INDETERMINATE', reason: 'order_unproven', detail: 'checkpoint commitment not proven-after the target (' + ord + ')', keylog_freshness: 'unverified' };
   // corroborated holds. Phase C — an INDEPENDENT anti-equivocation proof over THIS checkpoint upgrades to `attested`.
   // Uniqueness on an UNAUTHORIZED/UNBOUND checkpoint never reaches here (the corroborated conjunction above already
@@ -1461,20 +1545,23 @@ export const REGISTRY = {
   hashDomains: ['ust:state', 'ust:shard', 'ust:seed', 'ust:keylog', 'ust:leaf', 'ust:node',
     'ust:authority-checkpoint', 'ust:checkpoint-map-key', 'ust:checkpoint-map-value', 'ust:name-map-key', 'ust:name-map-value',
     'ust:keylog-empty', 'ust:keylog-leaf', 'ust:keylog-node', 'ust:keylog-commit', 'ust:smt-empty', 'ust:smt-node', 'ust:smt-leaf',
-    'ust:genesis-epoch', 'ust:authority-scope'],
+    'ust:genesis-epoch', 'ust:authority-scope', 'ust:evidence-receipt'],
   // signed `canon` preimage purposes (§12.1a/§12.3) — domain-separated, never interchangeable.
   purposes: ['ust:name-no-fork', 'ust:authority-checkpoint', 'ust:authority-checkpoint-signature',
-    'ust:checkpoint-authority-recovery', 'ust:genesis-epoch-transition', 'ust:checkpoint-uniqueness-attestation'],
+    'ust:checkpoint-authority-recovery', 'ust:genesis-epoch-transition', 'ust:checkpoint-uniqueness-attestation',
+    'ust:evidence-receipt', 'ust:evidence-receipt-signature'],
   // INVALID error codes (§15) — every code the verifier/API can emit. Ordered as §15 lists them.
   errorCodes: ['E-MALFORMED', 'E-CANON', 'E-BOUNDS', 'E-CYCLE', 'E-SIG', 'E-KEY', 'E-GENESIS', 'E-ANCHOR',
     'E-COMMIT', 'E-ROOT', 'E-SEED', 'E-PREV', 'E-AUTHORITY', 'E-SEQ', 'E-EVIDENCE', 'E-ASSURANCE'],
   // INDETERMINATE reasons — the §14 document-verifier's CLOSED set, and the §12.3.6 authority-checkpoint set (distinct).
   indeterminateReasons: { document: ['unavailable', 'unsupported_alg', 'resource_limit', 'stale_keylog'],
-    checkpoint: ['authority_unresolved', 'terminality_unproven', 'order_unproven'] },
+    checkpoint: ['authority_unresolved', 'terminality_unproven', 'order_unproven', 'evidence_unverified'] },
   tiers: Object.keys(TIER_RANK),                                    // NONE/LIGHT/HIGH/TOP — single-sourced from TIER_RANK
   assuranceAxes: ASSURANCE_AXES,                                    // single-sourced from the #78 lattice (§F.5.0)
   evidenceOrder: ['proven-after', 'not-after', 'unproven'],        // compareEvidenceOrder returns (§12.3.5)
   verifiedEvidenceFields: { required: ['proof_kind', 'subject', 'source_id', 'facts'], optional: ['verifier_id', 'verifier_version'] },
+  // M3 — the SIGNED connector-receipt claim (§12.3.5): facts only; a capability/assurance/independence field is E-EVIDENCE.
+  evidenceReceiptClaimFields: { required: ['version', 'purpose', 'domain_shard', 'active_genesis', 'genesis_epoch', 'subject', 'proof_kind', 'facts', 'issued_at'], optional: ['payload_digest'] },
 };
 
 // ─── TOP §11.3 completeness: a sequenced stream is prev-chained; first frame's prev = genesis content_hash

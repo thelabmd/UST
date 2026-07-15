@@ -40,8 +40,11 @@ const CAPS = {
   'fork-choice':        { core: ['forkChoice'], mcp: 'ust_fork_choice' },
   'stream-verify':      { core: ['verifyStream'], mcp: 'ust_verify_stream', cli: 'verifyStream' },
   'typed-evidence':     { core: ['verifiedEvidence', 'evidenceClass', 'evidenceCaps', 'compareEvidenceOrder'] },
+  // M3 (UST-6vj C2) — provenance-bearing evidence: a SIGNED connector receipt verified against consumer-admitted
+  // connectors is the ONLY way external facts reach a strong rung (closes the rc.35 round-2 verifiedEvidence-forge).
+  'evidence-receipt':   { core: ['evidenceReceiptClaim', 'buildEvidenceReceipt', 'evidenceReceiptId', 'verifyEvidenceReceipt'] },
   'assurance-lattice':  { core: ['ASSURANCE_AXES', 'axisRank', 'assuranceState', 'assuranceLE', 'meetAssurance', 'joinAssurance', 'projectTier', 'TIER_RANK', 'capAssurance'] },
-  'checkpoint-chain':   { core: ['buildAuthorityCheckpoint', 'sealAuthorityCheckpoint', 'authorityCheckpointId', 'verifyAuthorityCheckpointChain', 'resolveCheckpointRoots', 'deriveCheckpointFreshness', 'verifiedGenesisContext', 'genesisEpoch'], cli: 'buildCeremony' },
+  'checkpoint-chain':   { core: ['buildAuthorityCheckpoint', 'sealAuthorityCheckpoint', 'authorityCheckpointId', 'verifyAuthorityCheckpointChain', 'resolveCheckpointRoots', 'deriveCheckpointFreshness', 'verifiedGenesisContext', 'genesisEpoch', 'authorityScopeId'], cli: 'buildCeremony' },
   'recovery':           { core: ['checkpointRecoveryClaim', 'buildRecoveryStatement', 'verifyCheckpointRecovery'] },
   'epoch-transition':   { core: ['epochTransitionClaim', 'buildEpochTransition', 'verifyEpochTransition'] },
   'uniqueness-attest':  { core: ['checkpointUniquenessClaim', 'buildUniquenessAttestation', 'verifyCheckpointUniqueness'] },
@@ -69,8 +72,8 @@ const cliProbe = (cap) => { const tok = CAPS[cap].cli; return !!tok && cliSrc.in
 const SURFACES = {
   'ust-lite':         { probe: exportIntersect(LITE), full: ['canon', 'content-address', 'build-transcript', 'sign', 'verify'], subset: [], naReason: 'outside the standalone zero-dependency LIGHT floor (lite = sign/verify subset, gated by test:lite)' },
   'ust-web-signer':   { probe: exportIntersect(WEB), full: ['canon', 'content-address', 'build-transcript', 'sign'], subset: [], naReason: 'producer-only surface', naSpecific: { 'verify': 'by design: the private key never enters a verifier — verification is ust-protocol / ust-lite (README)' } },
-  'ust-ots-verify':   { probe: connector(OTS), full: ['anchor-verify', 'typed-evidence', 'substrate-registry'], subset: [], naReason: 'a Bitcoin/OTS substrate connector (plugs into verifyAnchor via substrateVerify), not a general surface' },
-  'ust-rekor-verify': { probe: connector(REKOR), full: ['anchor-verify', 'typed-evidence', 'substrate-registry'], subset: [], naReason: 'a Rekor transparency-log substrate connector, not a general surface' },
+  'ust-ots-verify':   { probe: connector(OTS), full: ['anchor-verify', 'typed-evidence', 'substrate-registry'], subset: [], naReason: 'a Bitcoin/OTS substrate connector (plugs into verifyAnchor via substrateVerify), not a general surface', naSpecific: { 'evidence-receipt': 'THE connector job per M3 — emit signed receipts (buildEvidenceReceipt with its own key) instead of raw verifiedEvidence facts; planned follow-up, tracked under UST-6vj C4/legacy' } },
+  'ust-rekor-verify': { probe: connector(REKOR), full: ['anchor-verify', 'typed-evidence', 'substrate-registry'], subset: [], naReason: 'a Rekor transparency-log substrate connector, not a general surface', naSpecific: { 'evidence-receipt': 'THE connector job per M3 — emit signed receipts instead of raw verifiedEvidence facts; planned follow-up, tracked under UST-6vj C4/legacy' } },
   // Agent MCP TARGET (owner, 2026-07-15) = full for EVERY non-operator capability + the single conditionally-operator
   // touch: reaching TOP (mint/attach an anchor), planned for noosphere, not yet built. `na` here means the capability
   // is deferred to the PLANNED operator MCP over ustate (key creation, checkpoint/recovery/epoch/uniqueness/map

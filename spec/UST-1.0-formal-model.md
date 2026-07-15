@@ -584,21 +584,49 @@ non-membership — the one composition problem that genuinely needs the anchored
 separately. The audit's manifest collapses, by the math, to "per-frame `K_A` + `A`-signed cadence + the existing
 substrate anchor" — less machinery, each omission proven, not cut.
 
-## F.5g Connector evidence algebra — facts are generators, order is a proof relation, quorum is domain-cardinality (#76 Phase A)
+## F.5g The evidence seam — provenance is a theorem; capability exists only in image(VerifyEvidence_C) (#76 Phase A → M3, rc.36)
 
-F.5a.1 pinned admission for ONE evidence kind (no-fork). Phase A states the same discipline for ANY connector, plus
-the two algebra operations the checkpoint layer runs on admitted evidence.
+F.5a.1 pinned admission for ONE evidence kind (no-fork). Phase A stated the same discipline for ANY connector; the
+rc.35 round-2 audit showed the original realization ASSUMED provenance instead of proving it — `verifiedEvidence()`
+was an exported constructor any caller could invoke, so a well-formed but caller-MINTED facts object reached the
+`corroborated` conjunction (the verifiedEvidence-forge). M3 (UST-6vj C2) rewrites the connector map as a
+verification map whose IMAGE is the only carrier of capability.
 
-**Evidence is a generator, not a verdict.** A connector is a map `κ : proof ↦ VerifiedEvidence`, a bundle of
-VERIFIED FACTS `(proof_kind, subject, source_id, facts)` — never an assurance label. The class is a CORE map
-`cls : proof_kind → (a σ-sub-algebra of world-coordinates)`, applied by the verifier: `pow-header-chain ↦`
-external-commitment/order/time, `transparency-log ↦` append-only inclusion+consistency (NOT non-membership),
-`authenticated-map ↦` keyed membership+non-membership, `content-addressed ↦` content-equality/availability,
-otherwise `opaque` ⇒ `INDETERMINATE(unsupported)`. Because `cls` is core-owned, a connector cannot inject a class:
-a `facts` payload carrying `assurance`/`strength`/`trust_domain`/`independent` is rejected at construction
-(`E-EVIDENCE`) — the F.5a.1 "never self-declared" rule, now at the evidence boundary. `transparency-log ≠
-non-membership` is exactly F.3.1/F.5a: inclusion+consistency generate the append-only event, not the `¬∃ rival`
-event, so `cls(transparency-log)` deliberately omits non-membership.
+**Raw evidence is a disjoint union.** `RawEvidence := DirectCryptographicProof ⊔ SignedConnectorReceipt`. The direct
+arm is realized by the proofs the core verifies inline (key-log terminality F.5n, verifiable-map uniqueness F.5k,
+uniqueness attestations F.5j — each checked against consumer-admitted roots). The connector arm is a SIGNED receipt:
+a claim `{version, purpose:"ust:evidence-receipt", domain_shard, active_genesis, genesis_epoch, subject, proof_kind,
+facts, payload_digest?, issued_at}` under an Ed25519 signature over the purpose-wrapped preimage
+`canon({purpose:"ust:evidence-receipt-signature", claim})` — the F.5h π-discipline. The receipt carries FACTS only:
+`facts` bearing `assurance`/`strength`/`trust_domain`/`independent`/`capability`/`attested`/`threshold` are rejected
+(`E-EVIDENCE`) at construction AND at verification — the F.5a.1 "never self-declared" rule at the evidence boundary.
+`issued_at` is a SIGNED assertion, never proven real time (F.2); a temporal capability arises only from the
+proof-kind, never from the stamp.
+
+**The verification map — `VerifyEvidence_C : RawEvidence × Subject × Scope × Config → VerifiedEvidence ⊔ INVALID ⊔
+INDETERMINATE`** — runs seven checks IN ORDER: (1) bounds/shape, total, before any crypto; (2) the signature over
+the purpose-wrapped preimage, `keyId(pub) = key_id = issuer_id`, and the claim's `genesis_epoch` CANONICAL
+(`H_"ust:genesis-epoch"(active_genesis)` — M2 hygiene uniform across every scope-bound object); (3) subject binding —
+the claim's `subject` equals the CONSUMER-chosen subject; (4) scope binding — the claim's
+`(domain_shard, active_genesis, genesis_epoch)` equals the authority scope of the VERIFIED chain; (5) admission —
+the signer is a consumer-admitted connector (`Config.connectors[key_id]`, pinned pub); (6) role — `proof_kind ∈
+allowed_proof_kinds` (B4: a connector admitted for `content-addressed` never contributes order/time); (7) totality —
+malformation/tamper ⇒ structured `INVALID(E-EVIDENCE)`, never a throw; a genuine receipt not admitted FOR THIS
+consumer/scope/subject ⇒ `INDETERMINATE(evidence_unverified)` — absence of admission is not proof of fraud, and it
+earns nothing. Only the image is `VerifiedEvidence` `{evidence_id, authority_scope_id, subject_id, proof_kind,
+verified_facts, issuer_id, trust_domain, basis}`; the runtime witnesses each member in a process-private set (the
+F.5a servedNoFork discipline), and `trust_domain` flows from CONSUMER config, never the receipt.
+
+**Theorem M3 (no capability without verified provenance).** Every evidence value the strong freshness derivation
+consumes lies in `image(VerifyEvidence_C)`: its capabilities are those of a proof-kind that a consumer-admitted
+connector actually SIGNED, over the correct scope and subject. A caller-constructed look-alike is not in the image,
+carries no capability, and lifts no rung — the forge is closed. **B3 attenuation:** no composition step manufactures
+a capability — `Caps(out) ⊆ ⋃ Caps(in)` unless a new `VerifiedEvidence` is admitted. **The class stays a CORE map**
+`cls : proof_kind → (a σ-sub-algebra of world-coordinates)`: `pow-header-chain ↦` external-commitment/order/time,
+`transparency-log ↦` append-only inclusion+consistency (NOT non-membership — exactly F.3.1/F.5a: inclusion+
+consistency generate the append-only event, not the `¬∃ rival` event), `authenticated-map ↦` keyed
+membership+non-membership, `content-addressed ↦` content-equality/availability, otherwise `opaque` ⇒
+`INDETERMINATE(unsupported)`.
 
 **Order is a proof relation, `After(a,b) = {ω : t(a) > t(b)}`.** This event is `ℐ`-measurable only when the
 evidence pins both events into ONE order: (i) the same substrate's total order — `a.position > b.position` at a
@@ -616,12 +644,22 @@ unadmitted (0); a `trust_domain` carried on the evidence is producer-supplied an
 This is the formal content of "strengthened by quorum across INDEPENDENT sources": independence is consumer-defined
 domain-distinctness, not connector count and not a self-declared field.
 
-**Realization.** `κ`/facts-only guard = `verifiedEvidence(...)` (throws `E-EVIDENCE` on a self-declared class);
-`cls` = `evidenceClass(proof_kind)`; `After` = `compareEvidenceOrder(a, b) → proven-after | not-after | unproven`;
+**Realization.** Receipt = `evidenceReceiptClaim` (facts-only ban) + `buildEvidenceReceipt` (purpose-wrapped sign) +
+`evidenceReceiptId` (`H_"ust:evidence-receipt"` over `{claim, sig}` only); `VerifyEvidence_C` =
+`verifyEvidenceReceipt(receipt, {subject, scope, connectors})` (the seven checks) with the direct arm as the inline
+verifiers (F.5j/F.5k/F.5n); the strong-derivation gate = `deriveCheckpointFreshness` admits commitment/anchor only
+through the seam (`trust.connectors`) or as an in-process-witnessed token. The RAW facts shape `verifiedEvidence(...)`
+remains a builder (throws `E-EVIDENCE` on a self-declared class) but its output carries NO capability; `cls` =
+`evidenceClass(proof_kind)`; `After` = `compareEvidenceOrder(a, b) → proven-after | not-after | unproven`;
 `q` = `quorumTrustDomains(list, { domains, threshold }) → { count, domains, met }`.
 
 **Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
-- facts-only (no self-declared class/independence): *"PhA facts-only: connector self-declaring assurance → E-EVIDENCE"*, *"... trust_domain → E-EVIDENCE"*.
+- the seam (image = capability): *"M3 receipt: admitted connector receipt → VerifiedEvidence (verified_facts, consumer trust_domain, basis admitted-connector-receipt)"*, *"M3 receipt: tampered claim (sig over the pre-tamper preimage) → INVALID(E-EVIDENCE)"*, *"M3 receipt: non-canonical genesis_epoch → INVALID(E-EVIDENCE) (M2 hygiene is uniform)"*.
+- admission + role (B4): *"M3 admission: issuer not in consumer connectors → INDETERMINATE(evidence_unverified)"*, *"M3 admission: proof_kind outside allowed_proof_kinds → INDETERMINATE(evidence_unverified) (B4: a content connector never contributes order/time)"*.
+- binding: *"M3 binding: receipt subject ≠ required subject → evidence_unverified"*, *"M3 binding: receipt scope ≠ authority scope → evidence_unverified"*.
+- the forge is closed: *"M3 forge: a caller-minted evidence object cannot earn corroborated (freshness → evidence_unverified)"*, *"M3 forge: a look-alike VerifiedEvidence (correct fields, no provenance) earns nothing"*; token discipline: *"M3 token: a core-verified VerifiedEvidence token is accepted without re-verification (WeakSet witness)"*, *"M3 token: a verified token bound to a DIFFERENT subject is rejected at admission"*.
+- receipt facts-only ban: *"M3 receipt: facts self-declaring assurance/trust_domain/capability → INVALID(E-EVIDENCE) at build AND verify"*.
+- facts-only (raw shape, no self-declared class/independence): *"PhA facts-only: connector self-declaring assurance → E-EVIDENCE"*, *"... trust_domain → E-EVIDENCE"*.
 - `cls`, transparency-log ≠ non-membership: *"PhA class: transparency-log → append-only (NOT non-membership)"*, *"... authenticated-map → keyed non-membership"*, *"... unknown proof-kind → opaque"*.
 - `After` proof relation: *"PhA order: same substrate a.pos>b.pos → proven-after"* / *"... a.pos<b.pos → not-after"* / *"... a.not_before ≥ b.not_after → proven-after"* / *"... b.not_before ≥ a.not_after → not-after"* / *"... two not_after upper bounds alone → unproven"* / *"... cross-substrate positions → unproven"*.
 - `q` domain-cardinality: *"PhA quorum: two sources in one domain → count 1"* / *"... three domains → count 3, threshold 2 met"* / *"... source not in consumer config → not counted"* / *"... self-declared trust_domain on evidence ignored"*.
@@ -711,7 +749,7 @@ has no `attested` branch.
 **Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
 - the conjunction holds ⇒ corroborated: *"PhB all conjuncts (authorized × head∈root × proven-after) → corroborated"*.
 - the ceiling: *"PhB CEILING: corroborated carries anti_equivocation:unverified and is NEVER attested"*.
-- named indeterminacy per missing conjunct: *"PhB commitment NOT proven-after target → INDETERMINATE(order_unproven)"*, *"PhB two not_after upper bounds → unproven → order_unproven"*, *"PhB terminality missing → INDETERMINATE(terminality_unproven)"*, *"PhB commitment not bound to checkpoint id → INDETERMINATE(unavailable)"*, *"PhB unauthorized chain (wrong signer) → INVALID, freshness unverified"*, *"PhB checkpoint active_genesis ≠ target → INVALID(E-GENESIS)"*, *"PhB cold verifier (no root) → INDETERMINATE(authority_unresolved)"*.
+- named indeterminacy per missing conjunct: *"PhB commitment NOT proven-after target → INDETERMINATE(order_unproven)"*, *"PhB two not_after upper bounds → unproven → order_unproven"*, *"PhB terminality missing → INDETERMINATE(terminality_unproven)"*, *"PhB commitment not bound to checkpoint id → INDETERMINATE(evidence_unverified)"* (M3 — a receipt for a different subject is not admissible evidence here), *"PhB unauthorized chain (wrong signer) → INVALID, freshness unverified"*, *"PhB checkpoint active_genesis ≠ target → INVALID(E-GENESIS)"*, *"PhB cold verifier (no root) → INDETERMINATE(authority_unresolved)"*.
 
 All green at REV 44 (conformance 266/0).
 

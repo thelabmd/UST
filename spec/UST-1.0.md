@@ -416,7 +416,7 @@ publisher-bound values a layer up.)
   `ust:node`→`left_hash_ascii || right_hash_ascii` (both `sha256:`-prefixed, concatenated); `ust:seed`→
   `utf8(canon([content_hash,…]))`. Distinct tags make a bytes-equal collision across object kinds impossible. The COMPLETE, authoritative domain set is RENDERED from the reference `REGISTRY` (LAYER 1 drift gate §16 — never hand-maintained, so the enumeration above can never claim a domain the code lacks nor omit one it added):
   <!-- BEGIN spec-sync:hash-domains -->
-`ust:state` | `ust:shard` | `ust:seed` | `ust:keylog` | `ust:leaf` | `ust:node` | `ust:authority-checkpoint` | `ust:checkpoint-map-key` | `ust:checkpoint-map-value` | `ust:name-map-key` | `ust:name-map-value` | `ust:keylog-empty` | `ust:keylog-leaf` | `ust:keylog-node` | `ust:keylog-commit` | `ust:smt-empty` | `ust:smt-node` | `ust:smt-leaf` | `ust:genesis-epoch` | `ust:authority-scope`
+`ust:state` | `ust:shard` | `ust:seed` | `ust:keylog` | `ust:leaf` | `ust:node` | `ust:authority-checkpoint` | `ust:checkpoint-map-key` | `ust:checkpoint-map-value` | `ust:name-map-key` | `ust:name-map-value` | `ust:keylog-empty` | `ust:keylog-leaf` | `ust:keylog-node` | `ust:keylog-commit` | `ust:smt-empty` | `ust:smt-node` | `ust:smt-leaf` | `ust:genesis-epoch` | `ust:authority-scope` | `ust:evidence-receipt`
 <!-- END spec-sync:hash-domains -->
   `content_hash = H_state(S)` where
   `S = canon({ust, state})` (the signed content) is the document's UNIQUE reference (chains §9, anchors §11,
@@ -1147,25 +1147,44 @@ Checkpoint freshness (`deriveCheckpointFreshness`) is EARNED, never self-declare
   freshness.
 - **`corroborated`** — a CONJUNCTION: an AUTHORIZED checkpoint chain (§12.3.1) ∧ strict key-log terminality
   (§12.3.3) ∧ a VERIFIED external commitment BOUND to the checkpoint id AND ordered **proven-after** the target's
-  anchor. Both the commitment and the target anchor MUST be of a proof-kind whose CAPABILITY establishes temporal
-  order (`order`/`time`); a class that cannot (e.g. `content-addressed`, `authenticated-map`, unknown) NEVER
-  satisfies the ordering conjunct ⇒ INDETERMINATE (P0-04, external audit — a connector may not exceed its declared
-  power). The order is a PROOF relation (`compareEvidenceOrder`, F.5g), NEVER a wall-clock comparison. This is the
-  CEILING for a single publisher — one publisher cannot prove split-view absence.
+  anchor. The commitment and the target anchor enter ONLY through the EVIDENCE SEAM (below): a SIGNED receipt of a
+  consumer-admitted connector — or a token the seam itself produced — scope-bound to the chain's authority scope
+  (`domain_shard`, `active_genesis`, canonical `genesis_epoch`) and subject-bound to the checkpoint id /
+  `target.subject`; anything else ⇒ `INDETERMINATE(evidence_unverified)` — a caller-minted facts object earns
+  nothing (M3; closes the rc.35 round-2 verifiedEvidence-forge). Both MUST be of a proof-kind whose CAPABILITY
+  establishes temporal order (`order`/`time`); a class that cannot (e.g. `content-addressed`, `authenticated-map`,
+  unknown) NEVER satisfies the ordering conjunct ⇒ INDETERMINATE (P0-04, external audit — a connector may not
+  exceed its declared power). The order is a PROOF relation (`compareEvidenceOrder`, F.5g), NEVER a wall-clock
+  comparison. This is the CEILING for a single publisher — one publisher cannot prove split-view absence.
 - **`attested`** — `corroborated` ∧ an INDEPENDENT anti-equivocation proof over THIS checkpoint (§12.3.4 map
   uniqueness OR witness quorum; a §12.2a substrate-anchored key-log head is the same top rung by a different
   basis). Uniqueness on an unauthorized/unbound checkpoint never reaches here, so `attested ⇒ corroborated ∧
   independent-uniqueness`; uniqueness ALONE never earns `attested`.
 
-The external commitment is a **`VerifiedEvidence`** record whose fields are (generated from the code `REGISTRY` —
-`tools/gen-spec-registry.mjs`):
+**The evidence seam (M3).** External facts reach a strong rung ONLY as an **evidence receipt**: a claim signed by
+the connector's key over the purpose-wrapped preimage `canon({purpose:"ust:evidence-receipt-signature", claim})`.
+The claim's fields are (generated from the code `REGISTRY` — `tools/gen-spec-registry.mjs`):
+<!-- BEGIN spec-sync:evidence-receipt-fields -->
+required `version`, `purpose`, `domain_shard`, `active_genesis`, `genesis_epoch`, `subject`, `proof_kind`, `facts`, `issued_at`; optional `payload_digest`
+<!-- END spec-sync:evidence-receipt-fields -->
+`genesis_epoch` MUST be canonical (`H_"ust:genesis-epoch"(active_genesis)`, §12.3.0a); `issued_at` is a SIGNED
+claim, never proven time. The verifier (`verifyEvidenceReceipt`) checks, in order: shape → signature (+
+`keyId(pub) = key_id = issuer_id`) → subject binding → scope binding → **admission** (the signer is in the
+consumer's `trust.connectors`, pinned pub) → **role** (`proof_kind ∈ allowed_proof_kinds` — a connector admitted
+for `content-addressed` never contributes order/time) → totality (malformation/tamper ⇒ `E-EVIDENCE`; a genuine
+receipt not admitted for THIS consumer/scope/subject ⇒ `INDETERMINATE(evidence_unverified)`). Only its output —
+`VerifiedEvidence` `{evidence_id, authority_scope_id, subject_id, proof_kind, verified_facts, issuer_id,
+trust_domain, basis}` — carries capability; `trust_domain` comes from CONSUMER config, never the receipt. The RAW
+facts shape (`verifiedEvidence`, fields below) remains a builder for structuring facts BEFORE signing and carries
+no capability itself:
 <!-- BEGIN spec-sync:verified-evidence-fields -->
 required `proof_kind`, `subject`, `source_id`, `facts`; optional `verifier_id`, `verifier_version`
 <!-- END spec-sync:verified-evidence-fields -->
-A missing required field ⇒ `E-EVIDENCE`. It is **facts-only**: a connector supplies raw `facts` and the CORE derives the evidence CLASS from `proof_kind`
+A missing required field ⇒ `E-EVIDENCE`. Both forms are **facts-only**: a connector supplies raw `facts` and the CORE derives the evidence CLASS from `proof_kind`
 (e.g. `transparency-log` → append-only inclusion+consistency, which is NOT non-membership; only a keyed
 `authenticated-map` proof-kind yields non-membership) — a connector that self-declares the class or independence
-by putting `assurance`, `strength`, `trust_domain`, or `independent` into `facts` ⇒ `E-EVIDENCE`.
+by putting `assurance`, `strength`, `trust_domain`, `independent`, `capability`, `attested`, or `threshold` into
+`facts` ⇒ `E-EVIDENCE`.
 `compareEvidenceOrder(a, b)` returns one of (generated from the code `REGISTRY`):
 <!-- BEGIN spec-sync:evidence-order -->
 `proven-after` | `not-after` | `unproven`
@@ -1181,9 +1200,9 @@ algorithm from §14. Its INVALID codes: `E-MALFORMED`, `E-AUTHORITY` (signer ≠
 `current_key_id` ≠ signer), `E-KEY` (`keyId(next_pub) ≠ next_key_id`), `E-PREV` (`previous_checkpoint` /
 `previous_epoch_final_checkpoint` mismatch), `E-SEQ` (sequence ≠ prev+1, `effective_sequence` ≠ seq+1, or
 epoch-initial sequence mismatch), `E-GENESIS` (checkpoint `active_genesis`/`domain_shard` ≠ the bound target),
-`E-EVIDENCE` (self-declared evidence class). Its INDETERMINATE reasons — **`authority_unresolved`,
-`terminality_unproven`, `order_unproven`, `unavailable`** — are checkpoint-scoped and do NOT widen the §14
-document-verifier's closed four-member reason set (§15).
+`E-EVIDENCE` (self-declared evidence class, or a malformed/tampered evidence receipt). Its INDETERMINATE reasons —
+**`authority_unresolved`, `terminality_unproven`, `order_unproven`, `evidence_unverified`, `unavailable`** — are
+checkpoint-scoped and do NOT widen the §14 document-verifier's closed four-member reason set (§15).
 
 ---
 
@@ -1478,7 +1497,7 @@ Independent re-implementation is expected; the vectors make "verify without trus
 **Signed purposes — canonical set** (generated from `index.mjs` `REGISTRY`; includes the §12.1a `ust:name-no-fork`
 purpose alongside the §12.3 family; kept == code by the `spec-code-sync` gate):
 <!-- BEGIN spec-sync:purposes -->
-`ust:name-no-fork` | `ust:authority-checkpoint` | `ust:authority-checkpoint-signature` | `ust:checkpoint-authority-recovery` | `ust:genesis-epoch-transition` | `ust:checkpoint-uniqueness-attestation`
+`ust:name-no-fork` | `ust:authority-checkpoint` | `ust:authority-checkpoint-signature` | `ust:checkpoint-authority-recovery` | `ust:genesis-epoch-transition` | `ust:checkpoint-uniqueness-attestation` | `ust:evidence-receipt` | `ust:evidence-receipt-signature`
 <!-- END spec-sync:purposes -->
 
 ---
@@ -2125,6 +2144,23 @@ provenance and will be lifted into this ledger when the spec is published.
   active_genesis, genesis_epoch})` — the sole producer of an authority context. Two new hash domains. Enforcement (each
   checkpoint's epoch MUST equal the canonical, closing epoch-split) + the evidence-receipt provenance seam + the unified
   quorum algebra are the next phases (bd `UST-6vj`).
+- **REV 51 (2026-07-15, `rc.36`)** — **authority-layer refactor, phase C1-enforcement + C2 (the evidence seam, M2+M3).**
+  Epoch enforcement landed: every authority checkpoint's `genesis_epoch` MUST equal `H("ust:genesis-epoch",
+  active_genesis)` — a publisher-chosen uniqueness namespace is `E-MALFORMED`, so two rival C0 collide in ONE
+  checkpoint-map slot and cannot both attest (closes **epoch-split**, security-regression `rc35-P0f`). The evidence
+  seam (M3) closes **verifiedEvidence-forge** (`rc35-P0g`): external facts reach `corroborated` ONLY as a SIGNED
+  **evidence receipt** — claim `{version, purpose:"ust:evidence-receipt", domain_shard, active_genesis, genesis_epoch,
+  subject, proof_kind, facts, payload_digest?, issued_at}` signed over the purpose-wrapped preimage — verified by
+  `verifyEvidenceReceipt` in seven ordered checks (shape → signature → subject → scope → ADMISSION against the
+  consumer's `trust.connectors` → ROLE `allowed_proof_kinds` (B4) → totality). Only the seam's output
+  (`VerifiedEvidence`, process-witnessed) carries capability; `trust_domain` flows from consumer config, never the
+  receipt; the receipt is facts-only (extended ban incl. `capability`/`attested`/`threshold`). `deriveCheckpointFreshness`
+  admits commitment/anchor exclusively through the seam; new checkpoint INDETERMINATE reason `evidence_unverified`;
+  `target.subject` binds the anchor. New: hash domain `ust:evidence-receipt`, purposes `ust:evidence-receipt(-signature)`,
+  `authorityScopeId` (the ONE canonical scope id both context and evidence derive). F.5g rewritten around
+  `VerifyEvidence_C` (formal model, in lockstep). Gates: conformance 348/0, arc 50/0 (incl. forge/admission/role
+  vectors), model 111/111, security 23/0, parity (new `evidence-receipt` capability). Legacy `verifiedEvidence()`
+  remains a raw facts BUILDER with no capability; connector receipt-emission is the C4 follow-up (bd `UST-6vj`).
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the
