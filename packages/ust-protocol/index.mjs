@@ -1578,8 +1578,15 @@ export function noEventBacking(claimWindow, streamResult, frames) {
   if ([w0, w1, i0, i1].some((x) => x === null) || !(i0 <= w0 && i1 >= w1)) return 'publisher-asserted';   // the verified interval must CONTAIN the window
   if (streamResult.complete !== 'complete') return 'no-deletion-only';   // chain-consistent: no-deletion only, an omitted slot could still hide the event
   if (!Array.isArray(frames)) return 'observation-unchecked';            // complete, but no frames to confirm the publisher actually observed each slot
-  const blind = frames.some((f) => { const e = ustToEpoch(f?.state?.id?.ust_id); return e !== null && e >= w0 && e <= w1 && Object.values(f?.state?.data || {}).some((p) => p && p.kind === 'absence' && p.value?.reason === 'unreachable'); });
-  return blind ? 'observation-gap' : 'completeness-backed';              // a blind (unreachable) covered slot means a hidden event is not impossible
+  // OBSERVATIONAL coverage + SUBJECT binding (rc.35 audit P2 — GPT + agent). Every covered slot must POSITIVELY observe
+  // the claim's subject: a captured/computed partition, OR an absence that OBSERVED non-occurrence (reason `no-event` /
+  // `unchanged`). ANY OTHER absence (`unreachable`, `source-timeout`, … — reason-AGNOSTIC, since the recommended set is
+  // open) is BLIND — the publisher saw nothing, a hidden event is not impossible. And when `claimWindow.subject` is set,
+  // the observation must be OF that subject: a `complete` stream about partition X does not, alone, deny an event about Y.
+  const POSITIVE = new Set(['no-event', 'unchanged']);
+  const observedSubject = (f, subj) => Object.entries(f?.state?.data || {}).some(([name, p]) => (subj === undefined || name === subj) && p && (p.kind === 'captured' || p.kind === 'computed' || (p.kind === 'absence' && POSITIVE.has(p.value?.reason))));
+  const gap = frames.some((f) => { const e = ustToEpoch(f?.state?.id?.ust_id); return e !== null && e >= w0 && e <= w1 && !observedSubject(f, claimWindow.subject); });
+  return gap ? 'observation-gap' : 'completeness-backed';                // a blind slot OR one that never observed the subject breaks the no-event guarantee
 }
 
 // ─── §S6/F7 — the CONFORMANCE boundary is raw bytes. `verify(JSON.parse(x))` can't satisfy §6 because JSON.parse

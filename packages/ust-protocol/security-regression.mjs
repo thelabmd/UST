@@ -144,6 +144,14 @@ sec('rc35-P1', 'UST-b64', 'a malformed uniqueness attestation (non-string leaf) 
   try { return P.verifyCheckpointUniqueness([{ claim: { purpose: 'ust:checkpoint-uniqueness-attestation', domain_shard: D, genesis_epoch: 'sha256:' + 'cd'.repeat(32), sequence: '0', checkpoint: cpId, as_of: 1 }, issuer_id: 'x', sig: { alg: 'Ed25519', pub: 'AA', sig: 'BB' } }], { domain_shard: D, genesis_epoch: 'sha256:' + 'cd'.repeat(32), sequence: '0', checkpoint: cpId, threshold: 1 }).attested === false; } catch { return false; }
 });
 
+sec('rc35-P2', 'UST-b64', 'no-event with a blind slot (any non-positive reason) OR subject-mismatch is NOT completeness-backed', () => {
+  const iv = { from: 'ust:20260628.10', to: 'ust:20260628.13' }, sr = { complete: 'complete', interval: iv };
+  const blind = [{ state: { id: { ust_id: 'ust:20260628.11' }, data: { q: { kind: 'absence', value: { reason: 'source-timeout' } } } } }];
+  const mism = [{ state: { id: { ust_id: 'ust:20260628.11' }, data: { weather: { kind: 'captured', value: { t: '20' } } } } }];
+  return P.noEventBacking({ from: 'ust:20260628.10', to: 'ust:20260628.12' }, sr, blind) !== 'completeness-backed'
+    && P.noEventBacking({ from: 'ust:20260628.10', to: 'ust:20260628.12', subject: 'quake' }, sr, mism) !== 'completeness-backed';
+});
+
 // ─── report ────────────────────────────────────────────────────────────────────────────────────
 console.log('\n  rc.33 audit — security regression (Phase 0, epic UST-1o6): SECURE-expectation gate');
 for (const [s, id, bd, d] of rows) console.log(s + '  ' + id.padEnd(8) + bd.padEnd(9) + d);
