@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 59 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 60 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -197,18 +197,33 @@ export const genesisEpoch = (activeGenesis) => H('ust:genesis-epoch', activeGene
 // canon({domain, active_genesis, genesis_epoch}) triple was redundant (all three functions of contentHash) and
 // weaker (bound 3 fields). `genesis_epoch` survives only as diagnostic metadata / the legacy wire field.
 export const authorityScopeId = (activeGenesis) => H('ust:authority-scope', activeGenesis);
+
+// ─── K3 (rc.37, UST-znh) — OPAQUE HANDLE REGISTRY. The topology rule: no public API past the first level accepts a
+//     caller-NAMED `Verified*` object. A handle is a frozen value MINTED only inside this module and registered in a
+//     module-private brand; downstream requires the brand, so a caller cannot construct one, serialize it, or rebuild
+//     it from JSON. Four kinds: 'genesis' (VerifiedAuthorityContext), 'chain' (verified checkpoint chain +
+//     PinnedCheckpointState), 'evidence' (image of VerifyEvidence_C), 'predicate-graph' (the proven atoms the
+//     assembler reads). The round-2 WeakSet brand generalized to EVERY verified object — the runtime witness of
+//     image-membership. `isVerifiedHandle(kind, x)` is the ONLY exported reader (a boolean; never a constructor).
+const HANDLE_BRAND = new WeakSet(), HANDLE_KIND = new WeakMap();
+const mintHandle = (kind, obj) => { const h = Object.freeze(obj); HANDLE_BRAND.add(h); HANDLE_KIND.set(h, kind); return h; };
+const isHandle = (kind, x) => x !== null && typeof x === 'object' && HANDLE_BRAND.has(x) && HANDLE_KIND.get(x) === kind;
+export const isVerifiedHandle = (kind, x) => isHandle(kind, x);   // consumers may TEST provenance; they can never MINT it
+
 // M2 — the SOLE producer of an authority SCOPE. verifyGenesis (§2.1 design record): verify the doc, then DERIVE the
 // immutable scope {domain, active_genesis, genesis_epoch, scope_id}. Returns null iff the genesis does not verify as a
 // self-signed class:"genesis"; otherwise the context every checkpoint/uniqueness/recovery predicate is a function of.
+// K3: the returned context is a BRANDED, frozen GenesisHandle — the chain verifier requires the brand (a caller-shaped
+// look-alike is rejected, closing round-3 P0-1).
 export function verifiedGenesisContext(genesis) {
   const roots = resolveCheckpointRoots(genesis);                                   // P0-2: verifies class:genesis + self-sig
   if (!roots) return null;
   const active_genesis = contentHash(genesis), domain = genesis.state.id.domain_shard;
   const genesis_epoch = genesisEpoch(active_genesis);                                // diagnostic / legacy wire only
   const scope_id = authorityScopeId(active_genesis);                                 // K2: scope binds the whole genesis
-  return { scope_id, domain, active_genesis, genesis_epoch,
+  return mintHandle('genesis', { scope_id, domain, active_genesis, genesis_epoch,
     checkpoint_authority: roots.genesisAuthority,
-    ...(roots.recoveryKeys ? { recoveryKeys: roots.recoveryKeys, recoveryThreshold: roots.recoveryThreshold } : {}) };
+    ...(roots.recoveryKeys ? { recoveryKeys: roots.recoveryKeys, recoveryThreshold: roots.recoveryThreshold } : {}) });
 }
 export const buildKeyLogEntry = (id, time, keyOp, prev) =>                         // §12.2 add|rotate|revoke
   buildState({ ...id, class: 'key' }, time, { key_op: { kind: 'captured', value: keyOp } }, { prev });
@@ -545,7 +560,7 @@ export function verify(doc, opts = {}) {
     // axiom, applied BEFORE assembly — never a hidden boolean inside it) and hands the SEAM VERDICTS to
     // deriveAssurance; the lattice IS the machine (no second inline tier formula).
     const idVerdict = (identity.strength === 'consumer-override' && nameAuthoritative) ? { ...identity, strength: 'authoritative' } : identity;
-    const report = deriveAssurance({ identity: idVerdict, anchor: doc.proof !== undefined ? { inclusion: timeField.inclusion === true, time: timeField.strength } : undefined });
+    const report = deriveAssurance(provePredicates({ identity: idVerdict, anchor: doc.proof !== undefined ? { inclusion: timeField.inclusion === true, time: timeField.strength } : undefined }));
     const assurance = report.strength;
     const tier = report.tier;
     // §3.1/F.5b DOWNGRADE RESISTANCE — the symmetric floor to requireAuthoritative. A consumer requiring TOP
@@ -771,9 +786,8 @@ export function buildEvidenceReceipt(fields, privKeyObj, issuerPubB64url) {
   return { claim, issuer_id: keyId(issuerPubB64url), sig: { alg: 'Ed25519', key_id: keyId(issuerPubB64url), pub: issuerPubB64url, sig } };
 }
 export const evidenceReceiptId = (r) => H('ust:evidence-receipt', canon({ claim: r.claim, sig: r.sig }));
-// The in-process witness that VerifyEvidence_C produced a value (M3 / design §2.3): membership here IS the runtime
-// representation of a genuinely verified receipt. Portability = the signed receipt; safety = this token.
-const VERIFIED_EVIDENCE = new WeakSet();
+// K3: a VerifiedEvidence value is a branded 'evidence' handle (the M3 witness that VerifyEvidence_C produced it) —
+// portability = the signed receipt, safety = the brand.
 // VerifyEvidence_C — the ONLY producer of VerifiedEvidence. Seven checks IN ORDER (M3.2): bounds/shape → signature →
 // subject binding → scope binding → admission (consumer connectors) → role (allowed_proof_kinds, B4) → total.
 // Tamper/malformation ⇒ INVALID(E-EVIDENCE); not-admitted-for-THIS-consumer/scope/subject ⇒ INDETERMINATE
@@ -798,18 +812,17 @@ export function verifyEvidenceReceipt(receipt, { subject, scope = {}, connectors
     const conn = connectors?.[s.key_id];
     if (!conn || conn.pub !== s.pub) return unv('issuer is not a consumer-admitted connector (admission, M3.2/5)');
     if (!Array.isArray(conn.allowed_proof_kinds) || !conn.allowed_proof_kinds.includes(c.proof_kind)) return unv(`connector is not admitted for proof_kind '${c.proof_kind}' (role, M3.2/6 — B4)`);
-    const evidence = Object.freeze({ evidence_id: evidenceReceiptId(receipt),
+    const evidence = mintHandle('evidence', { evidence_id: evidenceReceiptId(receipt),
       authority_scope_id: authorityScopeId(scope.active_genesis),                     // K2: scope = H(tag, contentHash(g))
       subject_id: c.subject, proof_kind: c.proof_kind, verified_facts: Object.freeze({ ...c.facts }), issuer_id: s.key_id,
       ...(conn.trust_domain !== undefined ? { trust_domain: conn.trust_domain } : {}), basis: 'admitted-connector-receipt' });
-    VERIFIED_EVIDENCE.add(evidence);
     return { result: 'VALID', evidence };
   } catch (e) { return { result: 'INVALID', error: 'E-EVIDENCE', detail: 'receipt verification threw: ' + (e?.message || e) }; }   // M3.2/7 — total
 }
 // Freshness-side admission: a pre-verified token re-checks only its BINDING (scope + subject, never the crypto);
 // a raw {claim, sig} receipt goes through the full seam; anything else is the forge and earns nothing.
 function admitFreshnessEvidence(x, subject, scope, trust) {
-  if (x && typeof x === 'object' && VERIFIED_EVIDENCE.has(x))
+  if (isHandle('evidence', x))
     return x.authority_scope_id === authorityScopeId(scope.active_genesis) && x.subject_id === subject
       ? { evidence: x } : { detail: 'core-verified evidence is bound to a different scope/subject' };
   if (x && typeof x === 'object' && x.claim && x.sig) { const r = verifyEvidenceReceipt(x, { subject, scope, connectors: trust?.connectors }); return r.evidence ? { evidence: r.evidence } : { detail: r.detail }; }
@@ -1230,7 +1243,11 @@ export function verifyAuthorityCheckpointChain(chain, { genesis, context, genesi
   // C1 (M2) — a VerifiedAuthorityContext (the verifiedGenesisContext seam output) is the PREFERRED downstream root:
   // scope + authority + recovery keys all come from ONE verified derivation, never re-read from raw genesis fields.
   let authority_root = 'consumer-pin', ctxGenesis = null;
-  if (context && typeof context === 'object' && context.scope_id && context.checkpoint_authority) {
+  // K3 — the context root MUST be a BRANDED GenesisHandle (minted only by verifiedGenesisContext). A caller-shaped
+  // {scope_id, checkpoint_authority} object is NOT a handle, so it is ignored → round-3 P0-1 (forged verified-context)
+  // is closed at the type level, not by comparing extra fields. A non-handle object passed as `context` is rejected.
+  if (context !== undefined) {
+    if (!isHandle('genesis', context)) return { result: 'INVALID', error: 'E-AUTHORITY', detail: 'context is not a verified GenesisHandle (K3 — a caller-shaped context cannot root a chain; use verifiedGenesisContext)' };
     genesisAuthority = context.checkpoint_authority; ctxGenesis = context.active_genesis; authority_root = 'verified-context';
     if (context.recoveryKeys && recoveryKeys === undefined) { recoveryKeys = context.recoveryKeys; recoveryThreshold = recoveryThreshold ?? context.recoveryThreshold; }
   } else if (genesis) { const gr = resolveCheckpointRoots(genesis); if (gr?.genesisAuthority) { genesisAuthority = gr.genesisAuthority; authority_root = 'genesis'; } if (gr?.recoveryKeys && recoveryKeys === undefined) { recoveryKeys = gr.recoveryKeys; recoveryThreshold = recoveryThreshold ?? gr.recoveryThreshold; } }
@@ -1333,7 +1350,12 @@ export function verifyAuthorityCheckpointChain(chain, { genesis, context, genesi
   }
   const lb = chain[chain.length - 1].body, lca = lb.checkpoint_authority || {};
   const activeAuthority = (lca.next_key_id !== undefined) ? { key_id: lca.next_key_id, pub: lca.next_pub, effective_sequence: lca.effective_sequence } : prev.authority;
-  return { result: 'VALID', head: prev.id, length: String(chain.length), sequence: lb.sequence, active_genesis: lb.active_genesis, keylog: lb.keylog, activeAuthority, authority_root };
+  // K3 — a VALID chain also mints a branded CheckpointChainHandle carrying the full PinnedCheckpointState (§5 of the
+  // calculus): the ONLY admissible mid-chain cold-start root besides a genesis (K5 requires the brand, closing the
+  // scope-free-pin round-3 P0-2). `pin` is a scoped snapshot, never a bare key.
+  const pin = mintHandle('chain', { scope_id: authorityScopeId(lb.active_genesis), checkpoint_id: prev.id, sequence: lb.sequence,
+    authority_for_next: activeAuthority, keylog_size: lb.keylog?.length, keylog_root: lb.keylog?.root, keylog_head: lb.keylog?.head });
+  return { result: 'VALID', head: prev.id, length: String(chain.length), sequence: lb.sequence, active_genesis: lb.active_genesis, keylog: lb.keylog, activeAuthority, authority_root, pin };
 }
 
 // ─── #76 Phase C — CHECKPOINT UNIQUENESS (independent anti-equivocation). `attested` needs a `¬∃ rival at
@@ -1624,7 +1646,11 @@ export function capAssurance(state, ceiling) {
 //     step manufactures a capability). Runs strictly AFTER the §14 integrity floor: an INVALID document never reaches
 //     assembly, so integrity is 'valid' by position, not by parameter (Reach_C: the verifier only emits tuples whose
 //     coordinates were each earned by a predicate; the confinement property is pinned in conformance, Phase V).
-export function deriveAssurance({ identity, freshness, anchor, evidence = [] } = {}) {
+// C3/K3 — provePredicates maps SEAM VERDICTS (resolveAuthority / deriveCheckpointFreshness / verifyAnchor results,
+// plus image('evidence') handles) to the proven-atom strength coordinates and mints a branded PREDICATE-GRAPH handle.
+// It is the ONLY producer of that handle. The seam verdicts it reads are produced by the verifiers, never by a caller
+// label. (K4/K7: the kernel calls this over verdicts it derived from RAW inputs; a caller cannot reach it with fakes.)
+export function provePredicates({ identity, freshness, anchor, evidence = [] } = {}) {
   const verified = identity?.status === 'verified';                                  // 'suspect' (pre-compromise window) never name-binds — mirrors §14 exactly
   const idStr = !verified ? 'self-asserted'
     : identity.strength === 'authoritative' ? 'authoritative'
@@ -1634,10 +1660,16 @@ export function deriveAssurance({ identity, freshness, anchor, evidence = [] } =
     : identity?.freshness === 'fresh' ? 'fresh' : 'unverified';                       // fresh = the single-view §12.2a rung carried by the identity resolution
   const tmStr = anchor?.inclusion === true && anchor?.time === 'anchored' ? 'anchored' : 'unproven';
   const support = [...new Set((Array.isArray(evidence) ? evidence : [])
-    .filter((e) => e && typeof e === 'object' && VERIFIED_EVIDENCE.has(e))            // provenance-verified only (M3)
+    .filter((e) => isHandle('evidence', e))                                          // K3: capability only from image(VerifyEvidence_C) (B3)
     .flatMap((e) => evidenceCaps(e.proof_kind)))].sort();
-  const strength = Object.freeze(assuranceState({ integrity: 'valid', identity: idStr, freshness: frStr, time: tmStr }));
-  return Object.freeze({ strength, support: Object.freeze(support), tier: projectTier(strength) });
+  return mintHandle('predicate-graph', { atoms: Object.freeze({ integrity: 'valid', identity: idStr, freshness: frStr, time: tmStr }), support: Object.freeze(support) });
+}
+// The assembler. Takes ONLY a branded PredicateGraph (K3 — a caller-shaped {identity:'authoritative'} is NOT a graph,
+// so no coordinate lifts: round-3 P0-4 closed at the type level). Emits the frozen assurance report.
+export function deriveAssurance(graph) {
+  if (!isHandle('predicate-graph', graph)) return Object.freeze({ error: 'E-ASSURANCE', detail: 'deriveAssurance requires a verified PredicateGraph handle (K3 — build it with provePredicates over seam verdicts; a caller-shaped object earns nothing)' });
+  const strength = Object.freeze(assuranceState({ integrity: 'valid', ...graph.atoms }));
+  return Object.freeze({ strength, support: graph.support, tier: projectTier(strength) });
 }
 
 // ─── #oy8 CANONICAL REGISTRY — the SINGLE SOURCE OF TRUTH for the protocol's machine-checkable STRING SETS. The spec's

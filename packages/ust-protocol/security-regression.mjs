@@ -246,6 +246,23 @@ sec('rc35-P1d', 'UST-6vj', 'a keylogEntries witness above the §13 ceiling (257)
   return r.result === 'INVALID' && r.error === 'E-BOUNDS';
 });
 
+// rc.36 round-3 (K3 opaque handles) — forged verified-context: the chain 'context' branch accepted ANY
+// {scope_id, checkpoint_authority} shape, so a caller minted a verified-context and rooted an arbitrary chain
+// (round-3 P0-1). Post-K3 the context MUST be a branded GenesisHandle (minted only by verifiedGenesisContext).
+sec('r3-P0-1', 'UST-znh', 'a caller-shaped context (not a branded GenesisHandle) cannot root a checkpoint chain', () => {
+  const AG = 'sha256:' + '22'.repeat(32), klc = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);
+  const c0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: P.genesisEpoch(AG), sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog: { root: klc.root, length: klc.length, head: klc.head } }), K0.priv, K0.pub);
+  const forged = { scope_id: P.authorityScopeId(AG), active_genesis: AG, domain: D, genesis_epoch: P.genesisEpoch(AG), checkpoint_authority: { key_id: K0.key_id, pub: K0.pub } };
+  return P.verifyAuthorityCheckpointChain([c0], { context: forged }).result !== 'VALID';
+});
+
+// rc.36 round-3 (K3) — forged assembler input: deriveAssurance trusted caller-shaped identity/freshness/anchor by
+// shape (round-3 P0-4). Post-K3 it takes ONLY a branded PredicateGraph; a shaped object earns no coordinate.
+sec('r3-P0-4', 'UST-znh', 'deriveAssurance rejects a caller-shaped verdict object (only a branded PredicateGraph lifts a coordinate)', () => {
+  const forged = P.deriveAssurance({ identity: { status: 'verified', strength: 'authoritative' }, freshness: { result: 'VALID', keylog_freshness: 'attested' }, anchor: { inclusion: true, time: 'anchored' } });
+  return forged.error === 'E-ASSURANCE' && P.isVerifiedHandle('predicate-graph', { atoms: {}, support: [] }) === false;
+});
+
 // ─── report ────────────────────────────────────────────────────────────────────────────────────
 console.log('\n  rc.33 audit — security regression (Phase 0, epic UST-1o6): SECURE-expectation gate');
 for (const [s, id, bd, d] of rows) console.log(s + '  ' + id.padEnd(8) + bd.padEnd(9) + d);

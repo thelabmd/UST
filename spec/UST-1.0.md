@@ -2294,6 +2294,15 @@ provenance and will be lifted into this ledger when the spec is published.
   namespace by choosing `domain`/`genesis_epoch` because they are not in the preimage. `authorityScopeId` is now a
   single-input function; `genesis_epoch` survives as diagnostic/legacy-wire only. §12.3.0a + F.5g.0 updated in
   lockstep. Gates: conformance 377/0, model guard green.
+- **REV 60 (2026-07-15, `rc.37` line)** — **kernel phase K3: four opaque handles (topology enforced).** A module-
+  private brand registry mints frozen verified objects (`genesis`, `chain`, `evidence`, `predicate-graph`); no
+  exported constructor, not serializable, not rebuildable from JSON. `verifiedGenesisContext` returns a branded
+  `GenesisHandle` and the chain verifier REQUIRES the brand — a caller-shaped context is `E-AUTHORITY` (round-3 P0-1
+  closed at the type level, not by comparing fields). `deriveAssurance` takes ONLY a branded `PredicateGraph`
+  (minted by the new `provePredicates` over seam verdicts); a shaped `{identity:'authoritative'}` earns nothing
+  (round-3 P0-4 closed). A VALID chain mints a `CheckpointChainHandle` carrying the full scoped `PinnedCheckpointState`
+  (the K5 cold-start root). `isVerifiedHandle(kind,x)` is the only reader — consumers TEST provenance, never MINT it.
+  security-regression r3-P0-1 + r3-P0-4. Gates: conformance 382/0, security 31/0, model guard green.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

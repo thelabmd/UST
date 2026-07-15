@@ -674,6 +674,10 @@ console.log('\n═════════════════════�
     const Cx = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: P.genesisEpoch(AGx), sequence: '0', active_genesis: AGx, current_key_id: K0.key_id, keylog: { root: kl.root, length: kl.length, head: kl.head } }), K0.priv, K0.pubB64);
     return P.verifyAuthorityCheckpointChain([Cx], { context: ctx });
   })()));
+  // K3 — the context MUST be a branded GenesisHandle. A caller-shaped look-alike (round-3 P0-1 forge) is rejected.
+  check('K3 forged context (caller-shaped {scope_id, checkpoint_authority}) → INVALID(E-AUTHORITY), not verified-context', (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C0], { context: { scope_id: ctx.scope_id, active_genesis: ctx.active_genesis, domain: D, genesis_epoch: ctx.genesis_epoch, checkpoint_authority: { key_id: K0.key_id, pub: K0.pubB64 } } })));
+  check('K3 the genuine context IS a branded handle (isVerifiedHandle true); the look-alike is not', P.isVerifiedHandle('genesis', ctx) === true && P.isVerifiedHandle('genesis', { ...ctx }) === false);
+  check('K3 a VALID chain mints a branded CheckpointChainHandle (pin) carrying the scoped snapshot', (r => P.isVerifiedHandle('chain', r.pin) && r.pin.scope_id === P.authorityScopeId(P.contentHash(genCA)) && r.pin.checkpoint_id === r.head)(P.verifyAuthorityCheckpointChain([C0], { context: ctx })));
 }
 
 // ─── #76 Phase B — publisher-checkpoint CORROBORATED freshness (authorized chain × head∈root × proven-after target).
@@ -981,26 +985,31 @@ console.log('\n═════════════════════�
   check('M1.1 EVIDENCE_CAPS_UNIVERSE: |Caps| = 8, single-sourced from EVIDENCE_CAPS (support ≠ strength coordinate)', P.EVIDENCE_CAPS_UNIVERSE.length === 8 && ['pow-header-chain', 'transparency-log', 'authenticated-map', 'content-addressed', 'rfc3161-tsa'].every((k) => P.evidenceCaps(k).every((c) => P.EVIDENCE_CAPS_UNIVERSE.includes(c))));
   check('M1.1 support is ⊆-ordered, not a chain: transparency-log vs authenticated-map caps are incomparable sets', (() => { const a = P.evidenceCaps('transparency-log'), b = P.evidenceCaps('authenticated-map'); return !a.every((c) => b.includes(c)) && !b.every((c) => a.includes(c)); })());
 
-  // ── C3 (UST-6vj, M1.2) — deriveAssurance: THE one assembler. Strength from SEAM VERDICTS, support from
-  //    image(VerifyEvidence_C) only; pure/total/frozen. (The full Reach_C confinement sweep is Phase V.)
-  check('C3 deriveAssurance: a bare strength LABEL without a verified status earns nothing (no caller labels)',
-    (r => r.strength.identity === 'self-asserted' && r.tier === 'LIGHT')(P.deriveAssurance({ identity: { strength: 'authoritative' } })));
-  check('C3 deriveAssurance: the identity seam verdict maps by fixed rules (authoritative/verified → authoritative)',
-    (r => r.strength.identity === 'authoritative' && r.tier === 'HIGH')(P.deriveAssurance({ identity: { strength: 'authoritative', status: 'verified' } })));
-  check('C3 deriveAssurance: suspect status never name-binds (mirrors §14)',
-    (r => r.strength.identity === 'self-asserted')(P.deriveAssurance({ identity: { strength: 'authoritative', status: 'suspect' } })));
-  check('C3 deriveAssurance: freshness rung only from a VALID freshness verdict, never a label',
-    (() => { const lie = P.deriveAssurance({ identity: { strength: 'corroborated', status: 'verified' }, freshness: { keylog_freshness: 'attested' } });
-      const ok = P.deriveAssurance({ identity: { strength: 'corroborated', status: 'verified' }, freshness: { result: 'VALID', keylog_freshness: 'attested' } });
+  // ── C3/K3 — deriveAssurance: THE one assembler, takes ONLY a branded PredicateGraph. provePredicates maps seam
+  //    verdicts → atoms; deriveAssurance projects. Strength from SEAM VERDICTS, support from image(VerifyEvidence_C).
+  const DA = (v) => P.deriveAssurance(P.provePredicates(v));
+  check('K3 deriveAssurance REJECTS a caller-shaped object (not a PredicateGraph) → E-ASSURANCE (round-3 P0-4 closed)',
+    (r => r.error === 'E-ASSURANCE')(P.deriveAssurance({ identity: { status: 'verified', strength: 'authoritative' }, freshness: { result: 'VALID', keylog_freshness: 'attested' }, anchor: { inclusion: true, time: 'anchored' } })));
+  check('K3 provePredicates output is a branded handle a caller cannot forge (isVerifiedHandle true; a look-alike false)',
+    P.isVerifiedHandle('predicate-graph', P.provePredicates({})) === true && P.isVerifiedHandle('predicate-graph', { atoms: {}, support: [] }) === false);
+  check('C3 a bare strength LABEL without a verified status earns nothing (no caller labels)',
+    (r => r.strength.identity === 'self-asserted' && r.tier === 'LIGHT')(DA({ identity: { strength: 'authoritative' } })));
+  check('C3 the identity seam verdict maps by fixed rules (authoritative/verified → authoritative)',
+    (r => r.strength.identity === 'authoritative' && r.tier === 'HIGH')(DA({ identity: { strength: 'authoritative', status: 'verified' } })));
+  check('C3 suspect status never name-binds (mirrors §14)',
+    (r => r.strength.identity === 'self-asserted')(DA({ identity: { strength: 'authoritative', status: 'suspect' } })));
+  check('C3 freshness rung only from a VALID freshness verdict, never a label',
+    (() => { const lie = DA({ identity: { strength: 'corroborated', status: 'verified' }, freshness: { keylog_freshness: 'attested' } });
+      const ok = DA({ identity: { strength: 'corroborated', status: 'verified' }, freshness: { result: 'VALID', keylog_freshness: 'attested' } });
       return lie.strength.freshness === 'unverified' && ok.strength.freshness === 'attested'; })());
-  check('C3 deriveAssurance: anchored time requires inclusion === true AND time === anchored from the anchor seam',
-    (() => { const no = P.deriveAssurance({ identity: { strength: 'authoritative', status: 'verified' }, anchor: { inclusion: false, time: 'anchored' } });
-      const yes = P.deriveAssurance({ identity: { strength: 'authoritative', status: 'verified' }, anchor: { inclusion: true, time: 'anchored' } });
+  check('C3 anchored time requires inclusion === true AND time === anchored from the anchor seam',
+    (() => { const no = DA({ identity: { strength: 'authoritative', status: 'verified' }, anchor: { inclusion: false, time: 'anchored' } });
+      const yes = DA({ identity: { strength: 'authoritative', status: 'verified' }, anchor: { inclusion: true, time: 'anchored' } });
       return no.strength.time === 'unproven' && no.tier === 'HIGH' && yes.strength.time === 'anchored' && yes.tier === 'TOP'; })());
   check('C3 support: only image(VerifyEvidence_C) contributes capabilities — a minted look-alike contributes none (B3)',
-    (r => r.support.length === 0)(P.deriveAssurance({ identity: { strength: 'self-asserted', status: 'verified' }, evidence: [{ proof_kind: 'pow-header-chain', verified_facts: {}, basis: 'admitted-connector-receipt' }] })));
+    (r => r.support.length === 0)(DA({ identity: { strength: 'self-asserted', status: 'verified' }, evidence: [{ proof_kind: 'pow-header-chain', verified_facts: {}, basis: 'admitted-connector-receipt' }] })));
   check('C3 deriveAssurance output is frozen (pure value, no post-hoc mutation)',
-    (() => { const r = P.deriveAssurance({}); try { r.tier = 'TOP'; } catch {} try { r.strength.identity = 'authoritative'; } catch {} return r.tier !== 'TOP' && Object.isFrozen(r) && r.strength.identity === 'self-asserted'; })());
+    (() => { const r = DA({}); try { r.tier = 'TOP'; } catch {} try { r.strength.identity = 'authoritative'; } catch {} return r.tier !== 'TOP' && Object.isFrozen(r) && r.strength.identity === 'self-asserted'; })());
 
   // ── V1 (UST-sul, M1.2) — Reach_C CONFINEMENT: over the FULL verdict grid, the assembler emits ONLY tuples whose
   //    every coordinate is earned by ITS OWN seam predicate — and each coordinate is a function of ITS verdict alone
@@ -1021,13 +1030,13 @@ console.log('\n═════════════════════�
     const expTm = (an) => an?.inclusion === true && an?.time === 'anchored' ? 'anchored' : 'unproven';
     let confined = true, coordinateLocal = true;
     for (const id of ids) for (const fr of frs) for (const an of ans) {
-      const r = P.deriveAssurance({ identity: id, freshness: fr, anchor: an });
+      const r = P.deriveAssurance(P.provePredicates({ identity: id, freshness: fr, anchor: an }));
       if (r.strength.identity !== expId(id) || r.strength.freshness !== expFr(fr, id) || r.strength.time !== expTm(an) || r.strength.integrity !== 'valid') confined = false;
       if (r.tier !== P.projectTier(r.strength)) confined = false;                       // the report never carries a tier its own strength does not project
     }
     for (const id of ids) {                                                             // identity is a function of the identity verdict ALONE
-      const base = P.deriveAssurance({ identity: id }).strength.identity;
-      for (const fr of frs) for (const an of ans) if (P.deriveAssurance({ identity: id, freshness: fr, anchor: an }).strength.identity !== base) coordinateLocal = false;
+      const base = P.deriveAssurance(P.provePredicates({ identity: id })).strength.identity;
+      for (const fr of frs) for (const an of ans) if (P.deriveAssurance(P.provePredicates({ identity: id, freshness: fr, anchor: an })).strength.identity !== base) coordinateLocal = false;
     }
     check('V1 Reach_C confinement: 264-combination verdict grid — every coordinate earned by its own predicate, tier = projection', confined);
     check('V1 Reach_C per-coordinate locality: a coordinate is a function of ITS verdict alone (no cross-coordinate lift)', coordinateLocal);
