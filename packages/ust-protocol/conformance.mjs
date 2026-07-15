@@ -758,6 +758,21 @@ console.log('\n═════════════════════�
   check('PhC witness NOT in consumer trustRoots → not admitted', P.verifyCheckpointUniqueness([ua(Wa), ua(Wb)], { domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, trustRoots: { [Wa.key_id]: Wa.pubB64 }, domains, threshold: 2 }).attested === false);
   check('PhC self-declared trust_domain inside the claim → rejected', VU([{ claim: { ...P.checkpointUniquenessClaim({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId }), trust_domain: 'independent-7' }, issuer_id: Wa.key_id, sig: ua(Wa).sig }, ua(Wb)]).attested === false);
   check('PhC uniqueness for a DIFFERENT checkpoint → not admitted (binding)', VU([P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: 'sha256:' + '00'.repeat(32) }, Wa.priv, Wa.pubB64), ua(Wb)]).attested === false);
+
+  // ── M5 (UST-6vj) — ONE QUORUM ALGEBRA: admit → group → count → adjudicate; uniqueness and recovery are instances.
+  const Wd = kp('44'.repeat(32));
+  const roots4 = { ...trustRoots, [Wd.key_id]: Wd.pubB64 }, doms4 = { ...domains, [Wd.key_id]: 'op-d' };
+  const VU4 = (atts) => P.verifyCheckpointUniqueness(atts, { domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, trustRoots: roots4, domains: doms4, threshold: 2 });
+  check('M5 quorum-poison closed: an UNAUTHENTICATED first claim-variant cannot suppress the honest quorum (group AFTER admission)',
+    (r => r.attested === true)(VU4([{ claim: P.checkpointUniquenessClaim({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, as_of: '2026-01-01T00:00:00Z' }), issuer_id: Wa.key_id, sig: { alg: 'Ed25519', key_id: Wa.key_id, pub: Wa.pubB64, sig: 'AA' } }, ua(Wa), ua(Wb)])));
+  check('M5 conflict determinism: two RIVAL claims each reaching quorum → conflict, never first-wins',
+    (r => r.attested === false && r.conflict === true)(VU4([ua(Wa), ua(Wb), P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, observed_map_root: 'sha256:' + 'aa'.repeat(32) }, Wc.priv, Wc.pubB64), P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, observed_map_root: 'sha256:' + 'aa'.repeat(32) }, Wd.priv, Wd.pubB64)])));
+  check('M5 conflict is order-independent (reversed array → same conflict)',
+    (r => r.attested === false && r.conflict === true)(VU4([P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, observed_map_root: 'sha256:' + 'aa'.repeat(32) }, Wd.priv, Wd.pubB64), P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, observed_map_root: 'sha256:' + 'aa'.repeat(32) }, Wc.priv, Wc.pubB64), ua(Wb), ua(Wa)])));
+  check('M5 ValidThreshold uniform: quorumTrustDomains threshold 0 → met:false (never satisfied)',
+    (r => r.met === false)(P.quorumTrustDomains([{ source_id: 'a' }], { domains: { a: 'op-a' }, threshold: 0 })));
+  check('M5 total: a malformed recovery leaf (canon-throwing) admits nothing and never throws',
+    (() => { try { return P.verifyCheckpointRecovery([{ claim: { purpose: 'ust:checkpoint-authority-recovery', domain_shard: D, genesis_epoch: EP, last_accepted_checkpoint: headId, effective_sequence: '1', replacement_authority: { key_id: Wa.key_id, pub: Wa.pubB64 }, junk: undefined }, issuer_id: Wa.key_id, sig: { sig: 'AA', pub: Wa.pubB64 } }], { domain_shard: D, genesis_epoch: EP, last_accepted_checkpoint: headId, effective_sequence: '1', recoveryKeys: roots4, threshold: 2 }).recovered === false; } catch { return false; } })());
 }
 
 // ─── #76/#42 AUTHENTICATED-MAP UNIQUENESS — independent (non-publisher) non-membership via a sparse Merkle map. Same

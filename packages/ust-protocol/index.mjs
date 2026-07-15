@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 53 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 54 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -838,6 +838,10 @@ export function quorumTrustDomains(list, { domains = {}, threshold } = {}) {
     if (dom !== undefined) seen.add(dom);
   }
   const arr = [...seen];
+  // M5 ValidThreshold — uniform across EVERY quorum surface (the rc.35 round-2 sibling of P0-4: threshold ≤ 0 here
+  // made `met: true` from an EMPTY evidence list). A non-positive/non-integer threshold never satisfies a quorum.
+  if (threshold !== undefined && (!Number.isInteger(threshold) || threshold < 1))
+    return { count: arr.length, domains: arr, met: false, detail: 'threshold must be a positive integer (got ' + threshold + ')' };
   return { count: arr.length, domains: arr, ...(threshold !== undefined ? { met: arr.length >= threshold } : {}) };
 }
 
@@ -1154,33 +1158,29 @@ export function buildRecoveryStatement(fields, privKeyObj, issuerPubB64url) {
 }
 export function verifyCheckpointRecovery(statements, { domain_shard, genesis_epoch, last_accepted_checkpoint, effective_sequence, recoveryKeys = {}, threshold = 2 } = {}) {
   if (!Array.isArray(statements) || statements.length === 0) return { recovered: false, detail: 'no recovery statements' };
-  const nKeys = Object.keys(recoveryKeys).length;
-  if (!(Number.isInteger(threshold) && threshold >= 1 && threshold <= nKeys))          // P0-05: 1 ≤ threshold ≤ |recoveryKeys| (threshold=0 is not authorization)
-    return { recovered: false, detail: 'invalid recovery threshold ' + threshold + ' (must be 1..' + nKeys + ')' };
-  // UST-0ol Phase 4 — GROUP distinct valid signers by the canonical claim they signed; NEVER lock onto the first
-  // claim seen. Threshold authorization does NOT provide anti-equivocation: with one Byzantine signer, two conflicting
-  // replacements can each reach threshold. If more than ONE distinct replacement reaches threshold ⇒ CONFLICT (reject,
-  // order-independent). A single equivocating recovery must not silently pick a winner by array position (P0-05).
-  const byClaim = new Map();                                                            // canon(claim) → { replacement, signers:Set }
-  for (const s of statements) {
+  // M5 instance — the recovery quorum is the SAME algebra (admit → group → count → adjudicate): voter = the
+  // genesis-authorized recovery signer, ValidThreshold bounded by |recoveryKeys| (a closed voter set), >1 winning
+  // replacement = CONFLICT never first-wins (P0-05), and a malformed leaf admits nothing instead of throwing
+  // (the rc.35 round-2 recovery-DoS: canon(claim) threw through the whole verification).
+  const r = quorumAdjudicate(statements, { threshold, maxVoters: Object.keys(recoveryKeys).length, admit: (s) => {
     const { claim, issuer_id, sig } = s || {};
-    if (!claim || !issuer_id || !sig || !sig.sig || !sig.pub) continue;
-    if (claim.purpose !== 'ust:checkpoint-authority-recovery') continue;
-    if (claim.domain_shard !== domain_shard || claim.genesis_epoch !== genesis_epoch || claim.last_accepted_checkpoint !== last_accepted_checkpoint) continue;
-    if (String(claim.effective_sequence) !== String(effective_sequence)) continue;      // authorizes ONLY the next checkpoint
+    if (!claim || !issuer_id || !sig || !sig.sig || !sig.pub) return null;
+    if (claim.purpose !== 'ust:checkpoint-authority-recovery') return null;
+    if (claim.domain_shard !== domain_shard || claim.genesis_epoch !== genesis_epoch || claim.last_accepted_checkpoint !== last_accepted_checkpoint) return null;
+    if (String(claim.effective_sequence) !== String(effective_sequence)) return null;   // authorizes ONLY the next checkpoint
     const ra = claim.replacement_authority;
-    if (!ra || !ra.key_id || !ra.pub || keyId(ra.pub) !== ra.key_id) continue;          // replacement well-formed (key_id = keyId(pub))
-    const cc = canon(claim);
+    if (!ra || !ra.key_id || !ra.pub || keyId(ra.pub) !== ra.key_id) return null;       // replacement well-formed (key_id = keyId(pub))
+    const cc = canon(claim);                                                            // may throw on a malformed leaf → the core skips it (total)
     const pub = recoveryKeys[issuer_id];
-    if (!pub || pub !== sig.pub || keyId(sig.pub) !== issuer_id) continue;              // genesis-authorized recovery signer only
-    if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, cc, sig.sig)) continue;
-    let g = byClaim.get(cc); if (!g) { g = { replacement: ra, signers: new Set() }; byClaim.set(cc, g); }
-    g.signers.add(issuer_id);                                                           // one signer counts once per claim
-  }
-  const reached = [...byClaim.values()].filter((g) => g.signers.size >= threshold);
-  if (reached.length === 0) return { recovered: false, detail: 'recovery quorum not met (no claim reached ' + threshold + ' distinct signers)' };
-  if (reached.length > 1) return { recovered: false, conflict: true, detail: 'recovery equivocation: ' + reached.length + ' conflicting replacements each reached threshold' };
-  return { recovered: true, replacement_authority: reached[0].replacement, threshold: String(threshold), signers: [...reached[0].signers] };
+    if (!pub || pub !== sig.pub || keyId(sig.pub) !== issuer_id) return null;           // genesis-authorized recovery signer only
+    if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, cc, sig.sig)) return null;
+    return { key: cc, voter: issuer_id, payload: ra };
+  } });
+  if (r.outcome === 'conflict') return { recovered: false, conflict: true, detail: 'recovery equivocation: ' + r.count + ' conflicting replacements each reached threshold' };
+  if (r.outcome === 'invalid-threshold') return { recovered: false, detail: 'invalid recovery threshold ' + threshold + ' (must be 1..' + Object.keys(recoveryKeys).length + ')' };
+  return r.outcome === 'accepted'
+    ? { recovered: true, replacement_authority: r.payload, threshold: String(threshold), signers: r.voters }
+    : { recovered: false, detail: 'recovery quorum not met (no claim reached ' + threshold + ' distinct signers)' };
 }
 
 // ─── #76 (audit-8) GENESIS-EPOCH TRANSITION — a new genesis epoch must NOT silently reset the authority chain. The
@@ -1341,35 +1341,51 @@ export function buildUniquenessAttestation(fields, privKeyObj, issuerPubB64url) 
   const sig = edSign(null, Buffer.from(canon(claim), 'utf8'), privKeyObj).toString('base64url');
   return { claim, issuer_id: keyId(issuerPubB64url), sig: { alg: 'Ed25519', key_id: keyId(issuerPubB64url), pub: issuerPubB64url, sig } };
 }
+// ─── M5 (UST-6vj) — ONE QUORUM ALGEBRA: admit (authenticate FIRST, total) → group by canon(claim) AFTER admission →
+//     count DISTINCT consumer-resolved voters per group → adjudicate. Uniqueness attestations and recovery statements
+//     are INSTANCES of this core, so the guarantees hold once for both: an unauthenticated element can never poison
+//     the group reference (the rc.35 round-2 quorum-poison: `ref` was locked to the FIRST binding claim BEFORE its
+//     signature was checked, so a garbage-signed variant suppressed the honest quorum); the winner is independent of
+//     iteration order; >1 winning group is CONFLICT/equivocation, never first-wins; malformed input admits nothing
+//     and throws nothing (total). ValidThreshold: integer, 1 ≤ t (≤ |voters| where the voter set is closed).
+function quorumAdjudicate(items, { threshold, maxVoters, admit }) {
+  if (!Number.isInteger(threshold) || threshold < 1 || (maxVoters !== undefined && threshold > maxVoters))
+    return { outcome: 'invalid-threshold', detail: 'threshold must be an integer in 1..' + (maxVoters ?? '∞') + ' (got ' + threshold + ')' };
+  const groups = new Map();                                                             // canon(claim) → { voters:Set, tags:Set, payload }
+  for (const it of Array.isArray(items) ? items : []) {
+    let a; try { a = admit(it); } catch { a = null; }                                   // total: a malformed element admits nothing, never throws
+    if (!a) continue;
+    let g = groups.get(a.key); if (!g) { g = { voters: new Set(), tags: new Set(), payload: a.payload }; groups.set(a.key, g); }
+    g.voters.add(a.voter); if (a.tag !== undefined) g.tags.add(a.tag);
+  }
+  const winners = [...groups.values()].filter((g) => g.voters.size >= threshold);
+  if (winners.length === 0) return { outcome: 'quorum_not_met', detail: 'no claim reached ' + threshold + ' distinct voters (groups: ' + groups.size + ')' };
+  if (winners.length > 1) return { outcome: 'conflict', detail: 'equivocation: ' + winners.length + ' conflicting claims each reached threshold', count: winners.length };
+  const w = winners[0];
+  return { outcome: 'accepted', voters: [...w.voters], tags: [...w.tags], payload: w.payload };
+}
 export function verifyCheckpointUniqueness(attestations, { domain_shard, genesis_epoch, sequence, checkpoint, trustRoots = {}, domains = {}, threshold = 2 } = {}) {
   if (!Array.isArray(attestations) || attestations.length === 0) return { attested: false, detail: 'no attestations' };
-  // P0-4 (rc.35 audit) — a POSITIVE INTEGER quorum. threshold ≤ 0 made `0 distinct domains ≥ 0` earn `attested` from an
-  // EMPTY witness set (the strongest freshness rung for free). No admissible-domain cap needed: the seenDomains ≥ threshold
-  // test already bounds the upper side (you cannot meet a threshold higher than the distinct domains actually present).
-  if (!Number.isInteger(threshold) || threshold < 1) return { attested: false, detail: 'threshold must be a positive integer (got ' + threshold + ')' };
-  let ref = null; const seenDomains = new Set(), seenIssuers = new Set(), witnesses = [];
-  for (const a of attestations) {
-   // P1 (rc.35 audit) — a malformed remote witness statement (e.g. a non-string leaf → canon throws E-CANON) must be
-   // SKIPPED, never propagate a throw through deriveCheckpointFreshness (a denial-of-verifiability). Total, fail-closed.
-   try {
+  // M5 instance — voter = the CONSUMER-resolved trust domain (many issuers in one domain count once); admission =
+  // typed purpose + no self-declared independence + binding + consumer-accepted issuer + strict signature, all
+  // BEFORE any grouping. P0-4: threshold ≥ 1 (0 distinct ≥ 0 earned attested from an empty set).
+  const r = quorumAdjudicate(attestations, { threshold, admit: (a) => {
     const { claim, issuer_id, sig } = a || {};
-    if (!claim || !issuer_id || !sig || !sig.sig || !sig.pub) continue;
-    if (claim.purpose !== 'ust:checkpoint-uniqueness-attestation') continue;            // uniqueness, not bare observation
-    if ('trust_domain' in claim || 'issuer_id' in claim) continue;                      // self-declared independence rejected (P0-2)
-    if (claim.domain_shard !== domain_shard || claim.genesis_epoch !== genesis_epoch || String(claim.sequence) !== String(sequence) || claim.checkpoint !== checkpoint) continue;
-    const cc = canon(claim);
-    if (ref === null) ref = cc; else if (cc !== ref) continue;                          // all witnesses sign the BYTE-IDENTICAL claim
+    if (!claim || !issuer_id || !sig || !sig.sig || !sig.pub) return null;
+    if (claim.purpose !== 'ust:checkpoint-uniqueness-attestation') return null;         // uniqueness, not bare observation
+    if ('trust_domain' in claim || 'issuer_id' in claim) return null;                   // self-declared independence rejected (P0-2)
+    if (claim.domain_shard !== domain_shard || claim.genesis_epoch !== genesis_epoch || String(claim.sequence) !== String(sequence) || claim.checkpoint !== checkpoint) return null;
+    const cc = canon(claim);                                                            // may throw on a malformed leaf → the core skips it (total)
     const root = trustRoots[issuer_id]; const pub = typeof root === 'string' ? root : root?.pub;
-    if (!pub || pub !== sig.pub || keyId(sig.pub) !== issuer_id) continue;              // consumer-accepted issuer only
-    if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, cc, sig.sig)) continue;
-    if (seenIssuers.has(issuer_id)) continue;                                           // one issuer counts once
-    const dom = domains[issuer_id]; if (dom === undefined) continue;                    // consumer-resolved trust domain, else unadmitted
-    seenIssuers.add(issuer_id); seenDomains.add(dom); witnesses.push(issuer_id);
-   } catch { continue; }
-  }
-  return seenDomains.size >= threshold
-    ? { attested: true, basis: 'accepted-witness-quorum', threshold: String(threshold), accepted_witnesses: witnesses, trust_domains: [...seenDomains] }
-    : { attested: false, detail: 'quorum not met: ' + seenDomains.size + ' distinct trust domains < ' + threshold };
+    if (!pub || pub !== sig.pub || keyId(sig.pub) !== issuer_id) return null;           // consumer-accepted issuer only
+    if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, cc, sig.sig)) return null;
+    const dom = domains[issuer_id]; if (dom === undefined) return null;                 // consumer-resolved trust domain, else unadmitted
+    return { key: cc, voter: dom, tag: issuer_id };
+  } });
+  if (r.outcome === 'conflict') return { attested: false, conflict: true, detail: r.detail };   // two rival uniqueness claims each with quorum = equivocation, never first-wins
+  return r.outcome === 'accepted'
+    ? { attested: true, basis: 'accepted-witness-quorum', threshold: String(threshold), accepted_witnesses: r.tags, trust_domains: r.voters }
+    : { attested: false, detail: r.outcome === 'invalid-threshold' ? r.detail : 'quorum not met: no byte-identical claim reached ' + threshold + ' distinct trust domains' };
 }
 
 // ─── #76/#42 AUTHENTICATED-MAP UNIQUENESS — the INDEPENDENT (non-publisher) non-membership coordinate, via a sparse

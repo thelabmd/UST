@@ -846,9 +846,21 @@ coordinate — `fresh` (a recent authoritative fetch), `corroborated` (F.5i: aut
 `attested` (F.5j: ∧ independent uniqueness). No rung silently upgrades another (F.5a.1); each is earned by bringing
 its own coordinate into `ℐ_C`.
 
+**M5 (rc.36) — ONE quorum algebra; uniqueness and recovery are instances.** Every quorum in the model is the same
+four-step function: `Admitted_C(E)` (authenticate + bind FIRST, total — a malformed element admits nothing and
+throws nothing), `Groups_C` (group by `canon(claim)` AFTER admission — the rc.35 round-2 quorum-poison locked the
+group reference to the first BINDING claim before its signature was checked, so a garbage-signed variant suppressed
+the honest quorum), `q_C(g)` (count DISTINCT consumer-resolved voters — trust domains here, recovery signers in
+F.5l), and adjudication: `0` winners → quorum-not-met, `1` → accepted, `>1` → CONFLICT/equivocation — independent of
+iteration order, never first-wins. `ValidThreshold_C(t) := t ∈ ℕ ∧ 1 ≤ t (≤ |voters| when the voter set is closed)`
+holds UNIFORMLY — including the aggregate `quorumTrustDomains` (whose `threshold ≤ 0` previously reported `met` from
+an empty list, the P0-4 sibling).
+
 **Realization.** `checkpointUniquenessClaim`/`buildUniquenessAttestation` (the typed claim `u`),
-`verifyCheckpointUniqueness` (byte-identical claim + consumer-admitted issuers + distinct-`dom_C` quorum), and the
-`attested` branch of `deriveCheckpointFreshness` (checked only after the F.5i corroborated conjunction).
+`verifyCheckpointUniqueness` = the M5 core (`quorumAdjudicate`: admit → group → count → adjudicate) with voter =
+consumer-resolved trust domain, and the `attested` branch of `deriveCheckpointFreshness` (checked only after the
+F.5i corroborated conjunction). `verifyCheckpointRecovery` (F.5l) is the SAME core with voter = genesis-authorized
+recovery signer and a closed voter set.
 
 **Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
 - the conjunction upgrades: *"PhC 2 witnesses, DISTINCT domains → attested (accepted-witness-quorum), anti_equivocation attested"*.
@@ -856,6 +868,7 @@ its own coordinate into `ℐ_C`.
 - `attested ⇒ corroborated`: *"PhC uniqueness on an UNAUTHORIZED checkpoint → INVALID, never attested"*.
 - assertion not observation: *"PhC bare observation (wrong purpose) is NOT uniqueness → not admitted"*.
 - byte-identical claim / consumer-admitted / binding: *"PhC witnesses signing NON-identical claims → mismatches dropped → quorum not met"*, *"PhC witness NOT in consumer trustRoots → not admitted"*, *"PhC self-declared trust_domain inside the claim → rejected"*, *"PhC uniqueness for a DIFFERENT checkpoint → not admitted (binding)"*.
+- the M5 algebra: *"M5 quorum-poison closed: an UNAUTHENTICATED first claim-variant cannot suppress the honest quorum (group AFTER admission)"*, *"M5 conflict determinism: two RIVAL claims each reaching quorum → conflict, never first-wins"*, *"M5 conflict is order-independent (reversed array → same conflict)"*, *"M5 ValidThreshold uniform: quorumTrustDomains threshold 0 → met:false (never satisfied)"*, *"M5 total: a malformed recovery leaf (canon-throwing) admits nothing and never throws"*.
 
 All green at REV 44 (conformance 274/0).
 

@@ -191,6 +191,25 @@ sec('rc35-P0h', 'UST-6vj', 'a signed key-log rewind across checkpoints (shorter/
   return rewind.result !== 'VALID' && rewrite.result !== 'VALID';
 });
 
+// rc.35 round-2 (M5 refactor) — quorum-poison: the canonical group reference was locked to the FIRST binding claim
+// BEFORE its signature/admission was checked, so an attacker prepending a claim VARIANT with a garbage signature
+// suppressed the honest quorum (denial-of-attested). Post-M5 grouping happens AFTER admission; the honest quorum wins.
+sec('rc35-P0i', 'UST-6vj', 'an unauthenticated first claim-variant cannot suppress the honest witness quorum', () => {
+  const EPq = P.genesisEpoch('sha256:' + '55'.repeat(32)), CP = 'sha256:' + 'ce'.repeat(32);
+  const base = { domain_shard: D, genesis_epoch: EPq, sequence: '0', checkpoint: CP };
+  const roots = { [KA.key_id]: KA.pub, [KB.key_id]: KB.pub }, doms = { [KA.key_id]: 'op-a', [KB.key_id]: 'op-b' };
+  const poison = { claim: P.checkpointUniquenessClaim({ ...base, as_of: '2026-01-01T00:00:00Z' }), issuer_id: KA.key_id, sig: { alg: 'Ed25519', key_id: KA.key_id, pub: KA.pub, sig: 'AA' } };
+  const r = P.verifyCheckpointUniqueness([poison, P.buildUniquenessAttestation(base, KA.priv, KA.pub), P.buildUniquenessAttestation(base, KB.priv, KB.pub)], { ...base, trustRoots: roots, domains: doms, threshold: 2 });
+  return r.attested === true;
+});
+
+// rc.35 round-2 (M5) — ValidThreshold must be uniform: quorumTrustDomains accepted threshold ≤ 0 and returned
+// met:true from an EMPTY evidence list (the P0-4 sibling the point-fix missed).
+sec('rc35-P1b', 'UST-6vj', 'quorumTrustDomains with threshold ≤ 0 never reports met', () => {
+  return P.quorumTrustDomains([], { domains: {}, threshold: 0 }).met !== true
+    && P.quorumTrustDomains([{ source_id: 'x' }], { domains: { x: 'd' }, threshold: -1 }).met !== true;
+});
+
 // ─── report ────────────────────────────────────────────────────────────────────────────────────
 console.log('\n  rc.33 audit — security regression (Phase 0, epic UST-1o6): SECURE-expectation gate');
 for (const [s, id, bd, d] of rows) console.log(s + '  ' + id.padEnd(8) + bd.padEnd(9) + d);

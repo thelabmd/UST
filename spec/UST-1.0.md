@@ -1161,6 +1161,14 @@ Two INDEPENDENT (non-publisher) bases prove `¬∃ rival at the coordinate`, bot
   self-declared: a claim that carries its own `trust_domain`/`issuer_id` is REJECTED (P0-2), and a bare-observation
   co-sign is corroboration with the WRONG purpose ⇒ not admitted as uniqueness.
 
+**One quorum algebra (M5).** Every quorum surface (witness uniqueness here, recovery §12.3.2, the
+`quorumTrustDomains` aggregate) runs the SAME four steps: **admit** (authenticate + bind FIRST; a malformed element
+admits nothing and never throws) → **group** by `canon(claim)` AFTER admission (an unauthenticated element can never
+poison the group reference) → **count** distinct consumer-resolved voters per group → **adjudicate**: no group at
+threshold ⇒ not met; exactly one ⇒ accepted; MORE than one ⇒ **conflict/equivocation, rejected** — independent of
+iteration order, never first-wins. `threshold` MUST be an integer ≥ 1 (and ≤ the voter-set size where that set is
+closed, e.g. recovery keys) on EVERY surface — a non-positive threshold never satisfies any quorum.
+
 #### 12.3.5 Freshness ladder — `unverified ⊊ fresh ⊊ corroborated ⊊ attested`
 
 Checkpoint freshness (`deriveCheckpointFreshness`) is EARNED, never self-declared, and reported as a rung:
@@ -2215,6 +2223,18 @@ provenance and will be lifted into this ledger when the spec is published.
   `|Caps|`, `|P(Caps)|`) is RECOMPUTED from the live code structures — the class of error where the model's own
   numbers contradict its own definitions is now machine-caught (negative-tested: an injected wrong count fails the
   gate). Gates: conformance 360/0, model 123/123 + 4 numeric claims, arc regenerated (lat-* now 4-axis).
+- **REV 54 (2026-07-15, `rc.36`)** — **authority-layer refactor, phase M5 (one quorum algebra).** Uniqueness
+  attestations and recovery statements are now INSTANCES of a single core (`quorumAdjudicate`: admit → group → count
+  → adjudicate). Closes **quorum-poison** (`rc35-P0i`): the canonical group reference was locked to the FIRST binding
+  claim BEFORE its signature was checked, so an attacker prepending a garbage-signed claim VARIANT suppressed the
+  honest quorum (denial-of-attested) — grouping now happens strictly AFTER admission. Uniqueness gains CONFLICT
+  determinism (two rival claims each reaching quorum ⇒ equivocation, rejected, order-independent — previously
+  first-claim-wins-by-position); recovery keeps its conflict rule but through the shared core and is now TOTAL (a
+  canon-throwing malformed leaf admits nothing instead of throwing through verification — the round-2 recovery-DoS).
+  `ValidThreshold` (integer ≥ 1, ≤ closed-voter-set size) is UNIFORM — including `quorumTrustDomains`, whose
+  `threshold ≤ 0` previously reported `met` from an empty list (`rc35-P1b`, the P0-4 sibling). §12.3.4 quorum-algebra
+  paragraph; F.5j M5 section in the formal model (in lockstep). Gates: conformance 365/0, model 128/128,
+  security 26/0.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the
