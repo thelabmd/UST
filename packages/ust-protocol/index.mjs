@@ -1509,10 +1509,11 @@ export function verifyStream(frames, { genesis, keylog, checkpoint, cadenceLog, 
 }
 
 // §11.3 #39 — a NO-EVENT claim (a `kind:'absence'` partition, reason 'no-event', carrying the ust_id window {from,to}
-// it covers) is only as strong as the STREAM COMPLETENESS over that window. 'completeness-backed' needs a
-// chain-consistent (or complete) verifyStream whose covering checkpoint interval CONTAINS the claim window; otherwise
-// the negative is only the publisher's UNWITNESSED assertion. The absence DOC still verifies on its own (identity);
-// this answers the SEPARATE question "may I trust that nothing ELSE happened in this window?" — the hard half of a notary.
+// it covers) is only as strong as the STREAM COMPLETENESS over that window. Verdicts: 'completeness-backed' (the
+// window is inside a `complete` interval — no-omission, a hidden event is impossible); 'no-deletion-only' (inside a
+// `chain-consistent` interval — no EMITTED frame was deleted, but an omitted slot could still hide the event, a PARTIAL
+// backing); 'publisher-asserted' (no covering verified interval); 'not-applicable' (no window). The absence DOC still
+// verifies on its own (identity); this answers the SEPARATE "may I trust that nothing ELSE happened?" — a notary's hard half.
 export function noEventBacking(claimWindow, streamResult) {
   if (!claimWindow || claimWindow.from === undefined || claimWindow.to === undefined) return 'not-applicable';
   if (streamResult?.complete !== 'chain-consistent' && streamResult?.complete !== 'complete') return 'publisher-asserted';
@@ -1521,8 +1522,12 @@ export function noEventBacking(claimWindow, streamResult) {
   const iv = streamResult.interval;
   if (!iv || iv.from === undefined || iv.to === undefined) return 'publisher-asserted';   // checkpoint carried no interval ⇒ no windowed completeness
   const w0 = ustToEpoch(claimWindow.from), w1 = ustToEpoch(claimWindow.to), i0 = ustToEpoch(iv.from), i1 = ustToEpoch(iv.to);
-  if ([w0, w1, i0, i1].some((x) => x === null)) return 'publisher-asserted';
-  return (i0 <= w0 && i1 >= w1) ? 'completeness-backed' : 'publisher-asserted';   // interval CONTAINS the claim window
+  if ([w0, w1, i0, i1].some((x) => x === null) || !(i0 <= w0 && i1 >= w1)) return 'publisher-asserted';   // the verified interval must CONTAIN the window
+  // NO-OMISSION vs NO-DELETION (self-audit rc.35) — a no-event guarantee needs `complete`: every grid slot is a frame
+  // OR a signed gap, so a hidden/OMITTED event is impossible. `chain-consistent` proves only NO-DELETION of EMITTED
+  // frames; a never-emitted slot could still hide the very event the claim denies — so it is 'no-deletion-only', a
+  // PARTIAL backing, never a full no-event proof (exactly the omission the issue warns of).
+  return streamResult.complete === 'complete' ? 'completeness-backed' : 'no-deletion-only';
 }
 
 // ─── §S6/F7 — the CONFORMANCE boundary is raw bytes. `verify(JSON.parse(x))` can't satisfy §6 because JSON.parse

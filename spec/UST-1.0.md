@@ -743,12 +743,14 @@ Absent a signed cadence in the verifier's information set the range verdict is `
 specific event did NOT occur over a window — an SLA non-breach, a warning NOT issued, an embargo NOT lifted. This
 negative is only as strong as the STREAM COMPLETENESS over that window: the absence transcript verifies on its own
 (identity+integrity), but *"nothing ELSE happened"* is a NO-OMISSION claim, not a single-document property. A consumer
-therefore trusts a no-event claim over `[from,to]` **only** when a `verifyStream` over the covering interval is
-`chain-consistent` (or `complete`) **AND** the interval that `verifyStream` VALIDATED and returns (`streamResult.interval`)
-CONTAINS `[from,to]`; otherwise the negative is the publisher's UNWITNESSED assertion. `noEventBacking(window, streamResult)`
-returns `completeness-backed` | `publisher-asserted` | `not-applicable` — it reads the covering interval FROM the verified
-stream result, never a caller-supplied checkpoint, so a spoofed checkpoint cannot forge a backing. Without stream completeness a lone absence document
-could hide that something DID happen by simply not publishing the positive frame — exactly the omission that
+therefore trusts a no-event claim over `[from,to]` **only** when the interval that `verifyStream` VALIDATED and returns
+(`streamResult.interval`) CONTAINS `[from,to]` — read FROM the verified stream result, never a caller-supplied
+checkpoint, so a spoofed checkpoint cannot forge a backing. `noEventBacking(window, streamResult)` then GRADES it:
+`completeness-backed` needs `complete` (NO-OMISSION: every grid slot is a frame or a signed gap, so a hidden event is
+impossible); a `chain-consistent` interval yields `no-deletion-only` — no EMITTED frame was deleted, but an OMITTED
+(never-emitted) slot could still hide the very event, so it is a PARTIAL backing, NOT a full no-event proof;
+otherwise `publisher-asserted` / `not-applicable`. This is the crux: without `complete` a lone absence document could
+hide that something DID happen by simply not publishing the positive frame — exactly the omission that
 `chain-consistent` cannot see and `complete` (the signed grid) closes.
 
 **Concrete format (normative).** The cadence is a string integer of SECONDS, RESOLVED at a slot's time from
