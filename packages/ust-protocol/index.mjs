@@ -705,21 +705,16 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
   const rk = resolveKeys(genesis, keylog);
   if (rk.error) return { error: rk.error, detail: rk.detail };
   const { validKeys, revoked, history } = rk;
-  // §12.2a #40 KEY-LOG FRESHNESS (rc.28 audit fix) — "this key is still valid" is an authenticated NON-MEMBERSHIP
-  // claim (no MORE RECENT revoking entry exists), the same class as no-fork (F.5a): a CACHED key-log proves only
-  // "revoke ∉ my view", never "revoke does not exist". Freshness is EARNED, and — the audit catch — a raw
-  // self-computed head hash proves NOTHING (the consumer trivially derives it from its own stale log; that was an
-  // overclaim, the same class as the removed `mapInclusion:true`). So `attested` requires a VERIFIED anchor proof
-  // for the head: `keylogHeadAnchor` (an inclusion proof) checked against the substrate — inclusion + final proves
-  // the head IS the whole log at that anchor (independent non-membership). A `keylogFreshAsOf` timestamp from an
-  // AUTHORITATIVE fetch ≥ the doc anchor ⇒ `fresh` (caller-basis, like air-gap no-fork). Else `unverified` — NOT
-  // invalid (the cache is not "wrong"), but the consumer is TOLD its view may be stale (F.5b).
+  // §12.2a KEY-LOG FRESHNESS — "this key is still valid" is an authenticated NON-MEMBERSHIP claim: a CACHED key-log
+  // proves only "revoke ∉ my view", never "revoke does not exist".
+  // UST-0ol Phase 3 (P0-03) — the legacy `keylogHeadAnchor → attested` shortcut is DELETED. An anchored key-log HEAD
+  // proves membership AT its anchor time, NOT that it is the LATEST head at the document's time: a revoke that
+  // FOLLOWS the anchored prefix is invisible to it. Strong key-log freshness (corroborated/attested) is reachable
+  // ONLY through the one checkpoint derivation (deriveCheckpointFreshness): authorization + strict terminality +
+  // proven-after ordering + independent uniqueness. resolveAuthority reports at most `fresh` (single-view): a
+  // `keylogFreshAsOf` from an AUTHORITATIVE fetch ≥ the doc anchor ⇒ `fresh`; else `unverified` — TOLD, never forged.
   let freshness = 'unverified';
-  if (keylogHeadAnchor && typeof substrateVerify === 'function') {
-    const ha = verifyAnchor(rk.head, keylogHeadAnchor, { substrateVerify });     // VERIFIED: head ∈ a substrate-final anchored root
-    if (ha.inclusion && ha.time === 'anchored') freshness = 'attested';
-  }
-  if (freshness === 'unverified' && keylogFreshAsOf && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(keylogFreshAsOf) && (!anchorTime || keylogFreshAsOf >= anchorTime)) freshness = 'fresh';
+  if (keylogFreshAsOf && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(keylogFreshAsOf) && (!anchorTime || keylogFreshAsOf >= anchorTime)) freshness = 'fresh';
   // rc.12: surface the ceremony-declared CAPACITY so callers can pass it as opts.capacity to verify()
   // once authority is established — the grant flows FROM resolution, never from a raw genesis.
   const gvCap = genesis.state?.data?.genesis?.value ?? {};
