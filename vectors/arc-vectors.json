@@ -12,7 +12,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -31,7 +31,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:58e6c5c4dc4d160286b292fb2428e6388a793105022b9353178f6aa87bd51f7e",
             "pub": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
-            "sig": "sx3Km0lQDAHeQl7fc8Ty4srdgF7mAm6jIveXcch47KdpR9ZX-dCdkaTDBOb7QXK4U5eXBnQGACLPEEbP-N7iDg"
+            "sig": "pL6ZmKxxLYRTlYUFvh3XyL9q5XJ4a8B2RT2fYx6m3wH4v7jtSSdfTf2Br207IkEquuR6KAWWg2urRCxEU1dlAw"
           }
         },
         {
@@ -39,9 +39,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "1",
-            "previous_checkpoint": "sha256:9fa1bb182776fa9a33d016dd869dbbe3c6d971ec773b8411d54d6338912d6f19",
+            "previous_checkpoint": "sha256:e7ec747e9944c6d09fc6aac2344ec0ede9eef672dfa748b6b02fa761a6e448ae",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
               "current_key_id": "sha256:8b4d6663067226d64c762312dcf9bc6279545cb1255018bd77898008ebd48342",
@@ -59,7 +59,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:8b4d6663067226d64c762312dcf9bc6279545cb1255018bd77898008ebd48342",
             "pub": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
-            "sig": "cT8LqO7VIoHB4UyJHDQw_eI8rbLAMWOWZUDy0FuMKgkV2xvJi_raCMXjo-3zN8GJGcd_dlhVhujCN9xTOAlUCA"
+            "sig": "8laFHCvcqM5vZbHsEMq-y2tuHDO5kPTYr1Qv_RKb_7v-gjWCDbTg15bePQqpAlfKdh89zvk3o2oMeEbEQkPhBQ"
           }
         },
         {
@@ -67,9 +67,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "2",
-            "previous_checkpoint": "sha256:2d477615a8767462b1a9ccad735a8a02f3b5fe201f64d7ba81f277c2ee028a14",
+            "previous_checkpoint": "sha256:e859e3f4470c6b656a5b7f283000ecd02eb963a17e5ad2b17957692f7033aff3",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
               "current_key_id": "sha256:954c9e75f259d847c0b84da1a147deffd2fadcc6795483a01b90f0ac24def411"
@@ -84,7 +84,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:954c9e75f259d847c0b84da1a147deffd2fadcc6795483a01b90f0ac24def411",
             "pub": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
-            "sig": "PvMqOitADKr3CjUuIv1CqOdZXqvsxFvHGfGpH1tCi79IvLoVNp9SPi0aEccQzKZsYB8fve1uBH_h8T-ljf7QCA"
+            "sig": "w1n68ZIuyK1dMucezW4oVZnD3V_PQUqtQRJ0rEzTm0A8mFtYecXKQjkOBDwzj8GXhW9r_-FrjlCpxoSGXhFzDQ"
           }
         }
       ],
@@ -107,7 +107,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -126,7 +126,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:58e6c5c4dc4d160286b292fb2428e6388a793105022b9353178f6aa87bd51f7e",
             "pub": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
-            "sig": "sx3Km0lQDAHeQl7fc8Ty4srdgF7mAm6jIveXcch47KdpR9ZX-dCdkaTDBOb7QXK4U5eXBnQGACLPEEbP-N7iDg"
+            "sig": "pL6ZmKxxLYRTlYUFvh3XyL9q5XJ4a8B2RT2fYx6m3wH4v7jtSSdfTf2Br207IkEquuR6KAWWg2urRCxEU1dlAw"
           }
         },
         {
@@ -134,9 +134,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "1",
-            "previous_checkpoint": "sha256:9fa1bb182776fa9a33d016dd869dbbe3c6d971ec773b8411d54d6338912d6f19",
+            "previous_checkpoint": "sha256:e7ec747e9944c6d09fc6aac2344ec0ede9eef672dfa748b6b02fa761a6e448ae",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
               "current_key_id": "sha256:8b4d6663067226d64c762312dcf9bc6279545cb1255018bd77898008ebd48342",
@@ -154,7 +154,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:2ac30deb81bf7ab9720db3a5c86fe5e74936a65563a4a1c4304d824f135aa245",
             "pub": "_RckOFqgx1tk-3jNYC-h2ZH96_drE8WO1wLqyDXp9hg",
-            "sig": "UlzrBh_Qwpd16pNft0M_l3JAiuXYLMrK2MiAFvd2LfWEHBjtOvc8gAASvz8e-cSSRZ7uxpsHT7AbJf_AvF3PCg"
+            "sig": "2Vdma-avBkQqEgFQgLg_VbAe60ws0uOjyAZC302zFZVbhRcJfmFMcFvB-ztdNIw6o6iuvbnZkjN4Utky9oqnDA"
           }
         }
       ],
@@ -178,7 +178,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -197,7 +197,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:58e6c5c4dc4d160286b292fb2428e6388a793105022b9353178f6aa87bd51f7e",
             "pub": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
-            "sig": "sx3Km0lQDAHeQl7fc8Ty4srdgF7mAm6jIveXcch47KdpR9ZX-dCdkaTDBOb7QXK4U5eXBnQGACLPEEbP-N7iDg"
+            "sig": "pL6ZmKxxLYRTlYUFvh3XyL9q5XJ4a8B2RT2fYx6m3wH4v7jtSSdfTf2Br207IkEquuR6KAWWg2urRCxEU1dlAw"
           }
         },
         {
@@ -205,9 +205,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "1",
-            "previous_checkpoint": "sha256:9fa1bb182776fa9a33d016dd869dbbe3c6d971ec773b8411d54d6338912d6f19",
+            "previous_checkpoint": "sha256:e7ec747e9944c6d09fc6aac2344ec0ede9eef672dfa748b6b02fa761a6e448ae",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
               "current_key_id": "sha256:8b4d6663067226d64c762312dcf9bc6279545cb1255018bd77898008ebd48342",
@@ -225,7 +225,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:954c9e75f259d847c0b84da1a147deffd2fadcc6795483a01b90f0ac24def411",
             "pub": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
-            "sig": "cBjYEVcf8vU-NiMeoe9JWUUbruWgzEjnMSjt7K87ogVUzdGZjSvvaVfK3nwFTDrdIOeTtFTu5JebhecKiUYZDQ"
+            "sig": "Uo9FvlDLZKRkKrWBEZKApzb60jG81qrBpA94JevZjvZK-908OkA4cmf7XPurSlc4SECpXfLlJfxwU69xLCSgCg"
           }
         }
       ],
@@ -249,7 +249,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -268,7 +268,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:58e6c5c4dc4d160286b292fb2428e6388a793105022b9353178f6aa87bd51f7e",
             "pub": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
-            "sig": "sx3Km0lQDAHeQl7fc8Ty4srdgF7mAm6jIveXcch47KdpR9ZX-dCdkaTDBOb7QXK4U5eXBnQGACLPEEbP-N7iDg"
+            "sig": "pL6ZmKxxLYRTlYUFvh3XyL9q5XJ4a8B2RT2fYx6m3wH4v7jtSSdfTf2Br207IkEquuR6KAWWg2urRCxEU1dlAw"
           }
         },
         {
@@ -276,9 +276,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "2",
-            "previous_checkpoint": "sha256:9fa1bb182776fa9a33d016dd869dbbe3c6d971ec773b8411d54d6338912d6f19",
+            "previous_checkpoint": "sha256:e7ec747e9944c6d09fc6aac2344ec0ede9eef672dfa748b6b02fa761a6e448ae",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
               "current_key_id": "sha256:8b4d6663067226d64c762312dcf9bc6279545cb1255018bd77898008ebd48342"
@@ -293,7 +293,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:8b4d6663067226d64c762312dcf9bc6279545cb1255018bd77898008ebd48342",
             "pub": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
-            "sig": "qNYP6RFIZ01HB2VUOKuOJxHgqXVMp0ajctpFY9g_O5xSiez4XSjUD58yg5hnb1BeDHMvrj59gRO_2mGb8Zj8Dw"
+            "sig": "7hJ84rYs_hSbJnxOt1_7gYqvGPWv4nZYdByqbkrDBz7fcvsoceeI6zs-ECc8eOQXskKD-DpaJQcz6bopehPwDQ"
           }
         }
       ],
@@ -317,7 +317,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -336,7 +336,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:58e6c5c4dc4d160286b292fb2428e6388a793105022b9353178f6aa87bd51f7e",
             "pub": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
-            "sig": "sx3Km0lQDAHeQl7fc8Ty4srdgF7mAm6jIveXcch47KdpR9ZX-dCdkaTDBOb7QXK4U5eXBnQGACLPEEbP-N7iDg"
+            "sig": "pL6ZmKxxLYRTlYUFvh3XyL9q5XJ4a8B2RT2fYx6m3wH4v7jtSSdfTf2Br207IkEquuR6KAWWg2urRCxEU1dlAw"
           }
         },
         {
@@ -344,9 +344,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "1",
-            "previous_checkpoint": "sha256:9fa1bb182776fa9a33d016dd869dbbe3c6d971ec773b8411d54d6338912d6f19",
+            "previous_checkpoint": "sha256:e7ec747e9944c6d09fc6aac2344ec0ede9eef672dfa748b6b02fa761a6e448ae",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
               "current_key_id": "sha256:8b4d6663067226d64c762312dcf9bc6279545cb1255018bd77898008ebd48342",
@@ -364,7 +364,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:8b4d6663067226d64c762312dcf9bc6279545cb1255018bd77898008ebd48342",
             "pub": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
-            "sig": "cT8LqO7VIoHB4UyJHDQw_eI8rbLAMWOWZUDy0FuMKgkV2xvJi_raCMXjo-3zN8GJGcd_dlhVhujCN9xTOAlUCA"
+            "sig": "8laFHCvcqM5vZbHsEMq-y2tuHDO5kPTYr1Qv_RKb_7v-gjWCDbTg15bePQqpAlfKdh89zvk3o2oMeEbEQkPhBQ"
           }
         },
         {
@@ -372,9 +372,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "2",
-            "previous_checkpoint": "sha256:2d477615a8767462b1a9ccad735a8a02f3b5fe201f64d7ba81f277c2ee028a14",
+            "previous_checkpoint": "sha256:e859e3f4470c6b656a5b7f283000ecd02eb963a17e5ad2b17957692f7033aff3",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
               "current_key_id": "sha256:954c9e75f259d847c0b84da1a147deffd2fadcc6795483a01b90f0ac24def411"
@@ -389,7 +389,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:954c9e75f259d847c0b84da1a147deffd2fadcc6795483a01b90f0ac24def411",
             "pub": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
-            "sig": "PvMqOitADKr3CjUuIv1CqOdZXqvsxFvHGfGpH1tCi79IvLoVNp9SPi0aEccQzKZsYB8fve1uBH_h8T-ljf7QCA"
+            "sig": "w1n68ZIuyK1dMucezW4oVZnD3V_PQUqtQRJ0rEzTm0A8mFtYecXKQjkOBDwzj8GXhW9r_-FrjlCpxoSGXhFzDQ"
           }
         }
       ],
@@ -408,7 +408,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -424,7 +424,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:0d88742630d4b9fee75b57ea828a074f70bdbbca7780477e2396f56610e564d0",
             "pub": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
-            "sig": "KEif_1130gy0yUfhOk4Iazzl0vLM5TYDBw3J6CRP1W_YXSgn4O_OpTxYFHEKwtbvbOzc07VsUCPK6T6FBQ2FBQ"
+            "sig": "GQzRZRNaM0k1zwLuXR49whGZqJaOKjuS-3j0e6G5DOZKiFXrwvAyTz3cQMGK6Z7NwXVCdX1KOEor-xCML4B1CQ"
           }
         }
       ],
@@ -448,7 +448,7 @@
         },
         "commitment": {
           "proof_kind": "pow-header-chain",
-          "subject": "sha256:5b6e567ff4b47f1d26e9e2bb82668b8a290a6aad2e5f4de1ac67f8fc51584957",
+          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
           "source_id": "btc",
           "facts": {
             "substrate": "bitcoin",
@@ -475,7 +475,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -491,7 +491,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:0d88742630d4b9fee75b57ea828a074f70bdbbca7780477e2396f56610e564d0",
             "pub": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
-            "sig": "KEif_1130gy0yUfhOk4Iazzl0vLM5TYDBw3J6CRP1W_YXSgn4O_OpTxYFHEKwtbvbOzc07VsUCPK6T6FBQ2FBQ"
+            "sig": "GQzRZRNaM0k1zwLuXR49whGZqJaOKjuS-3j0e6G5DOZKiFXrwvAyTz3cQMGK6Z7NwXVCdX1KOEor-xCML4B1CQ"
           }
         }
       ],
@@ -515,7 +515,7 @@
         },
         "commitment": {
           "proof_kind": "pow-header-chain",
-          "subject": "sha256:5b6e567ff4b47f1d26e9e2bb82668b8a290a6aad2e5f4de1ac67f8fc51584957",
+          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
           "source_id": "btc",
           "facts": {
             "substrate": "bitcoin",
@@ -543,7 +543,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -559,7 +559,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:0d88742630d4b9fee75b57ea828a074f70bdbbca7780477e2396f56610e564d0",
             "pub": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
-            "sig": "KEif_1130gy0yUfhOk4Iazzl0vLM5TYDBw3J6CRP1W_YXSgn4O_OpTxYFHEKwtbvbOzc07VsUCPK6T6FBQ2FBQ"
+            "sig": "GQzRZRNaM0k1zwLuXR49whGZqJaOKjuS-3j0e6G5DOZKiFXrwvAyTz3cQMGK6Z7NwXVCdX1KOEor-xCML4B1CQ"
           }
         }
       ],
@@ -583,7 +583,7 @@
         },
         "commitment": {
           "proof_kind": "pow-header-chain",
-          "subject": "sha256:5b6e567ff4b47f1d26e9e2bb82668b8a290a6aad2e5f4de1ac67f8fc51584957",
+          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
           "source_id": "btc",
           "facts": {
             "substrate": "bitcoin",
@@ -602,32 +602,32 @@
               "claim": {
                 "purpose": "ust:checkpoint-uniqueness-attestation",
                 "domain_shard": "noosphere.md",
-                "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+                "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
                 "sequence": "0",
-                "checkpoint": "sha256:5b6e567ff4b47f1d26e9e2bb82668b8a290a6aad2e5f4de1ac67f8fc51584957"
+                "checkpoint": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c"
               },
               "issuer_id": "sha256:727e2c80fef238781d1fe73b90740d329aeff8bc5bd59ac7625b147cf68eb667",
               "sig": {
                 "alg": "Ed25519",
                 "key_id": "sha256:727e2c80fef238781d1fe73b90740d329aeff8bc5bd59ac7625b147cf68eb667",
                 "pub": "iEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQs",
-                "sig": "JYYGEdmH11WNYpwNzv9nzoXOsobvpAxgqa74_Gp3Q8c7ytjISKoZFfN0e63vhFLjN7gFPazNPeOxW82KKbdkBA"
+                "sig": "7T-3ArL2mHswAETPu4TsGfYFBVuREH09gO0KoMiTyFUhlA4k6cy4cNooKcI9U-P9CYisgaiJzszIpNlrUdzDDw"
               }
             },
             {
               "claim": {
                 "purpose": "ust:checkpoint-uniqueness-attestation",
                 "domain_shard": "noosphere.md",
-                "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+                "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
                 "sequence": "0",
-                "checkpoint": "sha256:5b6e567ff4b47f1d26e9e2bb82668b8a290a6aad2e5f4de1ac67f8fc51584957"
+                "checkpoint": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c"
               },
               "issuer_id": "sha256:e8846a47e1f60449f4fa14b5287384e4753622300dc85aafaba3415ba01d3aa7",
               "sig": {
                 "alg": "Ed25519",
                 "key_id": "sha256:e8846a47e1f60449f4fa14b5287384e4753622300dc85aafaba3415ba01d3aa7",
                 "pub": "oJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPA",
-                "sig": "Nt9UOczz8nHnmW1sAAPrv5K7c7wDElDExhX8dS13GddU9yD3PrjAM5OcCq2cxQFaVdDNWQLiVEqJUMGhgDZJAA"
+                "sig": "L_FwZzxIoRLRFUPS_nYsEgt_yVzNYNW8W58N4SGz3DAm-dUR2zGe8FrJN_avK4lute6Z8_5u1DbQN2wQEm01Dw"
               }
             }
           ],
@@ -656,7 +656,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -672,7 +672,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:0d88742630d4b9fee75b57ea828a074f70bdbbca7780477e2396f56610e564d0",
             "pub": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
-            "sig": "KEif_1130gy0yUfhOk4Iazzl0vLM5TYDBw3J6CRP1W_YXSgn4O_OpTxYFHEKwtbvbOzc07VsUCPK6T6FBQ2FBQ"
+            "sig": "GQzRZRNaM0k1zwLuXR49whGZqJaOKjuS-3j0e6G5DOZKiFXrwvAyTz3cQMGK6Z7NwXVCdX1KOEor-xCML4B1CQ"
           }
         }
       ],
@@ -696,7 +696,7 @@
         },
         "commitment": {
           "proof_kind": "pow-header-chain",
-          "subject": "sha256:5b6e567ff4b47f1d26e9e2bb82668b8a290a6aad2e5f4de1ac67f8fc51584957",
+          "subject": "sha256:cc5bc257a684dc5471b2b6506633ab37da0e66ef2fe6808441d604072260c29c",
           "source_id": "btc",
           "facts": {
             "substrate": "bitcoin",
@@ -713,11 +713,11 @@
           "map": {
             "proof": {
               "siblings": [
-                "sha256:b9c3080283adea08fa7d8349b44c82352818994f1c268bf40a97d9d70eff1aee",
+                "sha256:635d92f98ac48242baafec1c4e856c708ff6bee7313a06e40d38d4594dcd0024",
                 "sha256:9958b27f0dbdf1cd0a3cc80c83a671795225b5292917f58ad6aef05192c34723",
                 "sha256:97816432d61afd2cacc5f4e9002cb7ff1027aa36afd7e67fecbf61031ee4b3f1",
                 "sha256:1ec00a494a2245df316c18d49075acfb835803845b76586f61bbb708c998b7a3",
-                "sha256:94fd8d9cb2517a7615a65ffdbc8a70ff90720e769b7e4ad1f916c899724db5fc",
+                "sha256:f77e7303a072ffe79f68756703460dc011ed043ac57e6543d70c9dc29b0bf2e0",
                 "sha256:fd092254006f79392cb1480d9897b8a4d85c0f6265731cc7a1913baebed1bc33",
                 "sha256:f7a541ca77c7998ee16786a725808898b74dacbc13d95dc569ad1acba2d8a3d7",
                 "sha256:4e521e991ab00af46f2db3b6287a9c3e97552adb44cc2869e1795216f10754e3",
@@ -971,12 +971,12 @@
                 "sha256:1e4b6e90a6dba5f60cfe6246e9c871d642fcc9964e01cd515c15734cc5baeda2"
               ]
             },
-            "mapRoot": "sha256:ee440623b9a76748b93ca599c01cb085ae44fe4eac24fec29c1e193ccfa6a7b3"
+            "mapRoot": "sha256:90eca5f0c058a71045a273b6a3649bbe12333daa2bcf5a0ed32cf13c6a05a9c9"
           }
         },
         "trust": {
           "mapRoots": [
-            "sha256:ee440623b9a76748b93ca599c01cb085ae44fe4eac24fec29c1e193ccfa6a7b3"
+            "sha256:90eca5f0c058a71045a273b6a3649bbe12333daa2bcf5a0ed32cf13c6a05a9c9"
           ]
         }
       },
@@ -994,7 +994,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -1013,7 +1013,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
             "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
-            "sig": "8YXsLgKsMGfsWSzn5Puce-uI0ylQgEd998h4MfR4gDCQAwoHfY8S_kpyjeMQahgAEQ4MHlehVbUlonJbwgT4DQ"
+            "sig": "UmWeHAcV5rI8EL9hKFceYx4z6V20WVpFDjnGib5l4RJ4ZID1dI51awW-ZA4JfOJm23YCji-MGb27NEH1SyZsAg"
           }
         },
         {
@@ -1021,9 +1021,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "1",
-            "previous_checkpoint": "sha256:85d3090689ad3a76e5d670f6ad9a42812f4ad8e093c1f6e38b904f2371123084",
+            "previous_checkpoint": "sha256:0f8532af8af0de344b35131239f9c96ad531589f6a612af88ee27d75a640a03c",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
               "current_key_id": "sha256:07afeb50a85c1222e3d9f74e0bc35e61752f04ae228a4c2def3c7188c9223470"
@@ -1038,7 +1038,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:07afeb50a85c1222e3d9f74e0bc35e61752f04ae228a4c2def3c7188c9223470",
             "pub": "A1KKhM818z2-8bMhktk1FE6dYjOE0LB5ymh8ABCbgZY",
-            "sig": "nNwM3HltsXRayC7vbp7_OzAIRs6-3YsY2V_oIVb8vQdlHoFB7yQNxkrEnSPtLGJ8UgP8p0PWlzgGtcIaefuOCA"
+            "sig": "5ZJ0sVsjAe1Gbn0X87iJuN3YZ-1KH2JSVwnIrGudX-krp3_Ho7EHPCaA4jy6seMgZVhbyoF2MMyeUCfG3KaUCw"
           }
         }
       ],
@@ -1053,8 +1053,8 @@
               "claim": {
                 "purpose": "ust:checkpoint-authority-recovery",
                 "domain_shard": "noosphere.md",
-                "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-                "last_accepted_checkpoint": "sha256:85d3090689ad3a76e5d670f6ad9a42812f4ad8e093c1f6e38b904f2371123084",
+                "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+                "last_accepted_checkpoint": "sha256:0f8532af8af0de344b35131239f9c96ad531589f6a612af88ee27d75a640a03c",
                 "replacement_authority": {
                   "key_id": "sha256:07afeb50a85c1222e3d9f74e0bc35e61752f04ae228a4c2def3c7188c9223470",
                   "pub": "A1KKhM818z2-8bMhktk1FE6dYjOE0LB5ymh8ABCbgZY"
@@ -1067,15 +1067,15 @@
                 "alg": "Ed25519",
                 "key_id": "sha256:bddfe17a01326681e6f86659de1b85bfe9755649ed793e2848da3a9f9fb86bb5",
                 "pub": "25lf4lFp0UHKubu6krqgH58uHs599MsqwFGQ83_MH50",
-                "sig": "H8Tnd5AQhpluDPkrXPrNKCqxz6kRzGXivFQZWhALPjdg0JbfzNbq8IC1I5s8c4c6QymSIUnmtPbd4XAoDcY4Cw"
+                "sig": "FJfsY8sFgBlG9R19ee61gw1KrcRqv9pz_iybPziVS7bCYKYbBZWrVnWcc1MyyKS0RfPh3jfoutGk-xgXgrWDBA"
               }
             },
             {
               "claim": {
                 "purpose": "ust:checkpoint-authority-recovery",
                 "domain_shard": "noosphere.md",
-                "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-                "last_accepted_checkpoint": "sha256:85d3090689ad3a76e5d670f6ad9a42812f4ad8e093c1f6e38b904f2371123084",
+                "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+                "last_accepted_checkpoint": "sha256:0f8532af8af0de344b35131239f9c96ad531589f6a612af88ee27d75a640a03c",
                 "replacement_authority": {
                   "key_id": "sha256:07afeb50a85c1222e3d9f74e0bc35e61752f04ae228a4c2def3c7188c9223470",
                   "pub": "A1KKhM818z2-8bMhktk1FE6dYjOE0LB5ymh8ABCbgZY"
@@ -1088,7 +1088,7 @@
                 "alg": "Ed25519",
                 "key_id": "sha256:16e18dca6d65996f10d05eb2ec93e6a8bbda03a6512b70156816bf05b9ce718b",
                 "pub": "IVL40Zt5HSRFMkLhXy6rbLfP-ntqXtMAl5YOBpiB2xI",
-                "sig": "MW1hv9txUF8kp9CPSY4J3Tha_mQ7RB9zvWMWNcIe4Xz3q8_gyp8z1ajHjCjYTiwdeKM0wFwMzw2YLT1oDEIsBw"
+                "sig": "Ll3y7we1xp6tdwBbi5U17usgevKNZRkzBVh68e8oFH2QIT8u5SFL4-JaxK-bY3vMnNXZq-cmDB5RSrKm5PUoCw"
               }
             }
           ]
@@ -1113,7 +1113,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -1132,7 +1132,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
             "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
-            "sig": "8YXsLgKsMGfsWSzn5Puce-uI0ylQgEd998h4MfR4gDCQAwoHfY8S_kpyjeMQahgAEQ4MHlehVbUlonJbwgT4DQ"
+            "sig": "UmWeHAcV5rI8EL9hKFceYx4z6V20WVpFDjnGib5l4RJ4ZID1dI51awW-ZA4JfOJm23YCji-MGb27NEH1SyZsAg"
           }
         },
         {
@@ -1140,9 +1140,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "1",
-            "previous_checkpoint": "sha256:85d3090689ad3a76e5d670f6ad9a42812f4ad8e093c1f6e38b904f2371123084",
+            "previous_checkpoint": "sha256:0f8532af8af0de344b35131239f9c96ad531589f6a612af88ee27d75a640a03c",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
               "current_key_id": "sha256:07afeb50a85c1222e3d9f74e0bc35e61752f04ae228a4c2def3c7188c9223470"
@@ -1157,7 +1157,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:07afeb50a85c1222e3d9f74e0bc35e61752f04ae228a4c2def3c7188c9223470",
             "pub": "A1KKhM818z2-8bMhktk1FE6dYjOE0LB5ymh8ABCbgZY",
-            "sig": "nNwM3HltsXRayC7vbp7_OzAIRs6-3YsY2V_oIVb8vQdlHoFB7yQNxkrEnSPtLGJ8UgP8p0PWlzgGtcIaefuOCA"
+            "sig": "5ZJ0sVsjAe1Gbn0X87iJuN3YZ-1KH2JSVwnIrGudX-krp3_Ho7EHPCaA4jy6seMgZVhbyoF2MMyeUCfG3KaUCw"
           }
         }
       ],
@@ -1172,8 +1172,8 @@
               "claim": {
                 "purpose": "ust:checkpoint-authority-recovery",
                 "domain_shard": "noosphere.md",
-                "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-                "last_accepted_checkpoint": "sha256:85d3090689ad3a76e5d670f6ad9a42812f4ad8e093c1f6e38b904f2371123084",
+                "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+                "last_accepted_checkpoint": "sha256:0f8532af8af0de344b35131239f9c96ad531589f6a612af88ee27d75a640a03c",
                 "replacement_authority": {
                   "key_id": "sha256:07afeb50a85c1222e3d9f74e0bc35e61752f04ae228a4c2def3c7188c9223470",
                   "pub": "A1KKhM818z2-8bMhktk1FE6dYjOE0LB5ymh8ABCbgZY"
@@ -1186,7 +1186,7 @@
                 "alg": "Ed25519",
                 "key_id": "sha256:bddfe17a01326681e6f86659de1b85bfe9755649ed793e2848da3a9f9fb86bb5",
                 "pub": "25lf4lFp0UHKubu6krqgH58uHs599MsqwFGQ83_MH50",
-                "sig": "H8Tnd5AQhpluDPkrXPrNKCqxz6kRzGXivFQZWhALPjdg0JbfzNbq8IC1I5s8c4c6QymSIUnmtPbd4XAoDcY4Cw"
+                "sig": "FJfsY8sFgBlG9R19ee61gw1KrcRqv9pz_iybPziVS7bCYKYbBZWrVnWcc1MyyKS0RfPh3jfoutGk-xgXgrWDBA"
               }
             }
           ]
@@ -1212,7 +1212,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -1228,7 +1228,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:99dc4596f2a33e1a8876a469a028fdaa8353616c293e23c3fd976f21ae8710ad",
             "pub": "wFDFY3pE-oYp__PMzOIwDLNipj2Z2V_FQUUmb0MyRFo",
-            "sig": "qMvyfizlxxRhg9K-JjAexoJKsLSpj5Zym2XV2Y7KWQo9lThwwQ9AVFSJqoyK2GGPEL7zbBRXhdtwUTLcdQJwDg"
+            "sig": "u42k5bStyQCIaCr4NvzLFUMDjLl5Q2gd2iOcaZqtj-ZDT4PR2oJClDfgj9RpAUoOiHafR6AZoY8wSQsY1kwLAw"
           }
         },
         {
@@ -1236,9 +1236,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+            "genesis_epoch": "sha256:cf31942c00b76c90d683338ce3b1d86d71517662b737ea4af012e7494161cacd",
             "sequence": "0",
-            "previous_epoch_final_checkpoint": "sha256:80cb4f6e18b39f8c7286ba56ea23439e815ecc3ff07870797e7ffe45d311afb6",
+            "previous_epoch_final_checkpoint": "sha256:302bfa1aae6dbdaedb1c0e2ceec86746aa1ab8533fa21ae298881a6ea7ef386f",
             "active_genesis": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
             "checkpoint_authority": {
               "current_key_id": "sha256:2f38003f4c602a3a1c1524cbda9f971e40bf22aaaf97a33254b092f7cfcb759f"
@@ -1253,7 +1253,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:2f38003f4c602a3a1c1524cbda9f971e40bf22aaaf97a33254b092f7cfcb759f",
             "pub": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc",
-            "sig": "rolwW3r4203wUOOxCMqVOdF2CmRcJFtZuiH7eOdxXrkV61tdVI-QTvrZ_WO_8lJAGj7Usa8Vtgv3ciYV214FDA"
+            "sig": "GYQ7ySRm6ZkzpUtED55oSY7nBG_a-Uf1ww9-0pIBNyGZACddN6-tAmbOt0tu3ye5NR_StpHyNyh1qM8MVEQ8BQ"
           }
         }
       ],
@@ -1263,13 +1263,13 @@
           "pub": "wFDFY3pE-oYp__PMzOIwDLNipj2Z2V_FQUUmb0MyRFo"
         },
         "epochTransitions": {
-          "sha256:b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1": {
+          "sha256:cf31942c00b76c90d683338ce3b1d86d71517662b737ea4af012e7494161cacd": {
             "claim": {
               "purpose": "ust:genesis-epoch-transition",
               "domain_shard": "noosphere.md",
-              "from_genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-              "from_final_checkpoint": "sha256:80cb4f6e18b39f8c7286ba56ea23439e815ecc3ff07870797e7ffe45d311afb6",
-              "to_genesis_epoch": "sha256:b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+              "from_genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+              "from_final_checkpoint": "sha256:302bfa1aae6dbdaedb1c0e2ceec86746aa1ab8533fa21ae298881a6ea7ef386f",
+              "to_genesis_epoch": "sha256:cf31942c00b76c90d683338ce3b1d86d71517662b737ea4af012e7494161cacd",
               "to_checkpoint_authority": {
                 "key_id": "sha256:2f38003f4c602a3a1c1524cbda9f971e40bf22aaaf97a33254b092f7cfcb759f",
                 "pub": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc"
@@ -1281,7 +1281,7 @@
               "alg": "Ed25519",
               "key_id": "sha256:99dc4596f2a33e1a8876a469a028fdaa8353616c293e23c3fd976f21ae8710ad",
               "pub": "wFDFY3pE-oYp__PMzOIwDLNipj2Z2V_FQUUmb0MyRFo",
-              "sig": "Dv7P93aaKO3XO8tzm15GXnUrVrpuOCfFcgyDZnBjeMU1VZ8y76WW8V-9CSw4xawXvlm5f4WYkTYUJ7r6WUIVAg"
+              "sig": "DjQcKO5AfsVoEB01u_qU57zRWtq8lHXnPskiVTiKisigS-RNqBqpBtSMVHxFRkNQpTLNpuO5WnlDuR7LUXlMAA"
             }
           }
         }
@@ -1299,7 +1299,7 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "sequence": "0",
             "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
             "checkpoint_authority": {
@@ -1315,7 +1315,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:99dc4596f2a33e1a8876a469a028fdaa8353616c293e23c3fd976f21ae8710ad",
             "pub": "wFDFY3pE-oYp__PMzOIwDLNipj2Z2V_FQUUmb0MyRFo",
-            "sig": "qMvyfizlxxRhg9K-JjAexoJKsLSpj5Zym2XV2Y7KWQo9lThwwQ9AVFSJqoyK2GGPEL7zbBRXhdtwUTLcdQJwDg"
+            "sig": "u42k5bStyQCIaCr4NvzLFUMDjLl5Q2gd2iOcaZqtj-ZDT4PR2oJClDfgj9RpAUoOiHafR6AZoY8wSQsY1kwLAw"
           }
         },
         {
@@ -1323,9 +1323,9 @@
             "version": "1",
             "purpose": "ust:authority-checkpoint",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+            "genesis_epoch": "sha256:cf31942c00b76c90d683338ce3b1d86d71517662b737ea4af012e7494161cacd",
             "sequence": "0",
-            "previous_epoch_final_checkpoint": "sha256:80cb4f6e18b39f8c7286ba56ea23439e815ecc3ff07870797e7ffe45d311afb6",
+            "previous_epoch_final_checkpoint": "sha256:302bfa1aae6dbdaedb1c0e2ceec86746aa1ab8533fa21ae298881a6ea7ef386f",
             "active_genesis": "sha256:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
             "checkpoint_authority": {
               "current_key_id": "sha256:2f38003f4c602a3a1c1524cbda9f971e40bf22aaaf97a33254b092f7cfcb759f"
@@ -1340,7 +1340,7 @@
             "alg": "Ed25519",
             "key_id": "sha256:2f38003f4c602a3a1c1524cbda9f971e40bf22aaaf97a33254b092f7cfcb759f",
             "pub": "IBLLkMpg6OXY2vZuInLSIz4EhtVX6MZhQe2JIBd9frc",
-            "sig": "rolwW3r4203wUOOxCMqVOdF2CmRcJFtZuiH7eOdxXrkV61tdVI-QTvrZ_WO_8lJAGj7Usa8Vtgv3ciYV214FDA"
+            "sig": "GYQ7ySRm6ZkzpUtED55oSY7nBG_a-Uf1ww9-0pIBNyGZACddN6-tAmbOt0tu3ye5NR_StpHyNyh1qM8MVEQ8BQ"
           }
         }
       ],
@@ -2531,7 +2531,7 @@
           "claim": {
             "purpose": "ust:checkpoint-authority-recovery",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "last_accepted_checkpoint": "sha256:acacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacac",
             "replacement_authority": {
               "key_id": "sha256:33e79620d46655473c61fe5dada234c1c36971ee9de0a1fe058b21e5a684e9e9",
@@ -2545,14 +2545,14 @@
             "alg": "Ed25519",
             "key_id": "sha256:bbf6edc7ef91a4e3ddc011999bc937f32ab822bc3fee28bd26fc9e77979938db",
             "pub": "k9ufLuD3456UL7WUQRkL8gucQ8_MigUaFSSZzzkrejc",
-            "sig": "0Z5YZLlwuhJ8IAFrUfMx86YTc1ZiSgH0lFRa-7LuQN7ZL8dlZFCKBzEzgcft1zDlDBxqpLW1Lg6_DEFbW2Y_BA"
+            "sig": "A5tBL43yWn-81kLb-sSU_1puPhwGgnvpqLaf6u12oURNI9WhHT0fBApPSLnuz6zCG6aMp82zky9sb6DRATNOCA"
           }
         },
         {
           "claim": {
             "purpose": "ust:checkpoint-authority-recovery",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "last_accepted_checkpoint": "sha256:acacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacac",
             "replacement_authority": {
               "key_id": "sha256:33e79620d46655473c61fe5dada234c1c36971ee9de0a1fe058b21e5a684e9e9",
@@ -2566,13 +2566,13 @@
             "alg": "Ed25519",
             "key_id": "sha256:e7c5eeb26a85e3a4878793945059b84534fdf23dbb683522a7745ba675cb8a29",
             "pub": "-gE0epkeBK4PGm2B2yml6k7rWWX1d6ye-0TnsfL7sCg",
-            "sig": "loOAgwzPElljvTcw_Gi7Juio4hPN39EsNqqNz_OhToErax272k-Ai_hX39B_uzct3tDHpMOxSW_vm_iXGnvsAA"
+            "sig": "oWmQmr3w5OK0QrTECSY8JulBBUs1YQ3Ogd_vMsuLuFx3CT5t4vkEF_o5RYBINvtVVmdP6twu9M8Evi80_X58BQ"
           }
         }
       ],
       "opts": {
         "domain_shard": "noosphere.md",
-        "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
         "last_accepted_checkpoint": "sha256:acacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacac",
         "effective_sequence": "1",
         "recoveryKeys": {
@@ -2594,7 +2594,7 @@
           "claim": {
             "purpose": "ust:checkpoint-authority-recovery",
             "domain_shard": "noosphere.md",
-            "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
             "last_accepted_checkpoint": "sha256:acacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacac",
             "replacement_authority": {
               "key_id": "sha256:33e79620d46655473c61fe5dada234c1c36971ee9de0a1fe058b21e5a684e9e9",
@@ -2608,13 +2608,13 @@
             "alg": "Ed25519",
             "key_id": "sha256:bbf6edc7ef91a4e3ddc011999bc937f32ab822bc3fee28bd26fc9e77979938db",
             "pub": "k9ufLuD3456UL7WUQRkL8gucQ8_MigUaFSSZzzkrejc",
-            "sig": "0Z5YZLlwuhJ8IAFrUfMx86YTc1ZiSgH0lFRa-7LuQN7ZL8dlZFCKBzEzgcft1zDlDBxqpLW1Lg6_DEFbW2Y_BA"
+            "sig": "A5tBL43yWn-81kLb-sSU_1puPhwGgnvpqLaf6u12oURNI9WhHT0fBApPSLnuz6zCG6aMp82zky9sb6DRATNOCA"
           }
         }
       ],
       "opts": {
         "domain_shard": "noosphere.md",
-        "genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
         "last_accepted_checkpoint": "sha256:acacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacac",
         "effective_sequence": "1",
         "recoveryKeys": {
@@ -2635,7 +2635,7 @@
         "claim": {
           "purpose": "ust:genesis-epoch-transition",
           "domain_shard": "noosphere.md",
-          "from_genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "from_genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
           "from_final_checkpoint": "sha256:a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
           "to_genesis_epoch": "sha256:b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5",
           "to_checkpoint_authority": {
@@ -2649,12 +2649,12 @@
           "alg": "Ed25519",
           "key_id": "sha256:c70f629aa4aaafe3f1d4239b05ebd556e6e6a211841137b5b0b72f35e0668702",
           "pub": "jKYxRZB6Lmxfs9wHkcAYm4JS2j5BQ3BLOyyk5SbyXdE",
-          "sig": "Gxk-VHphTZduEo1sJ-hRIDxUVOHyKglkDekQgsnEloGGmQC3y8pLouw3bHtHeyepf0ad3zU_83PbX0DVpCHcAQ"
+          "sig": "6WMy2CsmtY5LuCUBOvzHpd5HNwUs-VEaMBeIbVwJyrSXbQfhwckW5QWn2c6iXRibYk6nTopHGHjAW0xqNHFHBg"
         }
       },
       "opts": {
         "domain_shard": "noosphere.md",
-        "from_genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "from_genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
         "from_final_checkpoint": "sha256:a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
         "fromAuthority": {
           "key_id": "sha256:c70f629aa4aaafe3f1d4239b05ebd556e6e6a211841137b5b0b72f35e0668702",
@@ -2672,7 +2672,7 @@
         "claim": {
           "purpose": "ust:genesis-epoch-transition",
           "domain_shard": "noosphere.md",
-          "from_genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+          "from_genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
           "from_final_checkpoint": "sha256:a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
           "to_genesis_epoch": "sha256:b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5",
           "to_checkpoint_authority": {
@@ -2686,12 +2686,12 @@
           "alg": "Ed25519",
           "key_id": "sha256:12cf21e417c25004ee597d3eb09842f1c09b75c12511d2ec6acefdb545ebf7b4",
           "pub": "68GYuLi_rncjJ4w7MWKfKd5ygpeXzMjCzM5tlDakz_I",
-          "sig": "fK4PPjvU_IZfwxPkbKjXgcG3-YMPqkMmIVAwe29_5K27KNYm3YFNCZyDsWg6FYtYDCDQSbaJeJNWa1bwDptuBA"
+          "sig": "5So5xb1RksU2bZYouN2dl0pwxlb9wvQUG4QAKY0Pjc42xUxvoXVgwna-akD6ByZmWOUGHBbXj6mZjs9Wq5s4BA"
         }
       },
       "opts": {
         "domain_shard": "noosphere.md",
-        "from_genesis_epoch": "sha256:a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "from_genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
         "from_final_checkpoint": "sha256:a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
         "fromAuthority": {
           "key_id": "sha256:c70f629aa4aaafe3f1d4239b05ebd556e6e6a211841137b5b0b72f35e0668702",

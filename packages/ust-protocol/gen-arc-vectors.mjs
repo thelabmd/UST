@@ -13,7 +13,7 @@ const kp = (seedHex) => {
   return { priv, pub, key_id: P.keyId(pub) };
 };
 const s = (n) => n.toString(16).padStart(2, '0').repeat(32);          // deterministic 32-byte seed from a small int
-const D = 'noosphere.md', EP = 'sha256:' + 'a1'.repeat(32), AG = 'sha256:' + 'a2'.repeat(32);
+const D = 'noosphere.md', AG = 'sha256:' + 'a2'.repeat(32), EP = P.genesisEpoch(AG);   // canonical epoch (M2): EP = H('ust:genesis-epoch', active_genesis)
 const gAuth = (k) => ({ key_id: k.key_id, pub: k.pub });
 const V = [];
 const add = (id, op, fields) => V.push({ id, op, ...fields });
@@ -66,7 +66,7 @@ const add = (id, op, fields) => V.push({ id, op, ...fields });
   add('recovery-2of3', 'verifyAuthorityCheckpointChain', { chain: [C0, C1r], opts: { genesisAuthority: gAuth(K0), recoveries: { '1': recs }, recoveryKeys: rKeys, recoveryThreshold: 2 }, expect: { result: 'VALID' } });
   add('recovery-below-threshold', 'verifyAuthorityCheckpointChain', { chain: [C0, C1r], opts: { genesisAuthority: gAuth(K0), recoveries: { '1': [recs[0]] }, recoveryKeys: rKeys, recoveryThreshold: 2 }, expect: { result: 'INVALID', error: 'E-AUTHORITY' } });
 
-  const KA0 = kp(s(0x51)), KB0 = kp(s(0x52)), EPB = 'sha256:' + 'b1'.repeat(32), AGB = 'sha256:' + 'b2'.repeat(32);
+  const KA0 = kp(s(0x51)), KB0 = kp(s(0x52)), AGB = 'sha256:' + 'b2'.repeat(32), EPB = P.genesisEpoch(AGB);   // canonical epoch for the post-transition genesis
   const C0a = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: KA0.key_id, keylog: KL }), KA0.priv, KA0.pub);
   const idA = P.authorityCheckpointId(C0a);
   const et = P.buildEpochTransition({ domain_shard: D, from_genesis_epoch: EP, from_final_checkpoint: idA, to_genesis_epoch: EPB, to_key_id: KB0.key_id, to_pub: KB0.pub, to_initial_sequence: '0' }, KA0.priv, KA0.pub);
