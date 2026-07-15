@@ -2327,6 +2327,13 @@ provenance and will be lifted into this ledger when the spec is published.
   ExperimentalAttested` gates the attested rung (K1). The intermediate functions remain exported (`@internal`) —
   K3 brands already make them non-forgeable; making them package-private is K4-tail (a breaking change gated on a
   major-version + surface migration). Round-4 audits ONLY this boundary. Gates: conformance 389/0, parity green.
+- **REV 63 (2026-07-16, `rc.37` line)** — **kernel phase K7: the assembler is a Horn least-fixed-point.**
+  `provePredicates` extracts the proven ATOM set from seam verdicts (never a caller label) and computes the least
+  closure over a fixed Horn rule set (`IdentityAuthoritative`, `FreshnessCorroborated`, `FreshnessAttested`,
+  `TierTOP/HIGH/LIGHT`), recording a premise TRACE; `deriveAssurance` projects the closure and returns the trace +
+  `provenAtoms`; `verifyAuthorityBundle` surfaces them. Coordinate values are unchanged — the win is that assurance
+  is a DERIVATION over admitted atoms (calculus §7), and no-upward-forge is visible (a rung is in the closure iff
+  every premise atom is). Gates: conformance 392/0, model guard green.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

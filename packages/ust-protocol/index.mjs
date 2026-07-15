@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 62 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 63 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -1622,15 +1622,11 @@ export function verifyAuthorityBundle(inputs = {}, config = {}) {
   // 4. assurance: the freshness verdict + admitted evidence → a branded predicate graph → the frozen report (K3).
   const admittedEvidence = [commitment, target?.anchor].filter((e) => isHandle('evidence', e));   // only image(VerifyEvidence_C) contributes capability
   const report = deriveAssurance(provePredicates({ freshness: fresh, evidence: admittedEvidence }));
-  // derivation TRACE — the proven atoms behind the freshness rung (K7 replaces this with the full least-fixed-point).
-  const proven = [];
-  if (fresh.result === 'VALID') { proven.push('checkpoint-authorized', 'scope-bound', 'keylog-append-only', 'snapshot-terminal', 'checkpoint-committed', 'checkpoint-after-target');
-    if (fresh.keylog_freshness === 'attested') proven.push('checkpoint-unique'); }
   return Object.freeze({ result: fresh.result, ...(fresh.error ? { error: fresh.error } : {}), ...(fresh.reason ? { reason: fresh.reason } : {}),
     scope_id: context.scope_id, keylog_freshness: fresh.keylog_freshness,
     ...(fresh.attested_withheld ? { attested_withheld: fresh.attested_withheld } : {}),
     assurance: report.strength, support: report.support, tier: report.tier,
-    derivation: Object.freeze({ rule: fresh.keylog_freshness === 'attested' ? 'FreshnessAttested' : fresh.keylog_freshness === 'corroborated' ? 'FreshnessCorroborated' : 'none', premises: Object.freeze(proven) }),
+    derivation: report.derivation, proven_atoms: report.provenAtoms,                  // K7: the least-fixed-point trace (each rung ← its premises)
     detail: fresh.detail });
 }
 
@@ -1702,6 +1698,24 @@ export function capAssurance(state, ceiling) {
 // plus image('evidence') handles) to the proven-atom strength coordinates and mints a branded PREDICATE-GRAPH handle.
 // It is the ONLY producer of that handle. The seam verdicts it reads are produced by the verifiers, never by a caller
 // label. (K4/K7: the kernel calls this over verdicts it derived from RAW inputs; a caller cannot reach it with fakes.)
+// K7 (rc.37, calculus §7) — the HORN inference layer. provePredicates extracts the proven ATOMS from seam verdicts
+// (never caller labels), then a fixed rule set derives the rungs as a least-closure; the trace records each derived
+// predicate with its premises, so every strong verdict is explainable. `deriveAssurance` projects the closure. The
+// coordinate values are unchanged — the win is that assurance is a DERIVATION over admitted atoms, not a passed value.
+const HORN_RULES = [
+  { concl: 'IdentityAuthoritative', premises: ['name-bound', 'active-genesis-unique'] },
+  { concl: 'FreshnessCorroborated', premises: ['checkpoint-authorized', 'scope-bound', 'keylog-append-only', 'snapshot-terminal', 'checkpoint-committed', 'checkpoint-after-target'] },
+  { concl: 'FreshnessAttested', premises: ['FreshnessCorroborated', 'checkpoint-unique'] },
+  { concl: 'TierTOP', premises: ['integrity-valid', 'IdentityAuthoritative', 'time-anchored'] },
+  { concl: 'TierHIGH', premises: ['integrity-valid', 'name-bound'] },
+  { concl: 'TierLIGHT', premises: ['integrity-valid'] },
+];
+const hornClosure = (atomSet) => {                                                    // least fixed point over HORN_RULES
+  const closed = new Set(atomSet), trace = [];
+  let grew = true;
+  while (grew) { grew = false; for (const r of HORN_RULES) if (!closed.has(r.concl) && r.premises.every((p) => closed.has(p))) { closed.add(r.concl); trace.push({ rule: r.concl, premises: r.premises.slice() }); grew = true; } }
+  return { closed, trace };
+};
 export function provePredicates({ identity, freshness, anchor, evidence = [] } = {}) {
   const verified = identity?.status === 'verified';                                  // 'suspect' (pre-compromise window) never name-binds — mirrors §14 exactly
   const idStr = !verified ? 'self-asserted'
@@ -1714,14 +1728,24 @@ export function provePredicates({ identity, freshness, anchor, evidence = [] } =
   const support = [...new Set((Array.isArray(evidence) ? evidence : [])
     .filter((e) => isHandle('evidence', e))                                          // K3: capability only from image(VerifyEvidence_C) (B3)
     .flatMap((e) => evidenceCaps(e.proof_kind)))].sort();
-  return mintHandle('predicate-graph', { atoms: Object.freeze({ integrity: 'valid', identity: idStr, freshness: frStr, time: tmStr }), support: Object.freeze(support) });
+  // K7 — the proven ATOMS the seams established (the coordinate strengths are read from these). The Horn closure
+  // derives the composite rungs + a premise trace; a coordinate never lifts without its atom (no-upward-forge).
+  const atomSet = ['integrity-valid'];
+  if (idStr === 'authoritative') atomSet.push('name-bound', 'active-genesis-unique');
+  else if (idStr === 'corroborated' || idStr === 'pinned') atomSet.push('name-bound');
+  if (frStr === 'corroborated' || frStr === 'attested') atomSet.push('checkpoint-authorized', 'scope-bound', 'keylog-append-only', 'snapshot-terminal', 'checkpoint-committed', 'checkpoint-after-target');
+  if (frStr === 'attested') atomSet.push('checkpoint-unique');
+  if (tmStr === 'anchored') atomSet.push('time-anchored');
+  const { trace } = hornClosure(atomSet);
+  return mintHandle('predicate-graph', { atoms: Object.freeze({ integrity: 'valid', identity: idStr, freshness: frStr, time: tmStr }),
+    support: Object.freeze(support), provenAtoms: Object.freeze(atomSet.slice()), derivation: Object.freeze(trace.map((t) => Object.freeze({ ...t, premises: Object.freeze(t.premises) }))) });
 }
 // The assembler. Takes ONLY a branded PredicateGraph (K3 — a caller-shaped {identity:'authoritative'} is NOT a graph,
-// so no coordinate lifts: round-3 P0-4 closed at the type level). Emits the frozen assurance report.
+// so no coordinate lifts: round-3 P0-4 closed at the type level). Emits the frozen assurance report + the K7 trace.
 export function deriveAssurance(graph) {
   if (!isHandle('predicate-graph', graph)) return Object.freeze({ error: 'E-ASSURANCE', detail: 'deriveAssurance requires a verified PredicateGraph handle (K3 — build it with provePredicates over seam verdicts; a caller-shaped object earns nothing)' });
   const strength = Object.freeze(assuranceState({ integrity: 'valid', ...graph.atoms }));
-  return Object.freeze({ strength, support: graph.support, tier: projectTier(strength) });
+  return Object.freeze({ strength, support: graph.support, tier: projectTier(strength), derivation: graph.derivation, provenAtoms: graph.provenAtoms });
 }
 
 // ─── #oy8 CANONICAL REGISTRY — the SINGLE SOURCE OF TRUTH for the protocol's machine-checkable STRING SETS. The spec's
