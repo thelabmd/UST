@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 52 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 53 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -544,8 +544,7 @@ export function verify(doc, opts = {}) {
     const assurance = assuranceState({ integrity: 'valid',
       identity: authoritative ? 'authoritative' : nameBound ? 'corroborated' : (identity.strength === 'pinned' ? 'pinned' : 'self-asserted'),
       freshness: identity.freshness || 'unverified',
-      time: timeField.strength === 'anchored' ? 'anchored' : 'unproven',
-      evidence: 'opaque' });
+      time: timeField.strength === 'anchored' ? 'anchored' : 'unproven' });   // M1.1: capability SUPPORT is not a strength coordinate (the old 5th axis was a hardwired 'opaque')
     const tier = projectTier(assurance);
     // §3.1/F.5b DOWNGRADE RESISTANCE — the symmetric floor to requireAuthoritative. A consumer requiring TOP
     // MUST reject anything the evidence proves below TOP, NEVER silently accept a lower tier (stripping the anchor
@@ -1520,19 +1519,25 @@ export function deriveCheckpointFreshness(chain, { genesis, genesisAuthority, pi
     head: headId, sequence: b.sequence, active_genesis: b.active_genesis };
 }
 
-// ─── #78 ASSURANCE PRODUCT-LATTICE (formal-model F.5 revision, CODE realization — the math must pass through code +
+// ─── #78 ASSURANCE PRODUCT-LATTICE (formal-model F.5.0, CODE realization — the math must pass through code +
 //     vectors + guard before it ships). The linear tier LIGHT ⊆ HIGH ⊆ TOP is ONE policy projection of a PRODUCT of
-//     FIVE orthogonal, independently-strengthening information axes — identity and freshness strengthen SEPARATELY
-//     (F.5 gap 1/3, `A_id` ⊥ `A_fresh`). Each axis is a total order (a rank); AssuranceState is their product under
-//     the componentwise (partial) order — a LATTICE: meet = per-axis min, join = per-axis max. `projectTier` reads
-//     ONLY identity+time (the classic tier); freshness+evidence ride alongside, never folded in.
+//     FOUR orthogonal, independently-strengthening STRENGTH axes — identity and freshness strengthen SEPARATELY
+//     (F.5 gap 1/3, product-incomparability M1.4). Each axis is a finite CHAIN (a rank); AssuranceState is their
+//     product under the componentwise (partial) order — a LATTICE of 2·4·4·2 = 64 states: meet = per-axis min,
+//     join = per-axis max. `projectTier` reads ONLY identity+time (the classic tier); freshness rides alongside.
+//     M1.1 (rc.36): EvidenceBasis is NOT a strength axis — a capability set is a Boolean lattice (P(Caps), ⊆), not a
+//     4-chain; the rc.35 five-axis product (256) was self-contradictory ("a SET" yet "every axis is a total order").
+//     STRENGTH (what is proven, per coordinate) is separate from SUPPORT (which capabilities the admitted evidence
+//     supplies — EVIDENCE_CAPS_UNIVERSE below); support DERIVES strength, it is not a fifth coordinate.
 export const ASSURANCE_AXES = {
   integrity: ['invalid', 'valid'],                                            // the §14 floor (canon/hash/sig) — the Integrity axis
   identity:  ['self-asserted', 'pinned', 'corroborated', 'authoritative'],    // A_id: name-binding + active-genesis uniqueness (§12.1a)
   freshness: ['unverified', 'fresh', 'corroborated', 'attested'],             // A_fresh: terminality + order + checkpoint uniqueness (§12.2a / §12.3.5)
   time:      ['unproven', 'anchored'],                                        // Fₜ: the anchor filtration (§11.2)
-  evidence:  ['opaque', 'inclusion', 'inclusion+order', 'inclusion+order+time'],  // EvidenceBasis: Variant A — only `inclusion+order+time` may enter Fₜ (§12.3.5)
 };
+// M1.1 — the capability-support UNIVERSE (single-sourced from EVIDENCE_CAPS): |Caps| = 8, support ∈ (P(Caps), ⊆).
+// A predicate is discharged only by an admissible capability (B4); no composition step manufactures one (B3).
+export const EVIDENCE_CAPS_UNIVERSE = Object.freeze([...new Set(Object.values(EVIDENCE_CAPS).flat())].sort());
 const AXES = Object.keys(ASSURANCE_AXES);
 export const axisRank = (axis, v) => ASSURANCE_AXES[axis].indexOf(v);          // -1 ⇒ not a value of this axis
 const axisLE = (axis, a, b) => { const ra = axisRank(axis, a), rb = axisRank(axis, b); return ra >= 0 && rb >= 0 && ra <= rb; };

@@ -3720,8 +3720,7 @@
         "integrity": "valid",
         "identity": "authoritative",
         "freshness": "attested",
-        "time": "anchored",
-        "evidence": "inclusion+order+time"
+        "time": "anchored"
       },
       "expect": {
         "value": "TOP"
@@ -3734,8 +3733,7 @@
         "integrity": "valid",
         "identity": "corroborated",
         "freshness": "corroborated",
-        "time": "unproven",
-        "evidence": "inclusion+order"
+        "time": "unproven"
       },
       "expect": {
         "value": "HIGH"
@@ -3748,8 +3746,7 @@
         "integrity": "valid",
         "identity": "self-asserted",
         "freshness": "unverified",
-        "time": "unproven",
-        "evidence": "opaque"
+        "time": "unproven"
       },
       "expect": {
         "value": "LIGHT"
@@ -3762,8 +3759,7 @@
         "integrity": "invalid",
         "identity": "authoritative",
         "freshness": "attested",
-        "time": "anchored",
-        "evidence": "inclusion+order+time"
+        "time": "anchored"
       },
       "expect": {
         "value": "NONE"
@@ -3776,8 +3772,7 @@
         "integrity": "valid",
         "identity": "authoritative",
         "freshness": "attested",
-        "time": "unproven",
-        "evidence": "inclusion+order+time"
+        "time": "unproven"
       },
       "expect": {
         "value": "HIGH"
@@ -3790,8 +3785,7 @@
         "integrity": "valid",
         "identity": "self-asserted",
         "freshness": "attested",
-        "time": "unproven",
-        "evidence": "opaque"
+        "time": "unproven"
       },
       "expect": {
         "value": "LIGHT"
@@ -3804,15 +3798,13 @@
         "integrity": "valid",
         "identity": "authoritative",
         "freshness": "unverified",
-        "time": "unproven",
-        "evidence": "opaque"
+        "time": "unproven"
       },
       "b": {
         "integrity": "valid",
         "identity": "self-asserted",
         "freshness": "attested",
-        "time": "unproven",
-        "evidence": "opaque"
+        "time": "unproven"
       },
       "expect": {
         "le": false
@@ -3825,15 +3817,13 @@
         "integrity": "valid",
         "identity": "self-asserted",
         "freshness": "attested",
-        "time": "unproven",
-        "evidence": "opaque"
+        "time": "unproven"
       },
       "b": {
         "integrity": "valid",
         "identity": "authoritative",
         "freshness": "unverified",
-        "time": "unproven",
-        "evidence": "opaque"
+        "time": "unproven"
       },
       "expect": {
         "le": false
@@ -3846,15 +3836,13 @@
         "integrity": "valid",
         "identity": "self-asserted",
         "freshness": "unverified",
-        "time": "unproven",
-        "evidence": "opaque"
+        "time": "unproven"
       },
       "b": {
         "integrity": "valid",
         "identity": "authoritative",
         "freshness": "attested",
-        "time": "anchored",
-        "evidence": "inclusion+order+time"
+        "time": "anchored"
       },
       "expect": {
         "le": true
@@ -3867,8 +3855,7 @@
         "integrity": "valid",
         "identity": "authoritative",
         "freshness": "attested",
-        "time": "anchored",
-        "evidence": "inclusion+order+time"
+        "time": "anchored"
       },
       "ceiling": {
         "identity": "self-asserted",
@@ -3887,8 +3874,7 @@
         "integrity": "valid",
         "identity": "authoritative",
         "freshness": "attested",
-        "time": "anchored",
-        "evidence": "inclusion+order+time"
+        "time": "anchored"
       },
       "ceiling": null,
       "expect": {

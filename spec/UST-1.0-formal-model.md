@@ -247,34 +247,70 @@ is the honest name of *how much information the verdict rests on*.
 The nested tower `𝒮_LIGHT ⊆ 𝒮_HIGH ⊆ 𝒮_TOP` above is ONE cut through a richer object. The audit (#76) separated
 structure the linear tier had fused, so F.5 is restated in product form — the per-mechanism theorems `F.5a–F.5n`
 below are its per-AXIS realizations (this subsumes the `F.5a–F.5f` sketch of #78: those names were taken by the
-built theorems during #76, so the framework moves here and the letters stay per-axis). Verification measures FIVE
-ORTHOGONAL coordinates, each its own information sub-σ-algebra of `ℐ`:
+built theorems during #76, so the framework moves here and the letters stay per-axis).
+
+**M1.1 (rc.36) — STRENGTH is separate from SUPPORT.** The rc.35 statement was self-contradictory: EvidenceBasis was
+DEFINED as "a SET of capabilities" yet the theorem asserted "every axis is a total order" and counted `2·4·4·2·4 =
+256` — a capability set is a Boolean lattice `(P(Caps), ⊆)`, not a 4-element chain (and the realized code axis was a
+4-chain the live verifier pinned to `opaque` — a phantom coordinate). The corrected structure:
+
+```
+Strength          := Integrity × IdentityStrength × FreshnessStrength × TimeStrength     (2·4·4·2 = 64, each a CHAIN)
+CapabilitySupport := (P(Caps), ⊆)                                                        (a finite Boolean lattice)
+AssuranceReport   := { strength ∈ Strength, support ∈ P(Caps), basis }
+```
+
+Verification measures FOUR orthogonal STRENGTH coordinates, each its own information sub-σ-algebra of `ℐ`:
 
 - **Integrity** `𝒮_I(d) := {∅, Ω}` — the trivial algebra; the §14 floor, a total function of `d`'s bytes.
 - **IdentityStrength** `A_id := σ(name-binding, active-genesis uniqueness)` (§12.1a / F.5a, F.5j).
-- **FreshnessStrength** `A_fresh := σ(terminality, temporal order, checkpoint uniqueness)` (§12.2a/§12.3 / F.5i, F.5n).
+- **FreshnessStrength** `A_fresh := σ(terminality, chain-consistency, temporal order, checkpoint uniqueness)`
+  (§12.2a/§12.3 / F.5i, F.5n).
 - **TimeStrength** `Fₜ` — the anchor filtration (§11.2 / F.5c).
-- **EvidenceBasis** — the connector-evidence CAPABILITY. Modeled not as a scalar rank but as a SET of capabilities
-  (`order`, `time`, `inclusion`, `consistency`, `membership`, `non-membership`, `content-equality`, `availability`;
-  realized as `EVIDENCE_CAPS`, P2-02) partially ordered by SET INCLUSION — capabilities are NOT naturally linear
-  (map-uniqueness, transparency-consistency, content-equality and trusted-timestamp are mutually incomparable). A
-  predicate is discharged ONLY by an admissible capability: temporal order needs `order`/`time`, so a proof-kind
-  bearing neither (`content-addressed`, `authenticated-map`, opaque) enters `Fₜ` under NO circumstance (Variant A, F.5g).
+
+**CapabilitySupport** — which capabilities the ADMITTED evidence supplies — is deliberately NOT a fifth strength
+coordinate: `Caps = {order, time, inclusion, consistency, membership, non-membership, content-equality,
+availability}` (single-sourced from `EVIDENCE_CAPS` via `EVIDENCE_CAPS_UNIVERSE`, `|Caps| = 8`, so `|P(Caps)| =
+256`), partially ordered by SET INCLUSION — capabilities are NOT naturally linear (map-uniqueness,
+transparency-consistency, content-equality and trusted-timestamp are mutually incomparable — *"M1.1 support is ⊆-ordered, not a chain"*; the universe is pinned by *"M1.1 EVIDENCE_CAPS_UNIVERSE"*). **Support DERIVES strength; it
+never IS strength:** a predicate is discharged only by an admissible capability — temporal order needs
+`order`/`time`, so a proof-kind bearing neither (`content-addressed`, `authenticated-map`, opaque) enters `Fₜ`
+under NO circumstance (Variant A, F.5g) — and the seam (F.5g) guarantees no caller mints support (B3/B4).
 
 **Gap 3 — split `A_id` from `A_fresh`.** These were the two facts `𝒮_HIGH`'s `W_n` fused; F.5a already splits
 name-binding from no-fork, and here the split is axis-level: name authority and key-log freshness are measurable
 one WITHOUT the other.
 
-Each axis is a finite TOTAL order of earned strengths (a rank): *"LATTICE (1) every axis is a total order"*. The
-**AssuranceState** of `d` is the tuple `A(d) = (I, IdentityStrength, FreshnessStrength, TimeStrength, EvidenceBasis)
+Each strength axis is a finite TOTAL order of earned strengths (a rank): *"LATTICE (1) every axis is a total order"*. The **AssuranceState** of `d` is the tuple `A(d) = (I, IdentityStrength, FreshnessStrength, TimeStrength)
 ∈ 𝓐 := ∏ axes`, ordered COMPONENTWISE (`A ≤ A'` iff `≤` on every axis). `(𝓐, ≤)` is a finite distributive LATTICE —
 meet = per-axis min, join = per-axis max — a reflexive/antisymmetric partial order
 (*"LATTICE (2) product order reflexive + antisymmetric"*) obeying the lattice laws over the full
-*"LATTICE product = 256 states"* (*"LATTICE (3) meet=glb, join=lub, commutative + absorption"*).
+*"LATTICE product = 64 states"* (*"LATTICE (3) meet=glb, join=lub, commutative + absorption"*).
 
-**Gap 1 — `A_id ⊥ A_fresh` (independence).** Identity and freshness strengthen INDEPENDENTLY: name authority can
-rise with freshness fixed and vice-versa, so the two are in general INCOMPARABLE in `(𝓐, ≤)` —
-*"LATTICE (4) A_id"* vs `A_fresh`. The linear tower collapsed this; the product keeps them apart.
+**Gap 1 — independence WITHOUT `⊥` (M1.4).** The symbol `⊥` was overloaded (bottom / orthogonality / probabilistic
+independence / contradiction — and the model carries no probability measure). The honest statement is PRODUCT
+INCOMPARABILITY: `(id₂, fresh₁)` and `(id₁, fresh₂)` are incomparable in `(𝓐, ≤)` whenever `id₂ > id₁` and
+`fresh₂ > fresh₁` — identity and freshness strengthen on independent coordinates, so neither dominates —
+*"LATTICE (4) A_id"* / `A_fresh` product-incomparability. The linear tower collapsed this; the product keeps them
+apart.
+
+**M1.2 — Reachability: laws on the ambient product, security on the image.** The 64-state product contains states no
+honest derivation emits (e.g. `Time = anchored ∧ Freshness = unverified` where the anchor IS fresh evidence). Define
+`Reach_C := image(deriveAssurance_C) ⊆ Strength` — the tuples the verifier can actually output under consumer config
+`C`. Lattice LAWS (meet/join/monotone `Π`) are proved on the ambient product (above); SECURITY properties
+(no-upward-forge, downgrade-resistance, no-rung-without-its-predicate) are stated on `Reach_C` — the
+evidence→assurance transition where the rc.35 findings lived; the exhaustive 64-state checks exercise the rank
+ALGEBRA, not that transition. The confinement property (`deriveAssurance_C` never leaves `Reach_C`) is the Phase-V
+conformance obligation (UST-sul), landing with the C3 pure-derivation seam.
+
+**M1.3 — strict rungs via INFORMATION ALGEBRAS, not σ(verdict).** Every ladder in this model is defined over the
+σ-algebra generated by the OBSERVABLES a verifier admits — never over verdict outcomes (for Boolean predicates
+`Y ⇒ X` does not order `σ(X), σ(Y)`). The freshness ladder: `ℐ_unverified := {∅, Ω}`;
+`ℐ_fresh := ℐ_unverified ∨ σ(fresh-fetch: as_of ≥ anchor)`; `ℐ_corrob := ℐ_fresh ∨ σ(authorized-chain,
+head∈committed-root, terminal, chain-consistent, proven-after)`; `ℐ_attested := ℐ_corrob ∨ σ(independent
+anti-equivocation: distinct-domain quorum ∨ authenticated-map uniqueness)`. Each inclusion is STRICT exactly under
+the non-degeneracy hypothesis below — the P0 fixes (consumer-rooted §B2, capability-checked F.5g) ENFORCE it. The
+identity ladder `ℐ_self ⊊ ℐ_pinned ⊊ ℐ_corrob-id ⊊ ℐ_auth` has the same shape (F.5a).
 
 **Non-degeneracy (P2-01) — the STRICT inclusions need a NAMED hypothesis.** Claims like `corroborated ⊊ authoritative`
 (F.5a) and `corroborated ⊊ attested` (F.5j) are STRICT only under an explicit assumption, made here: the independent
@@ -301,9 +337,9 @@ rung WITHOUT its predicate — all rejected):
 corroborated`); `LIGHT` iff the integrity floor holds; `NONE` below it (*"LATTICE (6b) integrity floor unmet"*).
 `Π` is ORDER-PRESERVING — `A ≤ A' ⇒ Π(A) ≤ Π(A')`, so more assurance NEVER lowers the tier:
 *"LATTICE (5) projectTier is monotone"*. And `Π` agrees with the §14 verifier on every realized strength — no
-second truth: *"LATTICE (6) projectTier agrees with the realized"* tier. Crucially `FreshnessStrength` and
-`EvidenceBasis` are NOT in `Π`'s image: they strengthen the state WITHOUT moving the linear tier — the product
-carries assurance the scalar ladder cannot express.
+second truth: *"LATTICE (6) projectTier agrees with the realized"* tier. Crucially `FreshnessStrength` (and the separate
+`CapabilitySupport` lattice) are NOT in `Π`'s image: they strengthen the report WITHOUT moving the linear tier —
+the product carries assurance the scalar ladder cannot express.
 
 **Gap 2 — `ℐ_C`, the CAPPED term.** A consumer config `C = (accepted roots, accepted issuers, issuer→trust_domain,
 installed-verifier trust, policy floors)` induces `ℐ_C = σ(evidence verified AND admitted under C) ⊆ ℐ`. The
@@ -315,9 +351,9 @@ domains: *"LATTICE (7c) proven-TOP capped by no-trust-roots"*. A missing/out-of-
 *"LATTICE (8) missing/out-of-range axis"* ⇒ fail-closed. This is the measure-theoretic content of "assurance is
 never self-declared": `ℐ_C` is the consumer's, and the meet is computed, never asserted by the publisher.
 
-*Sketch.* Each axis order is total and finite, so `∏` under the componentwise order is a finite distributive
-lattice with per-coordinate meet/join (standard); the three properties are checked exhaustively over all `2·4·4·2·4
-= 256` states and `256²` pairs. `Π` is monotone because each of its three read coordinates is monotone and the
+*Sketch.* Each strength axis order is total and finite, so `∏` under the componentwise order is a finite
+distributive lattice with per-coordinate meet/join (standard); the three properties are checked exhaustively over
+all `2·4·4·2 = 64` states and `64²` pairs. `Π` is monotone because each of its three read coordinates is monotone and the
 `TOP/HIGH/LIGHT` thresholds are up-sets; agreement with §14 is the `identity×time` case check. `ceil(C)` is an
 element of `𝓐`, so `A ∧ ceil(C) ≤ A` is immediate from meet, giving downgrade-resistance (F.5b) as a lattice fact,
 not a separate axiom. ∎
@@ -350,9 +386,15 @@ distinct predicates result:
   Consistency proofs between successive signed roots give append-only; a monitor watching the leaf at `n` gives
   detection (`W1`). Decidable in `σ(K_n) ∨ Fₜ`.
 
-**Proposition F.5a.** `σ(corroborated) ⊊ σ(no-fork)`. Corroboration is decidable from data the PUBLISHER serves;
-no-fork requires the map coordinate, which the publisher does not control — the same separation as membership vs
-authenticated non-membership in F.3.1, now on the NAME axis rather than the TIME axis. Consequently the honest
+**Proposition F.5a (M1.3 form — σ of the EVIDENCE, never of the verdict).** Let `ℐ_corrob-id := σ(key-binding,
+the publisher's served list)` and `ℐ_auth := ℐ_corrob-id ∨ σ(anchored map-coordinate / consumer-admitted witness)`.
+Then `ℐ_corrob-id ⊊ ℐ_auth`, STRICT under the F.5.0 non-degeneracy hypothesis (the map/witness coordinate is not a
+measurable function of the publisher's view, and two histories exist agreeing on the served list but differing at
+the coordinate — a rival genesis). The rc.35 wording `σ(corroborated) ⊊ σ(no-fork)` was a category error: for
+Boolean predicates `Y ⇒ X` does NOT order the OUTCOME σ-algebras `σ(X), σ(Y)` — the ladder lives on the observables
+a verifier admits, not on verdicts. Corroboration is decidable from data the PUBLISHER serves; no-fork requires the
+map coordinate, which the publisher does not control — the same separation as membership vs authenticated
+non-membership in F.3.1, now on the NAME axis rather than the TIME axis. Consequently the honest
 verdict when `ℐ` holds only the served list is **`corroborated`** — a real, bounded fact (key-bound name, no
 rival in the publisher's own view), NOT nothing — and **`authoritative`/`no-fork`** is emitted only when `ℐ`
 contains an anchored map-inclusion for `n`. Suppressing the map removes it from *everyone's* `ℐ`, which lowers
@@ -399,8 +441,9 @@ a 0/1 axiom `Ax_C` the consumer adjoins to its OWN view at its own responsibilit
 
 **Proposition F.5a.1 (the override never silently equals `authoritative`).** `consumer-override` is decided by
 `Ax_C` alone, by no coordinate of `ℐ_C` (neither the served list of `corroborated` nor the admitted-witness/map of
-`authoritative`). So on the identity axis the σ-algebra order stays `σ(self-asserted) ⊊ σ(corroborated) ⊊
-σ(authoritative)`, and `consumer-override` sits OFF this chain as a labelled consumer axiom. It maps onto the
+`authoritative`). So on the identity axis the INFORMATION ladder stays `ℐ_self ⊊ ℐ_corrob-id ⊊ ℐ_auth` (M1.3 —
+σ-algebras of admitted observables, not of verdicts), and `consumer-override` sits OFF this chain as a labelled
+consumer axiom. It maps onto the
 name-authoritative TIER only under an explicit projection `π_override` (`acceptConsumerOverride`), and the verdict
 always carries `independently_verified = false`. In particular `noForkConfirmed = 1` alone never yields the label
 `authoritative` — the REV 44 overclaim (a raw boolean earning `authoritative`) is closed by construction.

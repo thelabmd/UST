@@ -161,11 +161,12 @@ const add = (id, op, fields) => V.push({ id, op, ...fields });
 // ─── #78 ASSURANCE PRODUCT-LATTICE vectors — pure axis-tuple contracts (no keys): tier projection, the product
 //     order (independence witnesses), and the ℐ_C cap. A second impl reproduces projectTier/assuranceLE/capAssurance.
 {
-  const TOP = { integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored', evidence: 'inclusion+order+time' };
-  const HIGH = { integrity: 'valid', identity: 'corroborated', freshness: 'corroborated', time: 'unproven', evidence: 'inclusion+order' };
-  const LIGHT = { integrity: 'valid', identity: 'self-asserted', freshness: 'unverified', time: 'unproven', evidence: 'opaque' };
-  const idUp = { integrity: 'valid', identity: 'authoritative', freshness: 'unverified', time: 'unproven', evidence: 'opaque' };
-  const frUp = { integrity: 'valid', identity: 'self-asserted', freshness: 'attested', time: 'unproven', evidence: 'opaque' };
+  // M1.1 — STRENGTH is four chains (64 states); capability SUPPORT is a separate Boolean lattice, not a coordinate.
+  const TOP = { integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored' };
+  const HIGH = { integrity: 'valid', identity: 'corroborated', freshness: 'corroborated', time: 'unproven' };
+  const LIGHT = { integrity: 'valid', identity: 'self-asserted', freshness: 'unverified', time: 'unproven' };
+  const idUp = { integrity: 'valid', identity: 'authoritative', freshness: 'unverified', time: 'unproven' };
+  const frUp = { integrity: 'valid', identity: 'self-asserted', freshness: 'attested', time: 'unproven' };
   add('lat-tier-top', 'projectTier', { state: TOP, expect: { value: 'TOP' } });
   add('lat-tier-high', 'projectTier', { state: HIGH, expect: { value: 'HIGH' } });
   add('lat-tier-light', 'projectTier', { state: LIGHT, expect: { value: 'LIGHT' } });

@@ -900,13 +900,14 @@ console.log('\n═════════════════════�
   check('TERM wrong head at position L-1 → not terminal', P.verifyKeylogTerminality({ root: kl1.root, length: '1', head: 'sha256:' + '99'.repeat(32) }, kl1).terminal === false);
 }
 
-// ─── #78 ASSURANCE PRODUCT-LATTICE — the formal-model F.5 revision realized as RUNNING property checks (math ⇒ code
-//     ⇒ vector). Exhaustive over the full 2×4×4×2×4 = 256-state product; deterministic, no sampling for pairwise laws.
+// ─── #78/M1 ASSURANCE PRODUCT-LATTICE — the formal-model F.5.0 realized as RUNNING property checks (math ⇒ code
+//     ⇒ vector). M1.1: STRENGTH = four chains (2×4×4×2 = 64); capability SUPPORT is a separate Boolean lattice
+//     (P(Caps), ⊆) — not a fifth coordinate. Exhaustive; deterministic, no sampling for pairwise laws.
 {
   const AX = P.ASSURANCE_AXES, keys = Object.keys(AX);
   const all = []; (function rec(i, acc) { if (i === keys.length) return all.push({ ...acc }); for (const v of AX[keys[i]]) rec(i + 1, { ...acc, [keys[i]]: v }); })(0, {});
   const eq = (a, b) => keys.every((k) => a[k] === b[k]);
-  check('LATTICE product = 256 states (2×4×4×2×4)', all.length === 256);
+  check('LATTICE product = 64 states (2×4×4×2) — strength only, support is not a coordinate (M1.1)', all.length === 64);
 
   // (1) every axis a TOTAL order (all pairs comparable); (2) the product a PARTIAL order (reflexive + antisymmetric)
   let totalOK = true; for (const ax of keys) for (const x of AX[ax]) for (const y of AX[ax]) if (!(P.axisRank(ax, x) <= P.axisRank(ax, y) || P.axisRank(ax, y) <= P.axisRank(ax, x))) totalOK = false;
@@ -914,32 +915,32 @@ console.log('\n═════════════════════�
   let refl = true, antisym = true; for (const a of all) { if (!P.assuranceLE(a, a)) refl = false; for (const b of all) if (P.assuranceLE(a, b) && P.assuranceLE(b, a) && !eq(a, b)) antisym = false; }
   check('LATTICE (2) product order reflexive + antisymmetric', refl && antisym);
 
-  // (3) LATTICE laws pairwise (256²): meet a lower bound, join an upper bound, both commutative + absorptive
+  // (3) LATTICE laws pairwise (64²): meet a lower bound, join an upper bound, both commutative + absorptive
   let latOK = true; for (const a of all) for (const b of all) {
     const m = P.meetAssurance(a, b), j = P.joinAssurance(a, b);
     if (!(P.assuranceLE(m, a) && P.assuranceLE(m, b) && P.assuranceLE(a, j) && P.assuranceLE(b, j))) latOK = false;
     if (!(eq(m, P.meetAssurance(b, a)) && eq(j, P.joinAssurance(b, a)))) latOK = false;                 // commutative
     if (!(eq(P.meetAssurance(a, j), a) && eq(P.joinAssurance(a, m), a))) latOK = false;                 // absorption
   }
-  check('LATTICE (3) meet=glb, join=lub, commutative + absorption (256² pairs)', latOK);
+  check('LATTICE (3) meet=glb, join=lub, commutative + absorption (64² pairs)', latOK);
 
   // (4) A_id ⊥ A_fresh — the axes strengthen INDEPENDENTLY (gap 1/3): id-up/fresh-fixed vs fresh-up/id-fixed is INCOMPARABLE
-  const idUp = { integrity: 'valid', identity: 'authoritative', freshness: 'unverified', time: 'unproven', evidence: 'opaque' };
-  const frUp = { integrity: 'valid', identity: 'self-asserted', freshness: 'attested', time: 'unproven', evidence: 'opaque' };
-  check('LATTICE (4) A_id ⊥ A_fresh — independent axes incomparable', !P.assuranceLE(idUp, frUp) && !P.assuranceLE(frUp, idUp));
+  const idUp = { integrity: 'valid', identity: 'authoritative', freshness: 'unverified', time: 'unproven' };
+  const frUp = { integrity: 'valid', identity: 'self-asserted', freshness: 'attested', time: 'unproven' };
+  check('LATTICE (4) A_id / A_fresh product-incomparability (M1.4 — no ⊥): id-up vs fresh-up incomparable', !P.assuranceLE(idUp, frUp) && !P.assuranceLE(frUp, idUp));
 
-  // (5) projectTier MONOTONE over every comparable pair (256²): a ≤ b ⇒ tier(a) ≤ tier(b)
+  // (5) projectTier MONOTONE over every comparable pair (64²): a ≤ b ⇒ tier(a) ≤ tier(b)
   let monoOK = true; for (const a of all) for (const b of all) if (P.assuranceLE(a, b) && !(P.TIER_RANK[P.projectTier(a)] <= P.TIER_RANK[P.projectTier(b)])) monoOK = false;
   check('LATTICE (5) projectTier is monotone (order-preserving)', monoOK);
 
   // (6) the projection AGREES with the realized §14 tier (authoritative∧anchored⇒TOP; name-bound⇒HIGH) — NO 2nd truth
   const inlineTier = (id, time) => (id === 'authoritative' && time === 'anchored') ? 'TOP' : (id === 'corroborated' || id === 'authoritative') ? 'HIGH' : 'LIGHT';
-  let agreeOK = true; for (const id of AX.identity) for (const time of AX.time) if (P.projectTier({ integrity: 'valid', identity: id, freshness: 'unverified', time, evidence: 'opaque' }) !== inlineTier(id, time)) agreeOK = false;
+  let agreeOK = true; for (const id of AX.identity) for (const time of AX.time) if (P.projectTier({ integrity: 'valid', identity: id, freshness: 'unverified', time }) !== inlineTier(id, time)) agreeOK = false;
   check('LATTICE (6) projectTier agrees with the realized §14 tier (identity+time)', agreeOK);
-  check('LATTICE (6b) integrity floor unmet ⇒ NONE (INVALID upstream)', P.projectTier({ integrity: 'invalid', identity: 'authoritative', freshness: 'attested', time: 'anchored', evidence: 'inclusion+order+time' }) === 'NONE');
+  check('LATTICE (6b) integrity floor unmet ⇒ NONE (INVALID upstream)', P.projectTier({ integrity: 'invalid', identity: 'authoritative', freshness: 'attested', time: 'anchored' }) === 'NONE');
 
   // (7) capAssurance = the ℐ_C CAPPED term (F.5b downgrade-resistance): downgrade-only (cap ≤ proven), idempotent, no-ceiling ⇒ identity
-  const top = { integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored', evidence: 'inclusion+order+time' };
+  const top = { integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored' };
   let capOK = true; for (const a of all) { const c = P.capAssurance(a, { identity: 'pinned', freshness: 'fresh' }); if (!P.assuranceLE(c, a) || !eq(P.capAssurance(c, { identity: 'pinned', freshness: 'fresh' }), c)) capOK = false; }
   check('LATTICE (7a) capAssurance downgrade-only (cap ≤ proven) + idempotent', capOK);
   check('LATTICE (7b) no ceiling ⇒ unchanged', eq(P.capAssurance(top, null), top));
@@ -947,8 +948,13 @@ console.log('\n═════════════════════�
   check('LATTICE (7c) proven-TOP capped by no-trust-roots/no-domains ⇒ tier drops to LIGHT', P.projectTier(capped) === 'LIGHT' && capped.identity === 'self-asserted' && capped.freshness === 'corroborated');
 
   // (8) fail-closed: a missing/out-of-range axis ⇒ E-ASSURANCE (never a guessed state)
-  let threw = ''; try { P.assuranceState({ integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored' }); } catch (e) { threw = e.code; }
-  check('LATTICE (8) missing/out-of-range axis ⇒ E-ASSURANCE (fail-closed)', threw === 'E-ASSURANCE');
+  let threw = ''; try { P.assuranceState({ integrity: 'valid', identity: 'authoritative', freshness: 'attested' }); } catch (e) { threw = e.code; }
+  let threw2 = ''; try { P.assuranceState({ integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'sometime' }); } catch (e) { threw2 = e.code; }
+  check('LATTICE (8) missing/out-of-range axis ⇒ E-ASSURANCE (fail-closed)', threw === 'E-ASSURANCE' && threw2 === 'E-ASSURANCE');
+
+  // M1.1 — capability SUPPORT: a separate Boolean lattice (P(Caps), ⊆), single-sourced, |Caps| = 8
+  check('M1.1 EVIDENCE_CAPS_UNIVERSE: |Caps| = 8, single-sourced from EVIDENCE_CAPS (support ≠ strength coordinate)', P.EVIDENCE_CAPS_UNIVERSE.length === 8 && ['pow-header-chain', 'transparency-log', 'authenticated-map', 'content-addressed', 'rfc3161-tsa'].every((k) => P.evidenceCaps(k).every((c) => P.EVIDENCE_CAPS_UNIVERSE.includes(c))));
+  check('M1.1 support is ⊆-ordered, not a chain: transparency-log vs authenticated-map caps are incomparable sets', (() => { const a = P.evidenceCaps('transparency-log'), b = P.evidenceCaps('authenticated-map'); return !a.every((c) => b.includes(c)) && !b.every((c) => a.includes(c)); })());
 }
 
 // ─── #39 negative / absence observation — the notary's other half ──────────────────────────────────────

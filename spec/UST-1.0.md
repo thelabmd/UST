@@ -2201,6 +2201,20 @@ provenance and will be lifted into this ledger when the spec is published.
   model 121/121, security 24/0 (rc35-P0h). With M2+M3+M4 all four round-2 P0 classes are closed
   (epoch-split, verifiedEvidence-forge, keylog-rewind, cross-scope evidence); next — M1 (lattice/EvidenceBasis) +
   M5 (quorum algebra) + C3 (pure deriveAssurance) (bd `UST-6vj`).
+- **REV 53 (2026-07-15, `rc.36`)** — **authority-layer refactor, phase M1 (the lattice, made internally consistent) +
+  the math-consistency guard.** The rc.35 F.5.0 was SELF-contradictory: EvidenceBasis was defined as "a SET of
+  capabilities" yet counted as a 4-chain in a five-axis product (`2·4·4·2·4 = 256` — and the realized code axis was a
+  phantom the live verifier pinned to `opaque`). M1.1 separates STRENGTH from SUPPORT: `AssuranceState` is now the
+  product of FOUR chains (integrity·identity·freshness·time, **2·4·4·2 = 64**); capability support is the separate
+  Boolean lattice `(P(Caps), ⊆)` over the 8-capability universe (`EVIDENCE_CAPS_UNIVERSE`, single-sourced from
+  `EVIDENCE_CAPS`); support DERIVES strength, it is never a coordinate. M1.2 `Reach_C` — lattice laws on the ambient
+  product, SECURITY on `image(deriveAssurance_C)` (confinement lands with C3/V). M1.3 — strict rungs restated over
+  INFORMATION algebras (σ of admitted observables), fixing the `σ(corroborated) ⊊ σ(no-fork)` category error (σ of a
+  verdict). M1.4 — `A_id ⊥ A_fresh` restated as product-incomparability (no overloaded `⊥`). **New guard section
+  (UST-1n1)** in `model-correspondence.mjs`: every numeric structure claim in the formal model (axis products,
+  `|Caps|`, `|P(Caps)|`) is RECOMPUTED from the live code structures — the class of error where the model's own
+  numbers contradict its own definitions is now machine-caught (negative-tested: an injected wrong count fails the
+  gate). Gates: conformance 360/0, model 123/123 + 4 numeric claims, arc regenerated (lat-* now 4-axis).
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the
