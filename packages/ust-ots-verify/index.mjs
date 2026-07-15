@@ -99,8 +99,18 @@ export function makeSubstrateVerify({ upgrade = true, fetchImpl = fetch, explore
     }
     if (conflict) return { final: false, time: 'unproven' };                   // ANY reachable disagreement → definitive NO
     if (agree < need) return { final: false, time: 'unproven', detail: `only ${agree}/${need} independent explorers corroborated` };
-    return { final: true, time, assurance: need >= 2 ? 'explorer-corroborated' : 'explorer-single', explorers: agree };
+    return { final: true, time, block_height: String(parsed.height), assurance: need >= 2 ? 'explorer-corroborated' : 'explorer-single', explorers: agree };
   };
+}
+
+// P1-06 — emit a TYPED, capability-bearing VerifiedEvidence from a FINAL substrate result, so the core's freshness
+// derivation consumes a CONNECTOR-produced record (proof_kind bounds its capability), never a caller-fabricated one.
+// A non-final / incomplete result yields null (no evidence). `pow-header-chain` ⇒ order+time capable (EVIDENCE_CAPS).
+export function toVerifiedEvidence(subject, result, source_id = 'bitcoin-ots') {
+  if (!result || result.final !== true || result.block_height === undefined) return null;
+  const isoZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+  return { proof_kind: 'pow-header-chain', subject, source_id,
+    facts: { substrate: 'bitcoin', position: String(result.block_height), ...(isoZ.test(result.time || '') ? { not_before: result.time } : {}) } };
 }
 
 // Convenience default (upgrade-on-verify). Pass to resolveByDiscovery/verifyAnchor as `substrateVerify`.

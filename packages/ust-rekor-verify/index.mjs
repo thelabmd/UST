@@ -112,8 +112,18 @@ export function makeSubstrateVerify({ fetchImpl = fetch, api = REKOR, rekorPubKe
     if (!verifyCheckpoint(proof.checkpoint, proof.rootHash, proof.treeSize, pubKey))
       return { final: false, time: 'unproven' };
 
-    return { final: true, time: integratedTime ? new Date(integratedTime * 1000).toISOString().slice(0, 19) + 'Z' : 'rekor-logged' };
+    return { final: true, time: integratedTime ? new Date(integratedTime * 1000).toISOString().slice(0, 19) + 'Z' : 'rekor-logged', log_index: String(proof.logIndex) };
   };
+}
+
+// P1-06 — emit a TYPED, capability-bearing VerifiedEvidence from a FINAL Rekor result, consumed by the core's
+// freshness derivation (transparency-log ⇒ inclusion+consistency+order over the SAME log, per EVIDENCE_CAPS; NOT
+// non-membership/uniqueness). A non-final result yields null. The log index is the within-log order coordinate.
+export function toVerifiedEvidence(subject, result, source_id = 'rekor') {
+  if (!result || result.final !== true || result.log_index === undefined) return null;
+  const isoZ = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+  return { proof_kind: 'transparency-log', subject, source_id,
+    facts: { substrate: 'rekor', position: String(result.log_index), ...(isoZ.test(result.time || '') ? { not_before: result.time } : {}) } };
 }
 
 export const substrateVerify = makeSubstrateVerify();

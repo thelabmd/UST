@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { makeSubstrateVerify, verifyCheckpoint, verifyInclusion } from './index.mjs';
+import { makeSubstrateVerify, verifyCheckpoint, verifyInclusion, toVerifiedEvidence } from './index.mjs';
 
 const sha256 = (b) => createHash('sha256').update(b).digest();
 const FIX = JSON.parse(readFileSync(new URL('./test-fixture.json', import.meta.url)));
@@ -71,4 +71,12 @@ test('entry that does not attest our root → null (claim ≠ proof)', async () 
 test('verifyInclusion: single-leaf tree is self-consistent (why (3) is REQUIRED)', () => {
   const leaf = sha256(Buffer.from('x'));
   assert.equal(verifyInclusion({ leafHash: leaf, index: 0, treeSize: 1, hashes: [], rootHash: leaf.toString('hex') }), true);
+});
+
+test('P1-06 toVerifiedEvidence maps a FINAL Rekor result to typed transparency-log evidence; non-final ⇒ null', () => {
+  const ev = toVerifiedEvidence('sha256:subj', { final: true, log_index: '42', time: '2026-07-01T00:00:00Z' });
+  assert.equal(ev.proof_kind, 'transparency-log');
+  assert.equal(ev.facts.substrate, 'rekor');
+  assert.equal(ev.facts.position, '42');
+  assert.equal(toVerifiedEvidence('sha256:subj', { final: false }), null);
 });

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { makeSubstrateVerify, parseOtsBitcoin } from './index.mjs';
+import { makeSubstrateVerify, parseOtsBitcoin, toVerifiedEvidence } from './index.mjs';
 
 const F = JSON.parse(readFileSync(new URL('./test-fixture.json', import.meta.url)));
 
@@ -107,4 +107,13 @@ test('non-bitcoin substrate → null (router delegates onward)', async () => {
 test('parseOtsBitcoin extracts the attested block height', () => {
   const parsed = parseOtsBitcoin(Buffer.from(F.ots, 'base64'));
   assert.equal(parsed.height, F.height);
+});
+
+test('P1-06 toVerifiedEvidence maps a FINAL result to typed pow-header-chain evidence; non-final ⇒ null', () => {
+  const ev = toVerifiedEvidence('sha256:subj', { final: true, block_height: '800000', time: '2026-07-01T00:00:00Z' });
+  assert.equal(ev.proof_kind, 'pow-header-chain');
+  assert.equal(ev.facts.substrate, 'bitcoin');
+  assert.equal(ev.facts.position, '800000');
+  assert.equal(ev.facts.not_before, '2026-07-01T00:00:00Z');
+  assert.equal(toVerifiedEvidence('sha256:subj', { final: false }), null);
 });
