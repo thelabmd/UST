@@ -15,7 +15,12 @@
 // `unproven`, never a false `final`.
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-const OTS = createRequire(import.meta.url)('opentimestamps');
+// P1-08 — LAZY, OPTIONAL load. The abandoned `opentimestamps` (→ deprecated request/form-data with critical
+// CRLF/boundary advisories) is an OPTIONAL dependency loaded ONLY on the OTS substrate path, so importing this
+// module (parseOtsBitcoin, toVerifiedEvidence) never pulls the vulnerable network chain. Missing ⇒ substrateVerify
+// declines (null) and the router delegates onward; the operator installs it only to use the Bitcoin substrate.
+const _require = createRequire(import.meta.url);
+let _OTS; const loadOTS = () => { if (_OTS !== undefined) return _OTS; try { _OTS = _require('opentimestamps'); } catch { _OTS = null; } return _OTS; };
 
 const EXPLORERS = ['https://blockstream.info/api', 'https://mempool.space/api'];
 const OTS_BTC_TAG = Buffer.from([0x05, 0x88, 0x96, 0x0d, 0x73, 0xd7, 0x19, 0x01]);
@@ -56,6 +61,8 @@ export function makeSubstrateVerify({ upgrade = true, fetchImpl = fetch, explore
     if (sub && sub !== 'bitcoin-ots') return null;                 // not ours → router delegates onward
     const otsB64 = anchor?.ots ?? anchor?.anchor?.ots;
     if (!otsB64 || typeof root !== 'string') return null;
+    const OTS = loadOTS();
+    if (!OTS) return null;                                          // P1-08: opentimestamps not installed (opt-in substrate) → decline, router delegates onward
     let det;
     try { det = OTS.DetachedTimestampFile.deserialize(Uint8Array.from(Buffer.from(otsB64, 'base64'))); }
     catch { return null; }
