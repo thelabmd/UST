@@ -92,7 +92,8 @@ const add = (id, op, fields) => V.push({ id, op, ...fields });
   const CC0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog: kcn(2) }), K0.priv, K0.pub);
   const ccid = P.authorityCheckpointId(CC0);
   const CC1 = (kl) => P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '1', previous_checkpoint: ccid, active_genesis: AG, current_key_id: K0.key_id, keylog: kl }), K0.priv, K0.pub);
-  add('keylog-grows-across-checkpoints', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1(kcn(3))], opts: { genesisAuthority: gAuth(K0) }, expect: { result: 'VALID' } });
+  add('keylog-grows-across-checkpoints', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1(kcn(3))], opts: { genesisAuthority: gAuth(K0), keylogEntries: EV }, expect: { result: 'VALID' } });   // K5: a growth edge requires the prefix witness
+  add('keylog-growth-without-witness-indeterminate', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1(kcn(3))], opts: { genesisAuthority: gAuth(K0) }, expect: { result: 'INDETERMINATE', reason: 'chain_consistency_unproven' } });   // K5 / round-3 P0-3
   add('keylog-rewind-rejected', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1(kcn(1))], opts: { genesisAuthority: gAuth(K0) }, expect: { result: 'INVALID', error: 'E-COMMIT' } });
   add('keylog-same-length-rewrite-rejected', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1((() => { const c = P.buildKeylogCommitment([EV[0], 'sha256:' + '0f'.repeat(32)]); return { root: c.root, length: c.length, head: c.head }; })())], opts: { genesisAuthority: gAuth(K0) }, expect: { result: 'INVALID', error: 'E-COMMIT' } });
   add('keylog-prefix-witness-valid', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1(kcn(3))], opts: { genesisAuthority: gAuth(K0), keylogEntries: EV }, expect: { result: 'VALID' } });

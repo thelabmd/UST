@@ -1064,7 +1064,10 @@ BEFORE Cₙ's signature is trusted. The verifier MUST supply a root — preferre
 (the `verifiedGenesisContext` output, §12.3.0a — ONE verified derivation carrying scope + authority + recovery keys;
 C₀ is bound to ITS `active_genesis`, `authority_root:"verified-context"`); or `genesis` (roots resolved from the
 signed genesis); or `genesisAuthority = {key_id, pub}` (a consumer PIN); or a
-`pinnedPrior = {checkpoint_id, authority, sequence}`. No root ⇒ **INDETERMINATE (`authority_unresolved`)** — never a
+`pinnedPrior` — a FULL scoped `PinnedCheckpointState {scope_id, checkpoint_id, sequence, authority_for_next,
+keylog_size, keylog_root, keylog_head}` (a branded chain handle, or a complete consumer snapshot); a bare
+`{checkpoint_id, authority, sequence}` pin is scope-free and REJECTED (round-3 P0-2 — the continuation must live in
+the pin's scope). No root ⇒ **INDETERMINATE (`authority_unresolved`)** — never a
 silent accept. For each Cₙ, in order:
 
 1. **Shape.** `body.purpose == "ust:authority-checkpoint"`, `sequence` is a canonical decimal string, and
@@ -1078,12 +1081,14 @@ silent accept. For each Cₙ, in order:
    - **Normal step**: expected = the authority Cₙ₋₁ committed for THIS sequence — `{next_key_id, next_pub}` iff
      Cₙ₋₁'s `effective_sequence == sequence`, else the unchanged prior authority. Require
      `previous_checkpoint == prior.id` (`E-PREV`) and `sequence == prior.sequence + 1` (`E-SEQ`); domain unchanged.
-     **Chain-consistent key log (M4.2):** the key log is APPEND-ONLY across same-epoch checkpoints —
+     **Chain-consistent key log (M4.2 / K5):** the key log is APPEND-ONLY across same-epoch checkpoints —
      `keylog.length` MUST be ≥ the prior checkpoint's, and an EQUAL length MUST commit the identical
-     `root`+`head`; violation ⇒ `E-COMMIT` (a signed rewind/rewrite is a proven contradiction). When the verifier
-     supplies the key-log entry vector (`keylogEntries`, ≤ 256 per §13 — it already holds it for key resolution),
-     EVERY checkpoint's `keylog` must recompute as the commitment over a PREFIX of that one vector (all prefixes of
-     one vector are mutually consistent) — the full prefix-extension witness; mismatch ⇒ `E-COMMIT`.
+     `root`+`head` (violation ⇒ `E-COMMIT`, a signed rewind/rewrite is a proven contradiction). A GROWTH edge
+     REQUIRES the prefix-extension witness: the verifier supplies the key-log entry vector (`keylogEntries`, ≤ 256
+     per §13 — it already holds it for key resolution) and EVERY checkpoint's `keylog` must recompute as the
+     commitment over a PREFIX of that one vector (all prefixes of one vector are mutually consistent; mismatch ⇒
+     `E-COMMIT`). WITHOUT the witness a growth edge is `INDETERMINATE(chain_consistency_unproven)`, never VALID —
+     length alone does not prove an append (round-3 P0-3).
    - An unresolvable expected signer ⇒ **INDETERMINATE (`authority_unresolved`)**.
 3. **Authenticate against the RESOLVED signer.** The candidate signers are the resolved authority AND — after key
    loss — a bound recovery replacement for exactly this sequence (§12.3.2). Cₙ's `sig` MUST strict-verify (§7)
@@ -2303,6 +2308,16 @@ provenance and will be lifted into this ledger when the spec is published.
   (round-3 P0-4 closed). A VALID chain mints a `CheckpointChainHandle` carrying the full scoped `PinnedCheckpointState`
   (the K5 cold-start root). `isVerifiedHandle(kind,x)` is the only reader — consumers TEST provenance, never MINT it.
   security-regression r3-P0-1 + r3-P0-4. Gates: conformance 382/0, security 31/0, model guard green.
+- **REV 61 (2026-07-15, `rc.37` line)** — **kernel phase K5-core: the last two round-3 P0 closed structurally.**
+  Append-only is now built into the checkpoint TRANSITION: a GROWTH edge REQUIRES the prefix-extension witness
+  (`keylogEntries`) — without it the chain is `INDETERMINATE(chain_consistency_unproven)`, never VALID (length
+  monotonicity alone does not prove `[A]→[X,Y]` is an append; round-3 P0-3). `deriveCheckpointFreshness` forwards the
+  witness. `pinnedPrior` MUST be a full scoped `PinnedCheckpointState` (a branded `CheckpointChainHandle` or a
+  complete consumer snapshot with `scope_id` + key-log); a bare `{checkpoint_id, authority, sequence}` pin is
+  rejected and a pinned continuation must live in the pin's scope (round-3 P0-2 — no scope-free jump). New
+  INDETERMINATE reason `chain_consistency_unproven`. §12.3.1 + F.5i in lockstep. security-regression r3-P0-2 +
+  r3-P0-3. **All four round-3 P0 now dissolve at the type/transition level** (forged context K3, forged assembler K3,
+  scope-free pin K5, growth rewrite K5). Gates: conformance 383/0, arc 61/0, security 33/0, model guard green.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

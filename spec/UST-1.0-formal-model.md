@@ -827,7 +827,9 @@ and the vector committed by `keylog(C_{n-1})` is a PREFIX of the one committed b
 relation is witnessed by the key-log ENTRY VECTOR itself (≤ 256 by the §13 resolution ceiling — the consumer already
 holds it for `resolveKeys`): every checkpoint's commitment must recompute over a prefix of that ONE vector, and all
 prefixes of one vector are mutually consistent. Monotone length + equal-length-identity hold UNCONDITIONALLY (no
-witness needed); a violation is `INVALID(E-COMMIT)` — a proven contradiction, not an absence.
+witness needed); a GROWTH edge REQUIRES the prefix witness — without it (K5, round-3 P0-3) append-only across the
+growth is unproven and the chain is `INDETERMINATE(chain_consistency_unproven)`, never VALID (length alone does not
+prove `[A]→[X,Y]` is an append). A rewind/same-length-rewrite is `INVALID(E-COMMIT)` — a proven contradiction.
 
 Each conjunct is separately measurable, so a MISSING coordinate names itself rather than forging the verdict:
 `¬Authorized ⇒ INVALID` (F.5h), `¬Binds ⇒ E-GENESIS`, `¬ChainConsistent ⇒ INVALID(E-COMMIT)` (a signed rewind is
@@ -855,7 +857,7 @@ anti_equivocation:"unverified"}` and has no `attested` branch.
 **Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
 - the conjunction holds ⇒ corroborated: *"PhB all conjuncts (authorized × head∈root × proven-after) → corroborated"*.
 - the ceiling: *"PhB CEILING: corroborated carries anti_equivocation:unverified and is NEVER attested"*.
-- `ChainConsistent` (M4.2): *"M4.2 keylog grows across checkpoints (2→3, same vector) → VALID"*, *"M4.2 keylog REWIND (length 2→1) → INVALID(E-COMMIT) — a signed rewind is caught without any proof"*, *"M4.2 equal-length keylog with a DIFFERENT root/head → INVALID(E-COMMIT) — same-length history rewrite"*, *"M4.2 prefix-extension witness: every checkpoint is a prefix of the supplied entry vector → VALID"*, *"M4.2 prefix-extension witness: a checkpoint whose keylog is NOT a prefix of the vector → INVALID(E-COMMIT)"*, *"M4.2 witness longer than the checkpoint keylog is fine; checkpoint longer than the witness → INVALID(E-COMMIT)"*, *"M4.2 keylogEntries over the §13 ceiling (257) → INVALID(E-BOUNDS) before any Merkle work"*.
+- `ChainConsistent` (M4.2): *"M4.2 keylog grows across checkpoints (2→3) with the prefix witness → VALID"*, *"K5 growth WITHOUT the prefix witness → INDETERMINATE(chain_consistency_unproven) (round-3 P0-3)"*, *"M4.2 keylog REWIND (length 2→1) → INVALID(E-COMMIT) — a signed rewind is caught without any proof"*, *"M4.2 equal-length keylog with a DIFFERENT root/head → INVALID(E-COMMIT) — same-length history rewrite"*, *"M4.2 prefix-extension witness: every checkpoint is a prefix of the supplied entry vector → VALID"*, *"M4.2 prefix-extension witness: a checkpoint whose keylog is NOT a prefix of the vector → INVALID(E-COMMIT)"*, *"M4.2 witness longer than the checkpoint keylog is fine; checkpoint longer than the witness → INVALID(E-COMMIT)"*, *"M4.2 keylogEntries over the §13 ceiling (257) → INVALID(E-BOUNDS) before any Merkle work"*.
 - named indeterminacy per missing conjunct: *"PhB commitment NOT proven-after target → INDETERMINATE(order_unproven)"*, *"PhB two not_after upper bounds → unproven → order_unproven"*, *"PhB terminality missing → INDETERMINATE(terminality_unproven)"*, *"PhB commitment not bound to checkpoint id → INDETERMINATE(evidence_unverified)"* (M3 — a receipt for a different subject is not admissible evidence here), *"PhB unauthorized chain (wrong signer) → INVALID, freshness unverified"*, *"PhB checkpoint active_genesis ≠ target → INVALID(E-GENESIS)"*, *"PhB cold verifier (no root) → INDETERMINATE(authority_unresolved)"*.
 
 All green at REV 44 (conformance 266/0); ChainConsistent added at REV 52.

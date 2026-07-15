@@ -263,6 +263,28 @@ sec('r3-P0-4', 'UST-znh', 'deriveAssurance rejects a caller-shaped verdict objec
   return forged.error === 'E-ASSURANCE' && P.isVerifiedHandle('predicate-graph', { atoms: {}, support: [] }) === false;
 });
 
+// rc.36 round-3 (K5) — scope-free pinnedPrior: a bare {checkpoint_id, authority, sequence} pin let a continuation
+// jump into a NEW domain/genesis without an epoch transition (round-3 P0-2). Post-K5 a pin MUST be a full scoped
+// PinnedCheckpointState (or a branded chain handle), and the continuation must live in the pin's scope.
+sec('r3-P0-2', 'UST-znh', 'a scope-free pinnedPrior cannot root a continuation into a new domain/genesis', () => {
+  const AG2 = 'sha256:' + '33'.repeat(32), klc = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);
+  const c42 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: 'evil.example', genesis_epoch: P.genesisEpoch(AG2), sequence: '42', previous_checkpoint: 'sha256:' + 'aa'.repeat(32), active_genesis: AG2, current_key_id: K0.key_id, keylog: { root: klc.root, length: klc.length, head: klc.head } }), K0.priv, K0.pub);
+  const bare = P.verifyAuthorityCheckpointChain([c42], { pinnedPrior: { checkpoint_id: 'sha256:' + 'aa'.repeat(32), authority: { key_id: K0.key_id, pub: K0.pub }, sequence: '41' } });
+  return bare.result !== 'VALID';
+});
+
+// rc.36 round-3 (K5) — growth key-log rewrite: a checkpoint that GROWS the key-log length to an UNRELATED vector
+// ([A]→[X,Y], not a prefix) used to pass on length monotonicity alone (round-3 P0-3). Post-K5 a growth edge without
+// the prefix-extension witness is INDETERMINATE, never VALID.
+sec('r3-P0-3', 'UST-znh', 'a growth key-log rewrite (non-prefix) without a consistency witness is not VALID', () => {
+  const AG = 'sha256:' + '44'.repeat(32), EPk = P.genesisEpoch(AG);
+  const A = 'sha256:' + '01'.repeat(32), X = 'sha256:' + '02'.repeat(32), Y = 'sha256:' + '03'.repeat(32);
+  const kc = (arr) => { const c = P.buildKeylogCommitment(arr); return { root: c.root, length: c.length, head: c.head }; };
+  const c0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPk, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog: kc([A]) }), K0.priv, K0.pub);
+  const c1 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPk, sequence: '1', previous_checkpoint: P.authorityCheckpointId(c0), active_genesis: AG, current_key_id: K0.key_id, keylog: kc([X, Y]) }), K0.priv, K0.pub);
+  return P.verifyAuthorityCheckpointChain([c0, c1], { genesisAuthority: { key_id: K0.key_id, pub: K0.pub } }).result !== 'VALID';
+});
+
 // ─── report ────────────────────────────────────────────────────────────────────────────────────
 console.log('\n  rc.33 audit — security regression (Phase 0, epic UST-1o6): SECURE-expectation gate');
 for (const [s, id, bd, d] of rows) console.log(s + '  ' + id.padEnd(8) + bd.padEnd(9) + d);

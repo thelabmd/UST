@@ -623,7 +623,7 @@ console.log('\n═════════════════════�
   const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
   const AG = 'sha256:' + 'bb'.repeat(32), EP = P.genesisEpoch(AG);   // M2: epoch canonical for the fixture's active_genesis
   const KL = (l, tag) => ({ length: String(l), root: 'sha256:' + (tag + '0').repeat(32).slice(0, 64), head: 'sha256:' + (tag + '1').repeat(32).slice(0, 64) });
-  const bc = (seq, prev, cur, nxt, D = 'noosphere.md', ep = EP) => P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: ep, sequence: seq, previous_checkpoint: prev, active_genesis: AG, current_key_id: cur.key_id, ...(nxt ? { next_key_id: nxt.k.key_id, next_pub: nxt.k.pubB64, effective_sequence: nxt.at } : {}), keylog: KL(5 + Number(seq), 'c') });
+  const bc = (seq, prev, cur, nxt, D = 'noosphere.md', ep = EP) => P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: ep, sequence: seq, previous_checkpoint: prev, active_genesis: AG, current_key_id: cur.key_id, ...(nxt ? { next_key_id: nxt.k.key_id, next_pub: nxt.k.pubB64, effective_sequence: nxt.at } : {}), keylog: KL(5, 'c') });   // K5: constant data key-log across the chain (append-only-consistent; these tests exercise AUTHORITY rotation, not key-log growth)
   const C0 = P.sealAuthorityCheckpoint(bc('0', null, K0, { k: K1, at: '1' }), K0.priv, K0.pubB64); const id0 = P.authorityCheckpointId(C0);
   const C1 = P.sealAuthorityCheckpoint(bc('1', id0, K1, { k: K2, at: '2' }), K1.priv, K1.pubB64); const id1 = P.authorityCheckpointId(C1);
   const C2 = P.sealAuthorityCheckpoint(bc('2', id1, K2, null), K2.priv, K2.pubB64);
@@ -631,7 +631,8 @@ console.log('\n═════════════════════�
   check('AC valid genesis-rooted chain C0→C1→C2 (in-band rotation) → VALID', (r => r.result === 'VALID' && r.head === P.authorityCheckpointId(C2) && r.length === '3')(P.verifyAuthorityCheckpointChain([C0, C1, C2], { genesisAuthority: gAuth })));
   check('AC cold verifier, no genesis/pinned authority → INDETERMINATE(authority_unresolved)', (r => r.result === 'INDETERMINATE' && r.reason === 'authority_unresolved')(P.verifyAuthorityCheckpointChain([C0, C1, C2], {})));
   // pinned prior: the pin carries the authority IN FORCE for the NEXT checkpoint (K2, what C1 committed), not C1's signer
-  check('AC pinned prior C1 → verify only the C1→C2 transition → VALID', (r => r.result === 'VALID')(P.verifyAuthorityCheckpointChain([C2], { pinnedPrior: { checkpoint_id: id1, authority: { key_id: K2.key_id, pub: K2.pubB64 }, sequence: '1' } })));
+  const pinC1 = { scope_id: P.authorityScopeId(AG), checkpoint_id: id1, sequence: '1', authority_for_next: { key_id: K2.key_id, pub: K2.pubB64 }, keylog_size: '5', keylog_root: KL(5, 'c').root, keylog_head: KL(5, 'c').head };   // K5: full PinnedCheckpointState (scope-bound)
+  check('AC pinned prior C1 → verify only the C1→C2 transition → VALID', (r => r.result === 'VALID')(P.verifyAuthorityCheckpointChain([C2], { pinnedPrior: pinC1 })));
   // signer NOT authorized by the prior checkpoint
   check('AC Cₙ signed by a key not authorized by Cₙ₋₁ → INVALID(E-AUTHORITY)', (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C0, P.sealAuthorityCheckpoint(bc('1', id0, K1, { k: K2, at: '2' }), KX.priv, KX.pubB64)], { genesisAuthority: gAuth })));
   // retroactive self-authorization: C1 signed by ITS OWN declared next key (K2), not the prior-authorized K1
@@ -648,8 +649,8 @@ console.log('\n═════════════════════�
   // three-layer id: external evidence is NOT part of checkpoint_id (same checkpoint, two anchor receipts ⇒ same id)
   check('AC checkpoint_id excludes attached external evidence (stable id)', P.authorityCheckpointId({ ...C2, anchor: { substrate: 'bitcoin-ots', receipt: 'a' } }) === P.authorityCheckpointId({ ...C2, anchor: { substrate: 'rekor', receipt: 'b' } }));
   // tampered body ⇒ signature no longer matches the preimage
-  const C2t = { body: { ...C2.body, keylog: { ...C2.body.keylog, head: 'sha256:' + '00'.repeat(32) } }, sig: C2.sig };   // tamper a sig-only field (active_genesis would now trip the M2 epoch check first)
-  check('AC tampered body (sig over the pre-tamper preimage) → INVALID(E-AUTHORITY)', (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C2t], { pinnedPrior: { checkpoint_id: id1, authority: { key_id: K2.key_id, pub: K2.pubB64 }, sequence: '1' } })));
+  const C2t = { body: { ...C2.body, checkpoint_authority: { ...C2.body.checkpoint_authority, current_key_id: 'sha256:' + '00'.repeat(32) } }, sig: C2.sig };   // tamper current_key_id: passes shape/epoch/scope/append-only, breaks ONLY the signature preimage → E-AUTHORITY (active_genesis→scope, keylog→append-only would trip first)
+  check('AC tampered body (sig over the pre-tamper preimage) → INVALID(E-AUTHORITY)', (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C2t], { pinnedPrior: pinC1 })));
   // domain must not change within one chain
   check('AC domain_shard changes within the chain → INVALID(E-MALFORMED)', (r => r.error === 'E-MALFORMED')(P.verifyAuthorityCheckpointChain([C0, P.sealAuthorityCheckpoint(bc('1', id0, K1, null, 'evil.example'), K1.priv, K1.pubB64)], { genesisAuthority: gAuth })));
 }
@@ -904,7 +905,8 @@ console.log('\n═════════════════════�
   const cp = (seq, prevId, kl, over = {}) => P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: seq, ...(prevId ? { previous_checkpoint: prevId } : {}), active_genesis: AG, current_key_id: K0.key_id, keylog: { root: kl.root, length: kl.length, head: kl.head }, ...over }), K0.priv, K0.pubB64);
   const C0 = cp('0', null, kc(2)), id0 = P.authorityCheckpointId(C0);
 
-  check('M4.2 keylog grows across checkpoints (2→3, same vector) → VALID', (r => r.result === 'VALID')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, kc(3))], { genesisAuthority: gA })));
+  check('M4.2 keylog grows across checkpoints (2→3) with the prefix witness → VALID', (r => r.result === 'VALID')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, kc(3))], { genesisAuthority: gA, keylogEntries: E })));
+  check('K5 growth WITHOUT the prefix witness → INDETERMINATE(chain_consistency_unproven) (round-3 P0-3)', (r => r.result === 'INDETERMINATE' && r.reason === 'chain_consistency_unproven')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, kc(3))], { genesisAuthority: gA })));
   check('M4.2 keylog REWIND (length 2→1) → INVALID(E-COMMIT) — a signed rewind is caught without any proof', (r => r.result === 'INVALID' && r.error === 'E-COMMIT')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, kc(1))], { genesisAuthority: gA })));
   check('M4.2 equal-length keylog with a DIFFERENT root/head → INVALID(E-COMMIT) — same-length history rewrite', (r => r.result === 'INVALID' && r.error === 'E-COMMIT')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, P.buildKeylogCommitment([e(0x01), e(0x0f)]))], { genesisAuthority: gA })));
   check('M4.2 prefix-extension witness: every checkpoint is a prefix of the supplied entry vector → VALID', (r => r.result === 'VALID')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, kc(3))], { genesisAuthority: gA, keylogEntries: E })));

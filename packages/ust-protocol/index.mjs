@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 60 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 61 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -1252,7 +1252,21 @@ export function verifyAuthorityCheckpointChain(chain, { genesis, context, genesi
     if (context.recoveryKeys && recoveryKeys === undefined) { recoveryKeys = context.recoveryKeys; recoveryThreshold = recoveryThreshold ?? context.recoveryThreshold; }
   } else if (genesis) { const gr = resolveCheckpointRoots(genesis); if (gr?.genesisAuthority) { genesisAuthority = gr.genesisAuthority; authority_root = 'genesis'; } if (gr?.recoveryKeys && recoveryKeys === undefined) { recoveryKeys = gr.recoveryKeys; recoveryThreshold = recoveryThreshold ?? gr.recoveryThreshold; } }
   if (!genesisAuthority && !pinnedPrior) return { result: 'INDETERMINATE', reason: 'authority_unresolved', detail: 'no genesis-rooted or pinned-prior checkpoint authority to resolve the first signer' };
-  let prev = pinnedPrior ? { id: pinnedPrior.checkpoint_id, authority: pinnedPrior.authority, sequence: pinnedPrior.sequence, body: null } : null;
+  // K5 (round-3 P0-2) — a mid-chain cold start roots ONLY in a full PinnedCheckpointState (a SCOPED snapshot), never a
+  // bare {id, authority, sequence}. Admissible as a branded CheckpointChainHandle (produced by a prior verification) OR
+  // a complete consumer-supplied snapshot; either way it carries scope_id + keylog, so the continuation is scope-bound
+  // and append-only holds from the pin. A scope-free pin used to let a continuation jump into a new domain/genesis.
+  let prev = null;
+  if (pinnedPrior !== undefined) {
+    const pp = pinnedPrior, a = pp?.authority_for_next;
+    const full = isHandle('chain', pp) || (pp && typeof pp === 'object'
+      && isHashStr(pp.scope_id) && isHashStr(pp.checkpoint_id) && isSeq(pp.sequence)
+      && a && typeof a.key_id === 'string' && typeof a.pub === 'string' && keyId(a.pub) === a.key_id
+      && isSeq(pp.keylog_size) && isHashStr(pp.keylog_root) && isHashStr(pp.keylog_head));
+    if (!full) return { result: 'INVALID', error: 'E-AUTHORITY', detail: 'pinnedPrior must be a branded CheckpointChainHandle or a full PinnedCheckpointState {scope_id, checkpoint_id, sequence, authority_for_next, keylog_size, keylog_root, keylog_head} — a scope-free pin is rejected (round-3 P0-2)' };
+    prev = { id: pp.checkpoint_id, authority: a, sequence: pp.sequence, pinScope: pp.scope_id,
+      body: { keylog: { length: pp.keylog_size, root: pp.keylog_root, head: pp.keylog_head } } };   // synthetic prior — carries keylog for append-only; no domain/epoch (scope check binds them)
+  }
   for (let i = 0; i < chain.length; i++) {
     const cp = chain[i], b = cp?.body;
     if (!b || b.purpose !== 'ust:authority-checkpoint') return { result: 'INVALID', error: 'E-MALFORMED', detail: 'not an authority-checkpoint body' };
@@ -1284,7 +1298,7 @@ export function verifyAuthorityCheckpointChain(chain, { genesis, context, genesi
       if (authority_root === 'verified-context' && b.active_genesis !== ctxGenesis)
         return { result: 'INVALID', error: 'E-GENESIS', detail: 'C₀ active_genesis ≠ the verified context active_genesis — checkpoint not bound to its rooting scope (C1/M2)' };
       expected = { key_id: genesisAuthority.key_id, pub: genesisAuthority.pub };       // C₀ rooted in the genesis-authorized key
-    } else if (prev.body && b.genesis_epoch !== prev.body.genesis_epoch) {
+    } else if (prev.body && prev.body.genesis_epoch !== undefined && b.genesis_epoch !== prev.body.genesis_epoch) {   // a scope-pin has no genesis_epoch — its continuation is a normal step bound by scope, not an epoch transition
       // GENESIS-EPOCH TRANSITION — a new epoch must NOT silently reset: it needs an authenticated A→B transition
       // signed by epoch A's authority (prev.authority), binding A's final checkpoint (prev.id). Same domain.
       if (b.domain_shard !== prev.body.domain_shard) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'domain_shard changes within the chain' };
@@ -1302,16 +1316,22 @@ export function verifyAuthorityCheckpointChain(chain, { genesis, context, genesi
       expected = (pca && pca.next_key_id !== undefined && pca.effective_sequence === b.sequence) ? { key_id: pca.next_key_id, pub: pca.next_pub } : prev.authority;
       if (b.previous_checkpoint !== prev.id) return { result: 'INVALID', error: 'E-PREV', detail: 'previous_checkpoint ≠ id of the prior accepted checkpoint' };
       if (b.sequence !== String(BigInt(prev.sequence) + 1n)) return { result: 'INVALID', error: 'E-SEQ', detail: 'sequence is not prev+1' };
-      if (b.domain_shard !== prev.body?.domain_shard && prev.body) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'domain_shard changes within the chain' };
-      // M4.2 ChainConsistent — the key log is APPEND-ONLY ACROSS same-epoch checkpoints (closes keylog-rewind: two
-      // individually-terminal snapshots where Cₙ silently commits a SHORTER/REWRITTEN history). Unconditional:
-      // length is monotone and an equal length commits the IDENTICAL snapshot. (The full prefix-extension proof —
-      // Cₙ₋₁'s vector is a PREFIX of Cₙ's — is the keylogEntries witness below.)
+      // K5 — a scope-pinned continuation MUST live in the pin's scope (round-3 P0-2): scope(g) = H(tag, active_genesis)
+      // binds the whole genesis, so this is stronger than a domain match and covers the pin's missing domain/epoch.
+      if (prev.pinScope !== undefined && authorityScopeId(b.active_genesis) !== prev.pinScope)
+        return { result: 'INVALID', error: 'E-GENESIS', detail: 'pinned-continuation active_genesis is not in the pinned scope (round-3 P0-2 — a scope-free jump is rejected)' };
+      if (prev.body?.domain_shard !== undefined && b.domain_shard !== prev.body.domain_shard) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'domain_shard changes within the chain' };
+      // M4.2 ChainConsistent — the key log is APPEND-ONLY ACROSS same-epoch checkpoints (closes keylog-rewind). Length
+      // monotone + equal-length-identical are UNCONDITIONAL; a GROWTH edge REQUIRES the prefix-extension witness
+      // (keylogEntries) — without it append-only across the growth is unproven (round-3 P0-3), so the chain is
+      // INDETERMINATE, never VALID. Length alone does not prove [A]→[X,Y] is an append.
       if (prev.body) {
         const Lp = BigInt(prev.body.keylog.length), Ln = BigInt(b.keylog.length);
         if (Ln < Lp) return { result: 'INVALID', error: 'E-COMMIT', detail: 'keylog length ' + Ln + ' < prior checkpoint ' + Lp + ' — a signed key-log rewind (append-only violated, M4.2)' };
         if (Ln === Lp && (b.keylog.root !== prev.body.keylog.root || b.keylog.head !== prev.body.keylog.head))
           return { result: 'INVALID', error: 'E-COMMIT', detail: 'equal-length keylog with a different root/head — a same-length history rewrite (M4.2)' };
+        if (Ln > Lp && keylogEntries === undefined)
+          return { result: 'INDETERMINATE', reason: 'chain_consistency_unproven', detail: 'a growth edge (keylog ' + Lp + '→' + Ln + ') requires a prefix-extension witness (keylogEntries); append-only across the growth cannot be proven from length alone (round-3 P0-3)' };
       }
     }
     // M4.2 prefix-extension witness — when the consumer supplies the key-log ENTRY vector (it already holds it for
@@ -1533,8 +1553,8 @@ export function verifyKeylogTerminality({ root, length, head } = {}, proof = {})
 // is capped at `corroborated` and carries `attested_withheld:'experimental-gate'`. Nothing else changes — this is a
 // contract-honesty gate, not a logic change; the closed kernel (UST-znh) replaces this whole function.
 export const STABILITY = Object.freeze({ light: 'stable', high: 'stable', corroborated: 'experimental-usable', attested: 'experimental-extension' });
-export function deriveCheckpointFreshness(chain, { genesis, context, genesisAuthority, pinnedPrior, target, commitment, terminality, uniqueness, trust, allowExperimentalAttested = false } = {}) {
-  const chn = verifyAuthorityCheckpointChain(chain, { genesis, context, genesisAuthority, pinnedPrior });
+export function deriveCheckpointFreshness(chain, { genesis, context, genesisAuthority, pinnedPrior, keylogEntries, target, commitment, terminality, uniqueness, trust, allowExperimentalAttested = false } = {}) {
+  const chn = verifyAuthorityCheckpointChain(chain, { genesis, context, genesisAuthority, pinnedPrior, keylogEntries });   // K5: forward the prefix witness so a growth chain can reach corroborated (round-3 P0-3)
   if (chn.result !== 'VALID') return chn.result === 'INDETERMINATE' ? chn
     : { result: 'INVALID', error: chn.error, detail: 'checkpoint chain not authorized: ' + (chn.detail || chn.error), keylog_freshness: 'unverified' };
   const b = chain[chain.length - 1].body, headId = chn.head;
@@ -1692,7 +1712,7 @@ export const REGISTRY = {
     'E-COMMIT', 'E-ROOT', 'E-SEED', 'E-PREV', 'E-AUTHORITY', 'E-SEQ', 'E-EVIDENCE', 'E-ASSURANCE'],
   // INDETERMINATE reasons — the §14 document-verifier's CLOSED set, and the §12.3.6 authority-checkpoint set (distinct).
   indeterminateReasons: { document: ['unavailable', 'unsupported_alg', 'resource_limit', 'stale_keylog'],
-    checkpoint: ['authority_unresolved', 'terminality_unproven', 'order_unproven', 'evidence_unverified'] },
+    checkpoint: ['authority_unresolved', 'terminality_unproven', 'order_unproven', 'evidence_unverified', 'chain_consistency_unproven'] },
   tiers: Object.keys(TIER_RANK),                                    // NONE/LIGHT/HIGH/TOP — single-sourced from TIER_RANK
   assuranceAxes: ASSURANCE_AXES,                                    // single-sourced from the #78 lattice (§F.5.0)
   evidenceOrder: ['proven-after', 'not-after', 'unproven'],        // compareEvidenceOrder returns (§12.3.5)

@@ -1,7 +1,7 @@
 {
   "version": "UST 1.0 assurance-arc vectors (1.0.0-rc.36)",
   "note": "language-neutral contract: pre-signed inputs + expected verdict, executable by any implementation (see run-arc-vectors.mjs)",
-  "count": 60,
+  "count": 61,
   "vectors": [
     {
       "id": "ac-valid-chain",
@@ -2207,10 +2207,80 @@
         "genesisAuthority": {
           "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
           "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0"
-        }
+        },
+        "keylogEntries": [
+          "sha256:0505050505050505050505050505050505050505050505050505050505050505",
+          "sha256:0606060606060606060606060606060606060606060606060606060606060606",
+          "sha256:0707070707070707070707070707070707070707070707070707070707070707"
+        ]
       },
       "expect": {
         "result": "VALID"
+      }
+    },
+    {
+      "id": "keylog-growth-without-witness-indeterminate",
+      "op": "verifyAuthorityCheckpointChain",
+      "chain": [
+        {
+          "body": {
+            "version": "1",
+            "purpose": "ust:authority-checkpoint",
+            "domain_shard": "noosphere.md",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+            "sequence": "0",
+            "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+            "checkpoint_authority": {
+              "current_key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97"
+            },
+            "keylog": {
+              "root": "sha256:c91ce3ac3724b538c1872950e51f054bb1910a21a6bda15f9cd5214be789d242",
+              "length": "2",
+              "head": "sha256:0606060606060606060606060606060606060606060606060606060606060606"
+            }
+          },
+          "sig": {
+            "alg": "Ed25519",
+            "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+            "sig": "trk29OASKsBpKstkHV7G3aYoBkJHzvvLkJvic-e_V22aTdMm2tsdNpl8NysAVN6l4TLkKTJpuTPiU37L2SoQBw"
+          }
+        },
+        {
+          "body": {
+            "version": "1",
+            "purpose": "ust:authority-checkpoint",
+            "domain_shard": "noosphere.md",
+            "genesis_epoch": "sha256:0b47eb1e9f5e6c671fb3dba656126935944a8d393b3be3eec20348a1ba73753f",
+            "sequence": "1",
+            "previous_checkpoint": "sha256:0e9594810fce68495499296564541cc4adfc75a869d7d32a75980f7fba5ce7ad",
+            "active_genesis": "sha256:a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+            "checkpoint_authority": {
+              "current_key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97"
+            },
+            "keylog": {
+              "root": "sha256:aee92b8cd56944710ba83a8bd2fb92956cb620c2f69e3715ec0e6e49ab347cf1",
+              "length": "3",
+              "head": "sha256:0707070707070707070707070707070707070707070707070707070707070707"
+            }
+          },
+          "sig": {
+            "alg": "Ed25519",
+            "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+            "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0",
+            "sig": "Fd4-gb3RAG3-MZyhe58vdJFW3z3HP9Vb3IzyUo2oUH98ctFoCqBab6vGteKtiI0tvrCBAasw9X5BaXVDcvVvCA"
+          }
+        }
+      ],
+      "opts": {
+        "genesisAuthority": {
+          "key_id": "sha256:c00e513be458544f3e12f578b99b4e261241d9b53e5a002695b13616010bbe97",
+          "pub": "SAdaWX5yGhVuLgeZ3lzAxTJNxufq8c3UYlCGjsUyFd0"
+        }
+      },
+      "expect": {
+        "result": "INDETERMINATE",
+        "reason": "chain_consistency_unproven"
       }
     },
     {
