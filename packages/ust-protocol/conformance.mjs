@@ -874,6 +874,23 @@ console.log('\n═════════════════════�
   check('LATTICE (8) missing/out-of-range axis ⇒ E-ASSURANCE (fail-closed)', threw === 'E-ASSURANCE');
 }
 
+// ─── #39 negative / absence observation — the notary's other half ──────────────────────────────────────
+{
+  const abs = P.seal(P.buildAbsence({ ...ID, ust_id: 'ust:20260628.1401' }, T, 'noaa_swpc', 'unreachable', { subject: 'GOES-18' }), A.priv, A.pubB64);
+  check('#39 buildAbsence → VALID:LIGHT', P.verify(abs, { context: 'data' }).result === 'VALID:LIGHT');
+  check('#39 absence is machine-distinguishable (kind + reason)', abs.state.data.noaa_swpc.kind === 'absence' && abs.state.data.noaa_swpc.value.reason === 'unreachable');
+  check('#39 captured ≠ absence (a normal reading is not a negative)', mk().state.data.sw.kind === 'captured');
+  const noReason = P.seal(P.buildState({ ...ID, ust_id: 'ust:20260628.1402' }, T, { x: { kind: 'absence', value: {} } }), A.priv, A.pubB64);
+  check('#39 public absence WITHOUT reason → E-MALFORMED', P.verify(noReason, { context: 'data' }).error === 'E-MALFORMED');
+  const window = { from: 'ust:20260628.10', to: 'ust:20260628.12' };
+  const cpCovers = { state: { data: { checkpoint: { value: { from: 'ust:20260628.10', to: 'ust:20260628.13' } } } } };
+  const cpShort = { state: { data: { checkpoint: { value: { from: 'ust:20260628.10', to: 'ust:20260628.11' } } } } };
+  check('#39 no-event + chain-consistent + covering interval ⇒ completeness-backed', P.noEventBacking(window, { complete: 'chain-consistent' }, cpCovers) === 'completeness-backed');
+  check('#39 no-event + provisional stream ⇒ publisher-asserted', P.noEventBacking(window, { complete: 'provisional' }, cpCovers) === 'publisher-asserted');
+  check('#39 no-event + interval does NOT contain the window ⇒ publisher-asserted', P.noEventBacking(window, { complete: 'chain-consistent' }, cpShort) === 'publisher-asserted');
+  check('#39 no window ⇒ not-applicable', P.noEventBacking({}, { complete: 'chain-consistent' }, cpCovers) === 'not-applicable');
+}
+
 console.log('  ust-protocol ' + P.VERSION.spec + ' conformance vs ' + V.version);
 console.log('  PASS ' + pass + '   FAIL ' + fail + '   NOTES ' + note);
 if (fails.length) { console.log('\n  FAILURES:'); fails.forEach(f => console.log('    ✗ ' + f)); }

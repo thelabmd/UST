@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.34`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.35`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -270,10 +270,18 @@ that were signed — no glyph substitution hides inside a U-label.
 `data` is a map of one or more **partitions**; names are operator-schema, unique, non-reserved (I3 — names
 live ONLY under `data`, cannot collide with identity). Count ≤ 64 (§13). Each partition is an envelope:
 ```
-Partition := { "kind":"captured"|"computed", "value": { <string leaves> } }               // PUBLIC
-            | { "kind":"captured"|"computed", "privacy":"blinded"|"encrypted",
+Partition := { "kind":"captured"|"computed"|"absence", "value": { <string leaves> } }       // PUBLIC
+            | { "kind":"captured"|"computed"|"absence", "privacy":"blinded"|"encrypted",
                 "commit": ContentHash [, "enc": {"alg":string,"key_id":string,"ct":b64url}] }  // PRIVATE
 ```
+**Absence (`kind:"absence"`, #39 — the notary's other half).** A `captured` partition records what WAS read; an
+`absence` partition records a NON-occurrence or unavailability — *"source S was unreachable"*, *"no alert fired"*,
+*"the value did not change"*. A PUBLIC absence value **MUST** carry a non-empty `reason` (RECOMMENDED one of
+`"unreachable"` | `"no-event"` | `"unchanged"`; publishers MAY use others) and MAY carry the `from`/`to` ust_id
+window it covers plus a `subject`. `kind:"absence"` makes a negative MACHINE-DISTINGUISHABLE from a `captured`
+partition with an empty value (the source returned empty) and from the absence of the transcript itself (the publisher
+did not publish — a stream-completeness question, §11.3). A private absence carries its `reason` inside the sealed
+value. The partition hashes UNIFORMLY like any other; `absence` is a SEMANTIC label, not a different preimage.
 **Per-partition hashing (UNIFORM).** Each partition has its OWN hash in the signed `hashes` map. The preimage is
 the SAME for every partition — it ALWAYS binds `domain_shard`, and the partition NAME is carried as a VALUE
 (`partition:`), never as a key, so a partition name can never overwrite a protocol field:
@@ -730,6 +738,17 @@ the active key at `t`, §12.2, so it cannot be shrunk post-hoc to hide slots). T
 the checkpoint is the existing `class:"attestation"` value plus two bounds, and the gap record already exists.
 Absent a signed cadence in the verifier's information set the range verdict is `chain-consistent`, NEVER
 `complete`.
+
+**No-event ties to completeness (#39).** A `kind:"absence"` partition with `reason:"no-event"` (§4.4) asserts that a
+specific event did NOT occur over a window — an SLA non-breach, a warning NOT issued, an embargo NOT lifted. This
+negative is only as strong as the STREAM COMPLETENESS over that window: the absence transcript verifies on its own
+(identity+integrity), but *"nothing ELSE happened"* is a NO-OMISSION claim, not a single-document property. A consumer
+therefore trusts a no-event claim over `[from,to]` **only** when a `verifyStream` over the covering interval is
+`chain-consistent` (or `complete`) **AND** the covering checkpoint's interval CONTAINS `[from,to]`; otherwise the
+negative is the publisher's UNWITNESSED assertion. `noEventBacking(window, streamResult, checkpoint)` returns
+`completeness-backed` | `publisher-asserted` | `not-applicable`. Without stream completeness a lone absence document
+could hide that something DID happen by simply not publishing the positive frame — exactly the omission that
+`chain-consistent` cannot see and `complete` (the signed grid) closes.
 
 **Concrete format (normative).** The cadence is a string integer of SECONDS, RESOLVED at a slot's time from
 `genesis.value.cadence` (the initial value) plus an optional **cadence-log** — a genesis-rooted, `prev`-chained
@@ -2072,6 +2091,14 @@ provenance and will be lifted into this ledger when the spec is published.
   (F.5l). Plus P1-01 checkpoint fixed-schema enforcement, P1-02 fail-closed `compareEvidenceOrder`, P1-05 duplicate
   typed-key rejection. Gates: conformance 317/0, arc 44/0, model↔code 97/97, security 10/10, cli 130/0. Remaining
   audit items (P1-03/04/06/07/08 release+supply-chain, P2 formal deepening) tracked under UST-1o6.
+- **REV 49 (2026-07-15, `rc.35`)** — **negative / absence observation** (gh#39): the notary's other half — signing
+  that something did NOT happen. A normative `kind:"absence"` partition (§4.4) records a NON-occurrence — `unreachable`
+  / `no-event` / `unchanged` — MACHINE-DISTINGUISHABLE from a captured-empty reading and from a not-published
+  transcript (a PUBLIC absence MUST carry a non-empty `value.reason`). The `no-event` guarantee is TIED to stream
+  completeness (§11.3): a windowed non-occurrence is `completeness-backed` only when `verifyStream` is
+  `chain-consistent`/`complete` over a covering checkpoint interval that CONTAINS the window, else it is the
+  publisher's unwitnessed assertion — `noEventBacking()` returns the verdict. `buildAbsence()` helper added; both new
+  exports triaged in the capability-parity gate (core-only — no surface exposes them yet).
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

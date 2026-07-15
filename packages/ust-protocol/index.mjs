@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.34', revision: 48 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.35', revision: 49 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -189,6 +189,8 @@ export const buildCheckpoint = (id, time, head, frameCount, prev, interval) =>  
   buildState({ ...id, class: 'attestation' }, time, { checkpoint: { kind: 'computed', value: { head, frame_count: String(frameCount), ...(interval ? { from: interval.from, to: interval.to } : {}) } } }, { prev });
 export const buildGap = (id, time, prev, reason) =>                               // §11.3 C2 — a signed gap record: this slot (id.ust_id) is HONESTLY absent
   buildState({ ...id, class: 'attestation' }, time, { gap: { kind: 'computed', value: { reason: reason || 'no-frame' } } }, { prev });
+export const buildAbsence = (id, time, name, reason, extra = {}, prev) =>         // §4.4 #39 — a NEGATIVE observation: partition `name` asserts non-occurrence/unavailability (reason unreachable|no-event|unchanged); `extra` MAY carry {from,to} (the window a no-event covers) / subject
+  buildState({ ...id, class: 'observation' }, time, { [name]: { kind: 'absence', value: { reason, ...extra } } }, prev ? { prev } : undefined);
 export const buildCadenceEntry = (id, time, cadence, effectiveFrom, prev) =>      // §11.3 continuity — a signed cadence CHANGE (key-log pattern); resolved at a slot's time
   buildState({ ...id, class: 'cadence' }, time, { cadence_op: { kind: 'computed', value: { cadence: String(cadence), effective_from: effectiveFrom } } }, { prev });
 
@@ -200,7 +202,12 @@ const RESERVED = { transcript: ['ust','state','sig','proof'], state: ['id','time
 // (the 11th audit found the old set enforced only state+id keys — a spec-impl mismatch).
 const RES_PARTITION_NAMES = new Set([...RESERVED.transcript, ...RESERVED.state, ...RESERVED.id,
   ...RESERVED.envelope, ...RESERVED.provenance, ...RESERVED.sig, 'partition', 'nonce', '__proto__', 'constructor', 'prototype']);
-const KINDS = ['captured', 'computed'], PRIVACY = ['blinded', 'encrypted'];   // §S4/D1: secret-url is a disclosure CHANNEL (§out-of-scope), not a privacy mode
+// §4.4 partition kinds: captured (observed), computed (derived), absence (#39 — a NORMATIVE NEGATIVE: 'source
+// unreachable' / 'no-event' / 'value unchanged'). `absence` is machine-distinguishable from a captured-empty reading
+// and from a not-published transcript. ABSENCE_REASONS is a RECOMMENDED (not closed) set — the value MUST carry a
+// non-empty `reason`; publishers MAY use others, but a consumer branches on these three.
+const KINDS = ['captured', 'computed', 'absence'], PRIVACY = ['blinded', 'encrypted'];   // §S4/D1: secret-url is a disclosure CHANNEL (§out-of-scope), not a privacy mode
+const ABSENCE_REASONS = ['unreachable', 'no-event', 'unchanged'];
 const AEAD_ALGS = ['AES-256-GCM', 'XChaCha20-Poly1305'], B64URL = /^[A-Za-z0-9_-]+$/;
 // the verdict is tier-scoped (`VALID:LIGHT|HIGH|TOP`); this is the ONE place code should test "did it verify" —
 // a bare `r.result === 'VALID'` is intentionally no longer valid (it forces callers to face the tier).
@@ -269,6 +276,11 @@ export function verify(doc, opts = {}) {
       // §4.4 CLOSED per-mode schema: `kind` (captured|computed) is REQUIRED for EVERY partition — a private value
       // was still captured-or-computed; a partition with no kind is malformed, not "private enough to skip."
       if (!KINDS.includes(part.kind)) return bad('E-MALFORMED', 'unknown partition kind: ' + name + '.' + part.kind);
+      // §4.4 #39 — a PUBLIC absence assertion MUST name WHY it is absent (non-empty `value.reason`), so 'source down'
+      // can never be silently confused with 'source returned empty' (a captured partition with an empty value). A
+      // private (blinded/encrypted) absence carries its reason inside the sealed value, so the plain check is skipped.
+      if (part.kind === 'absence' && part.privacy === undefined && (typeof part.value?.reason !== 'string' || part.value.reason.length === 0))
+        return bad('E-MALFORMED', 'absence partition requires a non-empty value.reason: ' + name);
       if (part.privacy !== undefined && !PRIVACY.includes(part.privacy)) return bad('E-MALFORMED', 'unknown privacy mode: ' + name + '.' + part.privacy);
     }
     // step 2 — canonical, content_hash, bijection, per-partition hashes (§14.2, G19, §4.4)
@@ -1491,6 +1503,21 @@ export function verifyStream(frames, { genesis, keylog, checkpoint, cadenceLog, 
     return { complete: 'chain-consistent', head: prevHash };           // no signed cadence + interval → no-deletion ceiling
   }
   return { complete: 'provisional', head: prevHash };                  // no checkpoint → open tail (P5)
+}
+
+// §11.3 #39 — a NO-EVENT claim (a `kind:'absence'` partition, reason 'no-event', carrying the ust_id window {from,to}
+// it covers) is only as strong as the STREAM COMPLETENESS over that window. 'completeness-backed' needs a
+// chain-consistent (or complete) verifyStream whose covering checkpoint interval CONTAINS the claim window; otherwise
+// the negative is only the publisher's UNWITNESSED assertion. The absence DOC still verifies on its own (identity);
+// this answers the SEPARATE question "may I trust that nothing ELSE happened in this window?" — the hard half of a notary.
+export function noEventBacking(claimWindow, streamResult, checkpoint) {
+  if (!claimWindow || claimWindow.from === undefined || claimWindow.to === undefined) return 'not-applicable';
+  if (streamResult?.complete !== 'chain-consistent' && streamResult?.complete !== 'complete') return 'publisher-asserted';
+  const iv = checkpoint?.state?.data?.checkpoint?.value;
+  if (!iv || iv.from === undefined || iv.to === undefined) return 'publisher-asserted';
+  const w0 = ustToEpoch(claimWindow.from), w1 = ustToEpoch(claimWindow.to), i0 = ustToEpoch(iv.from), i1 = ustToEpoch(iv.to);
+  if ([w0, w1, i0, i1].some((x) => x === null)) return 'publisher-asserted';
+  return (i0 <= w0 && i1 >= w1) ? 'completeness-backed' : 'publisher-asserted';   // interval CONTAINS the claim window
 }
 
 // ─── §S6/F7 — the CONFORMANCE boundary is raw bytes. `verify(JSON.parse(x))` can't satisfy §6 because JSON.parse
