@@ -3037,6 +3037,11 @@
             },
             "mapRoot": "sha256:140cf3a4cf7b0dc7091f17b79c30684cfb168e78c8e007c80407bd2f1f16aa5a"
           }
+        },
+        "trust": {
+          "mapRoots": [
+            "sha256:140cf3a4cf7b0dc7091f17b79c30684cfb168e78c8e007c80407bd2f1f16aa5a"
+          ]
         }
       },
       "expect": {

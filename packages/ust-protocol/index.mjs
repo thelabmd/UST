@@ -683,7 +683,11 @@ export function quorumTrustDomains(list, { domains = {}, threshold } = {}) {
   return { count: arr.length, domains: arr, ...(threshold !== undefined ? { met: arr.length >= threshold } : {}) };
 }
 
-export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, noForkEvidence, nameMap, trustRoots, corroborated = false, anchorTime, keylogFreshAsOf, keylogHeadAnchor, substrateVerify } = {}) {
+// ─── UST-0ol Phase 1 — the TRUST BOUNDARY (I_C). A map root is admissible ONLY if the CONSUMER independently holds
+//     it (trust.mapRoots — anchored/pinned out-of-band); it is NEVER taken from the same bundle as the proof. Absence
+//     of admission ⇒ no strong rung (fail-safe). This is the separation of trust-configuration from evidence.
+const mapRootAdmitted = (trust, root) => Array.isArray(trust?.mapRoots) && trust.mapRoots.includes(root);
+export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, noForkEvidence, nameMap, trustRoots, corroborated = false, anchorTime, keylogFreshAsOf, keylogHeadAnchor, substrateVerify, trust } = {}) {
   if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
   if (genesis.state?.id?.domain_shard !== doc.state.id.domain_shard) return { error: 'E-GENESIS', detail: 'genesis domain mismatch' };
   const rk = resolveKeys(genesis, keylog);
@@ -748,10 +752,10 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
   //     `consumer-override` (independently_verified:false), NEVER silently `authoritative` (the removed overclaim,
   //     same class as `mapInclusion:true`). A consumer consciously honoring its own override sets acceptConsumerOverride
   //     at verify(); the verdict stays transparent. Present-but-invalid evidence never upgrades (fail-safe).
-  if (nameMap) {                                                                    // #42 — independent name-map inclusion (prefix-uniqueness ⇒ ¬∃ rival)
+  if (nameMap && mapRootAdmitted(trust, nameMap.mapRoot)) {                          // #42 — name-map inclusion, root CONSUMER-ADMITTED (Phase 1); a self-supplied root never reaches here
     const nm = verifyActiveGenesisUniqueness(nameMap.proof, { domain_shard: doc.state.id.domain_shard, active_genesis: contentHash(genesis), mapRoot: nameMap.mapRoot });
     if (nm.authoritative) return { strength: 'authoritative', noFork: 'map-inclusion', independently_verified: true,
-      basis: 'authenticated-map-uniqueness', map_root: nm.map_root, status: st2, capacity, freshness };
+      basis: 'authenticated-map-uniqueness', map_root: nm.map_root, map_root_admitted: true, status: st2, capacity, freshness };
   }
   if (noForkEvidence !== undefined) {
     const ev = verifyNoForkEvidence(noForkEvidence, { domain_shard: doc.state.id.domain_shard, active_genesis: contentHash(genesis), trustRoots: trustRoots || {} });
@@ -1202,7 +1206,7 @@ export function verifyKeylogTerminality({ root, length, head } = {}, proof = {})
 //     (F.5g `compareEvidenceOrder`, never a timestamp compare). This CLOSES the P0-05 stale-prefix overclaim by
 //     earning `corroborated`, NEVER `attested`: a single publisher cannot prove split-view absence — independent
 //     anti-equivocation is Phase C/#42. (Strict last-index terminality is the #77 refinement; here `head ∈ root`.)
-export function deriveCheckpointFreshness(chain, { genesisAuthority, pinnedPrior, target, commitment, terminality, uniqueness } = {}) {
+export function deriveCheckpointFreshness(chain, { genesisAuthority, pinnedPrior, target, commitment, terminality, uniqueness, trust } = {}) {
   const chn = verifyAuthorityCheckpointChain(chain, { genesisAuthority, pinnedPrior });
   if (chn.result !== 'VALID') return chn.result === 'INDETERMINATE' ? chn
     : { result: 'INVALID', error: chn.error, detail: 'checkpoint chain not authorized: ' + (chn.detail || chn.error), keylog_freshness: 'unverified' };
@@ -1223,7 +1227,7 @@ export function deriveCheckpointFreshness(chain, { genesisAuthority, pinnedPrior
   // failed) ⇒ `attested ⇒ corroborated ∧ independent-uniqueness`; uniqueness alone never earns `attested`.
   if (uniqueness) {
     let uq = null;                                                                       // two INDEPENDENT bases for the SAME predicate
-    if (uniqueness.map) uq = verifyCheckpointMapUniqueness(uniqueness.map.proof, { domain_shard: b.domain_shard, genesis_epoch: b.genesis_epoch, sequence: b.sequence, checkpoint: headId, mapRoot: uniqueness.map.mapRoot });
+    if (uniqueness.map && mapRootAdmitted(trust, uniqueness.map.mapRoot)) uq = verifyCheckpointMapUniqueness(uniqueness.map.proof, { domain_shard: b.domain_shard, genesis_epoch: b.genesis_epoch, sequence: b.sequence, checkpoint: headId, mapRoot: uniqueness.map.mapRoot });   // Phase 1: map root must be consumer-admitted (trust.mapRoots)
     if ((!uq || !uq.attested) && uniqueness.attestations) uq = verifyCheckpointUniqueness(uniqueness.attestations, { domain_shard: b.domain_shard, genesis_epoch: b.genesis_epoch, sequence: b.sequence, checkpoint: headId, trustRoots: uniqueness.trustRoots, domains: uniqueness.domains, threshold: uniqueness.threshold });
     if (uq && uq.attested) return { result: 'VALID', keylog_freshness: 'attested', basis: uq.basis, anti_equivocation: 'attested',
       ...(uq.threshold ? { threshold: uq.threshold, accepted_witnesses: uq.accepted_witnesses, trust_domains: uq.trust_domains } : {}),

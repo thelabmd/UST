@@ -50,7 +50,7 @@ const add = (id, op, fields) => V.push({ id, op, ...fields });
   add('fresh-attested-witness-quorum', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(900, headId), terminality: term, uniqueness: { attestations: [ua(Wa), ua(Wb)], trustRoots, domains, threshold: 2 } }, expect: { keylog_freshness: 'attested', basis: 'accepted-witness-quorum' } });
   const cpLeaf = P.checkpointMapLeaf({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId });
   const cmap = P.buildVerifiableMap([cpLeaf, P.checkpointMapLeaf({ domain_shard: D, genesis_epoch: EP, sequence: '1', checkpoint: 'sha256:' + 'ee'.repeat(32) })]);
-  add('fresh-attested-map', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(900, headId), terminality: term, uniqueness: { map: { proof: cmap.prove(cpLeaf.key), mapRoot: cmap.root } } }, expect: { keylog_freshness: 'attested', basis: 'authenticated-map-uniqueness' } });
+  add('fresh-attested-map', 'deriveCheckpointFreshness', { chain: [C0], opts: { genesisAuthority: gAuth(K0), target, commitment: btc(900, headId), terminality: term, uniqueness: { map: { proof: cmap.prove(cpLeaf.key), mapRoot: cmap.root } }, trust: { mapRoots: [cmap.root] } }, expect: { keylog_freshness: 'attested', basis: 'authenticated-map-uniqueness' } });
 }
 
 // ─── recovery (F.5l) + epoch (F.5m) + terminality (F.5n) ───
