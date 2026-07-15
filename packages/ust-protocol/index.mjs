@@ -1050,6 +1050,9 @@ export function verifyEpochTransition(statement, { domain_shard, from_genesis_ep
   return { ok: true, to_genesis_epoch: claim.to_genesis_epoch, to_checkpoint_authority: ta, to_initial_sequence: claim.to_initial_sequence };
 }
 
+const CP_BODY_KEYS = new Set(['version', 'purpose', 'domain_shard', 'genesis_epoch', 'sequence', 'previous_checkpoint', 'previous_epoch_final_checkpoint', 'active_genesis', 'checkpoint_authority', 'keylog']);
+const CP_CA_KEYS = new Set(['current_key_id', 'next_key_id', 'next_pub', 'effective_sequence']);
+const isHashStr = (s) => typeof s === 'string' && /^sha256:[0-9a-f]{64}$/.test(s);
 export function verifyAuthorityCheckpointChain(chain, { genesisAuthority, pinnedPrior, recoveries, recoveryKeys, recoveryThreshold, epochTransitions } = {}) {
   if (!Array.isArray(chain) || chain.length === 0) return { error: 'E-MALFORMED', detail: 'empty checkpoint chain' };
   if (!genesisAuthority && !pinnedPrior) return { result: 'INDETERMINATE', reason: 'authority_unresolved', detail: 'no genesis-rooted or pinned-prior checkpoint authority to resolve the first signer' };
@@ -1058,6 +1061,14 @@ export function verifyAuthorityCheckpointChain(chain, { genesisAuthority, pinned
     const cp = chain[i], b = cp?.body;
     if (!b || b.purpose !== 'ust:authority-checkpoint') return { result: 'INVALID', error: 'E-MALFORMED', detail: 'not an authority-checkpoint body' };
     if (!isSeq(b.sequence)) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'sequence is not a canonical decimal string' };
+    // P1-01 — enforce the FIXED CheckpointBody grammar BEFORE trusting a (validly-signed) body: version + exact-key
+    // allowlists (body / checkpoint_authority / keylog) + keylog field shapes. A correct signature over junk is junk.
+    if (b.version !== '1') return { result: 'INVALID', error: 'E-MALFORMED', detail: 'checkpoint version must be "1"' };
+    if (Object.keys(b).some((k) => !CP_BODY_KEYS.has(k))) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'unknown checkpoint body field' };
+    const ca0 = b.checkpoint_authority;
+    if (!ca0 || typeof ca0 !== 'object' || Object.keys(ca0).some((k) => !CP_CA_KEYS.has(k))) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'malformed or unknown checkpoint_authority field' };
+    const kl0 = b.keylog;
+    if (!kl0 || typeof kl0 !== 'object' || Object.keys(kl0).some((k) => !['root', 'length', 'head'].includes(k)) || !isHashStr(kl0.root) || !isSeq(kl0.length) || !isHashStr(kl0.head)) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'malformed keylog {root,length,head}' };
     // 1) resolve the EXPECTED signer from PRIOR state (genesis / pinned / previous checkpoint) — before trusting cp
     let expected;
     if (prev === null) {
@@ -1202,20 +1213,41 @@ export function verifyActiveGenesisUniqueness(proof, { domain_shard, active_gene
 // ─── #77 STRICT KEY-LOG TERMINALITY — head is the LAST entry of a length-L log: inclusion of the entry at position
 //     L-1 AND non-membership at position L (no successor). A positioned SMT (F.5k) keyed by index — strictly stronger
 //     than the earlier `head ∈ root` membership (which a hidden successor could satisfy). keylog.root = this SMT root.
-export const keylogPosKey = (index) => H('ust:keylog-pos', canon({ i: String(index) }));
-export const keylogEntryValue = (entryHash) => H('ust:keylog-entry', canon({ h: entryHash }));
+// UST-0ol Phase 4 (P0-02) — a positioned SMT keyed by HASHED index cannot prove "nothing follows the head": absence
+// at index L says nothing about L+1, L+2 (a hidden entry at a non-adjacent index passed as terminal). Replaced by a
+// SIZE-BOUND ordered VECTOR COMMITMENT: root = H("ust:keylog-commit", {length, merkle_root}) over an ordered Merkle
+// of EXACTLY L leaves (padded to a power of two with a domain-separated empty leaf). Terminality = head is the leaf
+// at index L-1 AND every RIGHT sibling on its path is the empty-subtree default ⇒ NOTHING exists beyond the head.
+const KL_EMPTY = H('ust:keylog-empty', '');
+export const keylogLeaf = (entryHash) => H('ust:keylog-leaf', canon({ h: entryHash }));
+const klNode = (l, r) => H('ust:keylog-node', l + '|' + r);
+const klEmptyDefault = (d) => { let e = KL_EMPTY; for (let i = 0; i < d; i++) e = klNode(e, e); return e; };
 export function buildKeylogCommitment(entryHashes) {
   const L = entryHashes.length;
-  const map = buildVerifiableMap(entryHashes.map((h, i) => ({ key: keylogPosKey(i), value: keylogEntryValue(h) })));
-  return { root: map.root, length: String(L), head: entryHashes[L - 1],
-    headProof: map.prove(keylogPosKey(L - 1)), successorProof: map.prove(keylogPosKey(L)), map };
+  let width = 1; while (width < L) width <<= 1;
+  const layers = [entryHashes.map(keylogLeaf)]; while (layers[0].length < width) layers[0].push(KL_EMPTY);
+  while (layers[layers.length - 1].length > 1) {
+    const cur = layers[layers.length - 1], nxt = [];
+    for (let j = 0; j < cur.length; j += 2) nxt.push(klNode(cur[j], cur[j + 1]));
+    layers.push(nxt);
+  }
+  const merkle_root = layers[layers.length - 1][0];
+  const prove = (index) => { const sib = []; for (let d = 0, i = index; d < layers.length - 1; d++, i >>= 1) sib.push(layers[d][i ^ 1]); return { index: String(index), siblings: sib }; };
+  return { root: H('ust:keylog-commit', canon({ length: String(L), merkle_root })), length: String(L), head: entryHashes[L - 1], merkle_root, headProof: prove(L - 1), prove };
 }
 export function verifyKeylogTerminality({ root, length, head } = {}, proof = {}) {
   let L; try { L = BigInt(length); } catch { return { terminal: false, detail: 'length is not an integer' }; }
   if (L < 1n) return { terminal: false, detail: 'empty key-log' };
-  const inc = smtVerify(root, keylogPosKey(String(L - 1n)), keylogEntryValue(head), proof.headProof);   // head at position L-1
-  const noSucc = smtVerify(root, keylogPosKey(String(L)), null, proof.successorProof);                  // nothing at position L
-  return inc && noSucc ? { terminal: true } : { terminal: false, detail: !inc ? 'head not proven at position length-1' : 'a successor entry exists at position length' };
+  const hp = proof.headProof || proof;
+  if (!hp || !Array.isArray(hp.siblings) || String(hp.index) !== String(L - 1n)) return { terminal: false, detail: 'head proof missing or index ≠ length-1' };
+  let node = keylogLeaf(head), i = L - 1n;
+  for (let d = 0; d < hp.siblings.length; d++) {
+    const sib = hp.siblings[d], weAreLeft = (i & 1n) === 0n;                            // LEFT child ⇒ sibling is to the RIGHT (higher indices) ⇒ MUST be an empty subtree
+    if (weAreLeft && sib !== klEmptyDefault(d)) return { terminal: false, detail: 'a later key-log entry exists beyond the head (right subtree at level ' + d + ' is not empty)' };
+    node = weAreLeft ? klNode(node, sib) : klNode(sib, node);                           // combine using the INDEX-derived side, not a proof field
+    i >>= 1n;
+  }
+  return H('ust:keylog-commit', canon({ length: String(L), merkle_root: node })) === root ? { terminal: true } : { terminal: false, detail: 'commitment root mismatch (length/merkle not bound in root)' };
 }
 
 // ─── #76 Phase B — publisher-checkpoint CORROBORATED freshness. Compose the AUTHORIZED chain (F.5h) with the key-log
@@ -1316,7 +1348,7 @@ export const REGISTRY = {
   // hash domain tags (§7/§17) — the tag passed to H()/Hbytes(). MEASURED against actual usage by spec-code-sync.
   hashDomains: ['ust:state', 'ust:shard', 'ust:seed', 'ust:keylog', 'ust:leaf', 'ust:node',
     'ust:authority-checkpoint', 'ust:checkpoint-map-key', 'ust:checkpoint-map-value', 'ust:name-map-key', 'ust:name-map-value',
-    'ust:keylog-pos', 'ust:keylog-entry', 'ust:smt-empty', 'ust:smt-node', 'ust:smt-leaf'],
+    'ust:keylog-empty', 'ust:keylog-leaf', 'ust:keylog-node', 'ust:keylog-commit', 'ust:smt-empty', 'ust:smt-node', 'ust:smt-leaf'],
   // signed `canon` preimage purposes (§12.1a/§12.3) — domain-separated, never interchangeable.
   purposes: ['ust:name-no-fork', 'ust:authority-checkpoint', 'ust:authority-checkpoint-signature',
     'ust:checkpoint-authority-recovery', 'ust:genesis-epoch-transition', 'ust:checkpoint-uniqueness-attestation'],

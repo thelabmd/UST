@@ -610,7 +610,7 @@ console.log('\n═════════════════════�
   const K0 = kp('01'.repeat(32)), K1 = kp('02'.repeat(32)), K2 = kp('03'.repeat(32)), KX = kp('0f'.repeat(32));
   const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
   const EP = 'sha256:' + 'aa'.repeat(32), AG = 'sha256:' + 'bb'.repeat(32);
-  const KL = (l, tag) => ({ length: String(l), root: 'sha256:' + (tag + '0').repeat(16).slice(0, 64), head: 'sha256:' + (tag + '1').repeat(16).slice(0, 64) });
+  const KL = (l, tag) => ({ length: String(l), root: 'sha256:' + (tag + '0').repeat(32).slice(0, 64), head: 'sha256:' + (tag + '1').repeat(32).slice(0, 64) });
   const bc = (seq, prev, cur, nxt, D = 'noosphere.md', ep = EP) => P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: ep, sequence: seq, previous_checkpoint: prev, active_genesis: AG, current_key_id: cur.key_id, ...(nxt ? { next_key_id: nxt.k.key_id, next_pub: nxt.k.pubB64, effective_sequence: nxt.at } : {}), keylog: KL(5 + Number(seq), 'c') });
   const C0 = P.sealAuthorityCheckpoint(bc('0', null, K0, { k: K1, at: '1' }), K0.priv, K0.pubB64); const id0 = P.authorityCheckpointId(C0);
   const C1 = P.sealAuthorityCheckpoint(bc('1', id0, K1, { k: K2, at: '2' }), K1.priv, K1.pubB64); const id1 = P.authorityCheckpointId(C1);
@@ -795,8 +795,8 @@ console.log('\n═════════════════════�
   check('TERM honest length-1 log (head at pos0, nothing at pos1) → terminal', P.verifyKeylogTerminality({ root: kl1.root, length: kl1.length, head: kl1.head }, kl1).terminal === true);
   const kl2 = P.buildKeylogCommitment([e0, e1]);
   check('TERM honest length-2 log (head at pos1, nothing at pos2) → terminal', P.verifyKeylogTerminality({ root: kl2.root, length: kl2.length, head: kl2.head }, kl2).terminal === true);
-  const lie = P.verifyKeylogTerminality({ root: kl2.root, length: '1', head: e0 }, { headProof: kl2.map.prove(P.keylogPosKey(0)), successorProof: kl2.map.prove(P.keylogPosKey(1)) });
-  check('TERM strict catches a HIDDEN SUCCESSOR (length lies) → not terminal (membership could not)', lie.terminal === false && /successor/.test(lie.detail));
+  const lie = P.verifyKeylogTerminality({ root: kl2.root, length: '1', head: e0 }, { headProof: kl2.prove(0) });   // present a length-2 log as length-1, hiding e1
+  check('TERM strict catches a HIDDEN SUCCESSOR (length lies) → not terminal (right subtree not empty)', lie.terminal === false && /beyond|right subtree/.test(lie.detail));
   check('TERM wrong head at position L-1 → not terminal', P.verifyKeylogTerminality({ root: kl1.root, length: '1', head: 'sha256:' + '99'.repeat(32) }, kl1).terminal === false);
 }
 

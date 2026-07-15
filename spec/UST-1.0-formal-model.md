@@ -852,32 +852,39 @@ All green at REV 45 (conformance 301/0).
 ## F.5n Strict key-log terminality — head is the LAST entry, not merely a member (#77)
 
 F.5i's `corroborated` needs the checkpoint head to be TERMINAL: the latest key-log entry, with no more-recent
-revoking successor (the P0-05 / F.5a/F.5d latest-head fact restated on the key-log). Bare membership `head ∈ root`
-is NOT terminality — a log that ALSO holds a successor still contains `head`, so membership is satisfied while the
-head is stale. F.5n proves terminality directly.
+revoking successor. Bare membership `head ∈ root` is NOT terminality — a log that ALSO holds a successor still
+contains `head`, so membership is satisfied while the head is stale.
 
-**Terminality = inclusion at `L-1` ∧ non-membership at `L`.** Commit the key-log as a positioned SMT (F.5k) keyed by
-`H(index)`: leaf at position `i` binds entry `i`. For a claimed length `L`, `Terminal` is the conjunction
-`Inclusion(pos = L-1) → head` (the head sits at the LAST index) `∧ NonMembership(pos = L)` (authenticated absence of
-any entry beyond it — F.3.1 / F.5k). Membership placed `head` SOMEWHERE in the tree; the added non-membership
-coordinate proves nothing follows it. So `Terminal ⊋ HeadInRoot`: terminality strictly implies membership and adds
-the `¬∃ successor` that membership lacked.
+**An earlier construction was UNSOUND (P0-02, external audit).** Committing the key-log as a positioned SMT keyed by
+`H(index)` and proving `Inclusion(L-1) ∧ NonMembership(L)` proves only that index `L` is empty — it says NOTHING
+about indices `L+1, L+2, …`. Because hashed-index leaves are scattered, `[L, ∞)` is not a subtree, so a
+single-coordinate non-membership cannot cover the suffix: a prover commits entries at `{0, 2}`, claims `length = 1`,
+proves `pos 1` empty, and hides the entry at `pos 2`. Sparse-dictionary absence at one coordinate is not
+prefix-contiguity — the claim "non-membership at `L` proves nothing follows" was false.
 
-**It catches the lying-length attack.** A prover who claims length `L` over a root that actually holds an entry at
-position `L` fails the non-membership conjunct ⇒ `not terminal`. Bare `head ∈ root` could not detect this (the head
-IS present); the positioned non-membership at `L` is exactly the coordinate that exposes the hidden successor. This
-upgrades F.5i's `Terminal` conjunct from membership to true terminality, tightening `corroborated` freshness.
+**Terminality is now a SIZE-BOUND vector commitment.** The key-log is an ORDERED Merkle over EXACTLY `L` leaves
+(padded to a power of two with a domain-separated empty leaf), and the committed root binds the size:
+`root = H("ust:keylog-commit", {length = L, merkle_root})`. `Terminal(root, L, head)` holds iff `head` is the leaf at
+index `L-1`, AND on the authentication path from that leaf every RIGHT sibling (each time the path node is a left
+child) is the empty-subtree default for its level, AND the recomputed root equals the committed root. The
+right-siblings-empty condition proves the entire suffix `[L, ∞)` is empty in ONE bounded proof; binding `length` into
+the root forbids re-reading the same tree at another size. There is no coordinate at which a later entry can hide: a
+length-`L` commitment has no committed leaf beyond `L-1`, and a real leaf there makes some right sibling non-empty ⇒
+`not terminal`. So `Terminal ⊋ HeadInRoot`, and — unlike the SMT version — it is sound against a successor at ANY
+index, adjacent or not.
 
-**Realization.** `buildKeylogCommitment(entryHashes)` (positioned SMT root + `head`/`length`/`headProof`/`successorProof`)
-and `verifyKeylogTerminality({root, length, head}, {headProof, successorProof})` (inclusion at `L-1` ∧ non-membership
-at `L`), composed into `deriveCheckpointFreshness` as the `Terminal` conjunct (F.5i).
+**Realization.** `buildKeylogCommitment(entryHashes)` (ordered size-bound Merkle: `root`/`length`/`head`/`merkle_root`
+/`headProof = {index, siblings}` + a `prove(index)`) and `verifyKeylogTerminality({root, length, head}, {headProof})`
+(index `= L-1` ∧ every right sibling on the path is that level's empty default ∧ recomputed
+`H("ust:keylog-commit", {length, merkle_root})` equals `root`), composed into `deriveCheckpointFreshness` as the
+`Terminal` conjunct (F.5i).
 
 **Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
 - terminality holds for honest logs: *"TERM honest length-1 log (head at pos0, nothing at pos1) → terminal"*, *"TERM honest length-2 log (head at pos1, nothing at pos2) → terminal"*.
-- the strict improvement — a hidden successor is caught: *"TERM strict catches a HIDDEN SUCCESSOR (length lies) → not terminal (membership could not)"*.
+- a hidden/truncated successor is caught: *"TERM strict catches a HIDDEN SUCCESSOR (length lies) → not terminal (right subtree not empty)"*.
 - head must sit at the terminal index: *"TERM wrong head at position L-1 → not terminal"*.
 
-All green at REV 45 (conformance 305/0).
+Sound against the P0-02 reproduction (`security-regression.mjs`: a real length-3 log presented as length-1 ⇒ not terminal).
 
 ## F.6 Composition — the event algebra
 

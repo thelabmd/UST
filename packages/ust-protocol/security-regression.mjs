@@ -51,11 +51,11 @@ sec('P0-01b', 'UST-8o0', 'self-supplied checkpoint-map root must NOT earn freshn
     terminality: { headProof: kc.headProof, successorProof: kc.successorProof },
     uniqueness: { map: { proof: cmap.prove(cleaf.key), mapRoot: cmap.root } } }).keylog_freshness !== 'attested');
 
-// ─── P0-02 — sparse absence at L is not prefix-contiguity (hidden entry at position 2) ─────────────
-const h0 = 'sha256:' + '01'.repeat(32), h2 = 'sha256:' + '02'.repeat(32);
-const gapMap = P.buildVerifiableMap([{ key: P.keylogPosKey('0'), value: P.keylogEntryValue(h0) }, { key: P.keylogPosKey('2'), value: P.keylogEntryValue(h2) }]);
-sec('P0-02', 'UST-t8r', 'terminality must be FALSE when a later entry is hidden at a non-adjacent index', () =>
-  P.verifyKeylogTerminality({ root: gapMap.root, length: '1', head: h0 }, { headProof: gapMap.prove(P.keylogPosKey('0')), successorProof: gapMap.prove(P.keylogPosKey('1')) }).terminal === false);
+// ─── P0-02 — terminality is a SIZE-BOUND vector commitment; a truncated view of a longer log is NOT terminal ──────
+const e0t = 'sha256:' + '01'.repeat(32), e1t = 'sha256:' + '02'.repeat(32), e2t = 'sha256:' + '03'.repeat(32);
+const realLog = P.buildKeylogCommitment([e0t, e1t, e2t]);                           // real length-3 log (e1 a later revoke)
+sec('P0-02', 'UST-t8r', 'terminality must be FALSE when a later entry is hidden (log truncated to the head)', () =>
+  P.verifyKeylogTerminality({ root: realLog.root, length: '1', head: e0t }, { headProof: realLog.prove(0) }).terminal === false);
 
 // ─── P0-03 — legacy keylogHeadAnchor accepts a stale prefix as attested ────────────────────────────
 const revoke = P.seal(P.buildKeyLogEntry({ domain_shard: D, ust_id: 'ust:20260705.00', key_id: K0.key_id }, T5, { op: 'revoke', pub: K0.pub, reason: 'retired' }, P.contentHash(gen)), K0.priv, K0.pub);

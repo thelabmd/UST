@@ -77,7 +77,7 @@ const add = (id, op, fields) => V.push({ id, op, ...fields });
   const e0 = 'sha256:' + '01'.repeat(32), e1 = 'sha256:' + '02'.repeat(32);
   const kl2 = P.buildKeylogCommitment([e0, e1]);
   add('terminality-honest', 'verifyKeylogTerminality', { keylog: { root: kl2.root, length: kl2.length, head: kl2.head }, proof: { headProof: kl2.headProof, successorProof: kl2.successorProof }, expect: { terminal: true } });
-  add('terminality-hidden-successor', 'verifyKeylogTerminality', { keylog: { root: kl2.root, length: '1', head: e0 }, proof: { headProof: kl2.map.prove(P.keylogPosKey(0)), successorProof: kl2.map.prove(P.keylogPosKey(1)) }, expect: { terminal: false } });
+  add('terminality-hidden-successor', 'verifyKeylogTerminality', { keylog: { root: kl2.root, length: '1', head: e0 }, proof: { headProof: kl2.prove(0) }, expect: { terminal: false } });
 }
 
 // ─── Phase A connector evidence algebra (F.5g) — order proof-relation, quorum by consumer-resolved domains, class ───
