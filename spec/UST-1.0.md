@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.35`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.36`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -416,7 +416,7 @@ publisher-bound values a layer up.)
   `ust:node`→`left_hash_ascii || right_hash_ascii` (both `sha256:`-prefixed, concatenated); `ust:seed`→
   `utf8(canon([content_hash,…]))`. Distinct tags make a bytes-equal collision across object kinds impossible. The COMPLETE, authoritative domain set is RENDERED from the reference `REGISTRY` (LAYER 1 drift gate §16 — never hand-maintained, so the enumeration above can never claim a domain the code lacks nor omit one it added):
   <!-- BEGIN spec-sync:hash-domains -->
-`ust:state` | `ust:shard` | `ust:seed` | `ust:keylog` | `ust:leaf` | `ust:node` | `ust:authority-checkpoint` | `ust:checkpoint-map-key` | `ust:checkpoint-map-value` | `ust:name-map-key` | `ust:name-map-value` | `ust:keylog-empty` | `ust:keylog-leaf` | `ust:keylog-node` | `ust:keylog-commit` | `ust:smt-empty` | `ust:smt-node` | `ust:smt-leaf`
+`ust:state` | `ust:shard` | `ust:seed` | `ust:keylog` | `ust:leaf` | `ust:node` | `ust:authority-checkpoint` | `ust:checkpoint-map-key` | `ust:checkpoint-map-value` | `ust:name-map-key` | `ust:name-map-value` | `ust:keylog-empty` | `ust:keylog-leaf` | `ust:keylog-node` | `ust:keylog-commit` | `ust:smt-empty` | `ust:smt-node` | `ust:smt-leaf` | `ust:genesis-epoch` | `ust:authority-scope`
 <!-- END spec-sync:hash-domains -->
   `content_hash = H_state(S)` where
   `S = canon({ust, state})` (the signed content) is the document's UNIQUE reference (chains §9, anchors §11,
@@ -2116,6 +2116,15 @@ provenance and will be lifted into this ledger when the spec is published.
   `witnessNoFork`, §12.1a); `noEventBacking` over-backing a window where the publisher was UNREACHABLE at every slot —
   now grades OBSERVATIONAL coverage (`observation-gap`/`observation-unchecked`) and names subject-binding as a caller
   precondition (§11.3); and the §4.5 worked example was corrected from name-as-key to the normative name-as-VALUE.
+- **REV 50 (2026-07-15, `rc.36`)** — **authority-layer math-first refactor, phase C1 (foundation).** A SECOND diverse-model
+  adversarial round (dogfooded UST chain, depth-2) found 4 more P0 in the checkpoint/authority/freshness core, all of one
+  shape — the publisher chose the terms of its own audit. The fix is structural and MATH-FIRST (the theorems lead, in
+  `rnd/MATH-authority-layer.md`; the formal-model file + conformance land in lockstep with the code, never before). This
+  revision lands the scope seam: `verifiedGenesisContext(genesis)` derives the canonical, publisher-inaccessible scope —
+  `genesis_epoch = H("ust:genesis-epoch", contentHash(genesis))` and `scope_id = H("ust:authority-scope", canon{domain,
+  active_genesis, genesis_epoch})` — the sole producer of an authority context. Two new hash domains. Enforcement (each
+  checkpoint's epoch MUST equal the canonical, closing epoch-split) + the evidence-receipt provenance seam + the unified
+  quorum algebra are the next phases (bd `UST-6vj`).
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

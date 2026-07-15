@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.35', revision: 49 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 50 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -186,6 +186,22 @@ export function resolveCheckpointRoots(genesis) {
     if (ok && Object.keys(keys).length) { out.recoveryKeys = keys; out.recoveryThreshold = Number(rec.threshold); }
   }
   return out;
+}
+// M2 (rc.35 refactor, UST-985) — the canonical genesis_epoch is DERIVED from the active genesis; the publisher can never
+// choose the uniqueness namespace (epoch-split). Everything downstream reads this, never a body field.
+export const genesisEpoch = (activeGenesis) => H('ust:genesis-epoch', activeGenesis);
+// M2 — the SOLE producer of an authority SCOPE. verifyGenesis (§2.1 design record): verify the doc, then DERIVE the
+// immutable scope {domain, active_genesis, genesis_epoch, scope_id}. Returns null iff the genesis does not verify as a
+// self-signed class:"genesis"; otherwise the context every checkpoint/uniqueness/recovery predicate is a function of.
+export function verifiedGenesisContext(genesis) {
+  const roots = resolveCheckpointRoots(genesis);                                   // P0-2: verifies class:genesis + self-sig
+  if (!roots) return null;
+  const active_genesis = contentHash(genesis), domain = genesis.state.id.domain_shard;
+  const genesis_epoch = genesisEpoch(active_genesis);
+  const scope_id = H('ust:authority-scope', canon({ domain, active_genesis, genesis_epoch }));
+  return { scope_id, domain, active_genesis, genesis_epoch,
+    checkpoint_authority: roots.genesisAuthority,
+    ...(roots.recoveryKeys ? { recoveryKeys: roots.recoveryKeys, recoveryThreshold: roots.recoveryThreshold } : {}) };
 }
 export const buildKeyLogEntry = (id, time, keyOp, prev) =>                         // §12.2 add|rotate|revoke
   buildState({ ...id, class: 'key' }, time, { key_op: { kind: 'captured', value: keyOp } }, { prev });
@@ -1439,7 +1455,8 @@ export const REGISTRY = {
   // hash domain tags (§7/§17) — the tag passed to H()/Hbytes(). MEASURED against actual usage by spec-code-sync.
   hashDomains: ['ust:state', 'ust:shard', 'ust:seed', 'ust:keylog', 'ust:leaf', 'ust:node',
     'ust:authority-checkpoint', 'ust:checkpoint-map-key', 'ust:checkpoint-map-value', 'ust:name-map-key', 'ust:name-map-value',
-    'ust:keylog-empty', 'ust:keylog-leaf', 'ust:keylog-node', 'ust:keylog-commit', 'ust:smt-empty', 'ust:smt-node', 'ust:smt-leaf'],
+    'ust:keylog-empty', 'ust:keylog-leaf', 'ust:keylog-node', 'ust:keylog-commit', 'ust:smt-empty', 'ust:smt-node', 'ust:smt-leaf',
+    'ust:genesis-epoch', 'ust:authority-scope'],
   // signed `canon` preimage purposes (§12.1a/§12.3) — domain-separated, never interchangeable.
   purposes: ['ust:name-no-fork', 'ust:authority-checkpoint', 'ust:authority-checkpoint-signature',
     'ust:checkpoint-authority-recovery', 'ust:genesis-epoch-transition', 'ust:checkpoint-uniqueness-attestation'],
