@@ -642,6 +642,17 @@ console.log('\n═════════════════════�
   check('AC domain_shard changes within the chain → INVALID(E-MALFORMED)', (r => r.error === 'E-MALFORMED')(P.verifyAuthorityCheckpointChain([C0, P.sealAuthorityCheckpoint(bc('1', id0, K1, null, 'evil.example'), K1.priv, K1.pubB64)], { genesisAuthority: gAuth })));
 }
 
+// ─── P1-04 — checkpoint-authority root RESOLVED from the signed genesis, not a raw caller pin ───────────────────
+{
+  const K0 = kp('31'.repeat(32)), EP = 'sha256:' + '31'.repeat(32), D = 'noosphere.md';
+  const genCA = P.seal(P.buildGenesis({ domain_shard: D, ust_id: 'ust:20260701.00', key_id: K0.key_id }, T, K0.pubB64, undefined, undefined, undefined, { key_id: K0.key_id, pub: K0.pubB64 }), K0.priv, K0.pubB64);
+  const kl = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);
+  const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: P.contentHash(genCA), current_key_id: K0.key_id, keylog: { root: kl.root, length: kl.length, head: kl.head } }), K0.priv, K0.pubB64);
+  check('P1-04 roots RESOLVED from the signed genesis → authority_root:"genesis"', (r => r.result === 'VALID' && r.authority_root === 'genesis')(P.verifyAuthorityCheckpointChain([C0], { genesis: genCA })));
+  check('P1-04 raw genesisAuthority pin → authority_root:"consumer-pin" (not silently genesis-authorized)', (r => r.result === 'VALID' && r.authority_root === 'consumer-pin')(P.verifyAuthorityCheckpointChain([C0], { genesisAuthority: { key_id: K0.key_id, pub: K0.pubB64 } })));
+  check('P1-04 resolveCheckpointRoots rejects a checkpoint_authority key_id ≠ keyId(pub)', P.resolveCheckpointRoots(P.seal(P.buildGenesis({ domain_shard: D, ust_id: 'ust:20260701.01', key_id: K0.key_id }, T, K0.pubB64, undefined, undefined, undefined, { key_id: 'sha256:' + '99'.repeat(32), pub: K0.pubB64 }), K0.priv, K0.pubB64))?.genesisAuthority === undefined);
+}
+
 // ─── #76 Phase B — publisher-checkpoint CORROBORATED freshness (authorized chain × head∈root × proven-after target).
 //     Closes the P0-05 stale-prefix overclaim: earns `corroborated`, NEVER `attested` (no independent anti-equivocation).
 {

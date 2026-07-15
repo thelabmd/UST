@@ -157,13 +157,32 @@ export const buildAttestation = (id, time, data, constituents, prev) =>         
   buildState({ ...id, class: 'attestation' }, time, data, { constituents, root: merkleRoot(constituents), ...(prev !== undefined ? { prev } : {}) });
 export const buildDerivation = (id, time, data, basedOn, prev) =>                  // §9.3/§9.4 based_on + seed
   buildState({ ...id, class: 'derivation' }, time, data, { based_on: basedOn, seed: seed(basedOn.map(b => b.hash)), ...(prev !== undefined ? { prev } : {}) });
-export const buildGenesis = (id, time, pub, maxPartitions, maxTranscriptBytes, cadence) =>  // §12.1 self-signed name-binding root
+export const buildGenesis = (id, time, pub, maxPartitions, maxTranscriptBytes, cadence, checkpointAuthority, recovery) =>  // §12.1 self-signed name-binding root
   buildState({ ...id, class: 'genesis' }, time, { genesis: { kind: 'captured', value: {
     pub, role: 'name-binding-root',
     ...(maxPartitions !== undefined ? { max_partitions: String(maxPartitions) } : {}),           // §13 ladder (≠ ceiling; ABS 4096)
     ...(maxTranscriptBytes !== undefined ? { max_transcript_bytes: String(maxTranscriptBytes) } : {}), // §13 ladder (≠ ceiling; ABS 64 MiB)
     ...(cadence !== undefined ? { cadence: String(cadence) } : {}),                               // §11.3 C — SIGNED cadence (sec) → the expected grid; resolved not free-chosen (#69 C)
+    // P1-04 — the genesis CARRIES its own checkpoint-authority + recovery set, so `authority_root` is RESOLVED from
+    // the signed genesis, not a raw caller pin. `recovery.keys` is a {key_id: pub} map (each key_id = H(ust:keylog, pub)).
+    ...(checkpointAuthority ? { checkpoint_authority: { key_id: checkpointAuthority.key_id, pub: checkpointAuthority.pub } } : {}),
+    ...(recovery ? { recovery: { keys: recovery.keys, threshold: String(recovery.threshold) } } : {}),
   } } });
+// P1-04 — resolve the checkpoint-authority + recovery roots FROM the signed genesis value (typed, key_id = keyId(pub)
+// validated), never from a raw caller option. Returns {genesisAuthority?, recoveryKeys?, recoveryThreshold?} or null.
+export function resolveCheckpointRoots(genesis) {
+  const gv = genesis?.state?.data?.genesis?.value; if (!gv) return null;
+  const out = {};
+  const ca = gv.checkpoint_authority;
+  if (ca && ca.key_id && ca.pub && keyId(ca.pub) === ca.key_id) out.genesisAuthority = { key_id: ca.key_id, pub: ca.pub };
+  const rec = gv.recovery;
+  if (rec && rec.keys && typeof rec.keys === 'object') {
+    const keys = {}; let ok = true;
+    for (const [kid, pub] of Object.entries(rec.keys)) { if (typeof pub !== 'string' || keyId(pub) !== kid) ok = false; else keys[kid] = pub; }
+    if (ok && Object.keys(keys).length) { out.recoveryKeys = keys; out.recoveryThreshold = Number(rec.threshold); }
+  }
+  return out;
+}
 export const buildKeyLogEntry = (id, time, keyOp, prev) =>                         // §12.2 add|rotate|revoke
   buildState({ ...id, class: 'key' }, time, { key_op: { kind: 'captured', value: keyOp } }, { prev });
 export const buildCheckpoint = (id, time, head, frameCount, prev, interval) =>   // §11.3 M5 (interval = {from,to} for completeness, #69 C)
@@ -1060,8 +1079,11 @@ export function verifyEpochTransition(statement, { domain_shard, from_genesis_ep
 const CP_BODY_KEYS = new Set(['version', 'purpose', 'domain_shard', 'genesis_epoch', 'sequence', 'previous_checkpoint', 'previous_epoch_final_checkpoint', 'active_genesis', 'checkpoint_authority', 'keylog']);
 const CP_CA_KEYS = new Set(['current_key_id', 'next_key_id', 'next_pub', 'effective_sequence']);
 const isHashStr = (s) => typeof s === 'string' && /^sha256:[0-9a-f]{64}$/.test(s);
-export function verifyAuthorityCheckpointChain(chain, { genesisAuthority, pinnedPrior, recoveries, recoveryKeys, recoveryThreshold, epochTransitions } = {}) {
+export function verifyAuthorityCheckpointChain(chain, { genesis, genesisAuthority, pinnedPrior, recoveries, recoveryKeys, recoveryThreshold, epochTransitions } = {}) {
   if (!Array.isArray(chain) || chain.length === 0) return { error: 'E-MALFORMED', detail: 'empty checkpoint chain' };
+  // P1-04 — prefer roots RESOLVED from the signed genesis; a raw genesisAuthority is a consumer PIN, reported as such.
+  let authority_root = 'consumer-pin';
+  if (genesis) { const gr = resolveCheckpointRoots(genesis); if (gr?.genesisAuthority) { genesisAuthority = gr.genesisAuthority; authority_root = 'genesis'; } if (gr?.recoveryKeys && recoveryKeys === undefined) { recoveryKeys = gr.recoveryKeys; recoveryThreshold = recoveryThreshold ?? gr.recoveryThreshold; } }
   if (!genesisAuthority && !pinnedPrior) return { result: 'INDETERMINATE', reason: 'authority_unresolved', detail: 'no genesis-rooted or pinned-prior checkpoint authority to resolve the first signer' };
   let prev = pinnedPrior ? { id: pinnedPrior.checkpoint_id, authority: pinnedPrior.authority, sequence: pinnedPrior.sequence, body: null } : null;
   for (let i = 0; i < chain.length; i++) {
@@ -1122,7 +1144,7 @@ export function verifyAuthorityCheckpointChain(chain, { genesisAuthority, pinned
   }
   const lb = chain[chain.length - 1].body, lca = lb.checkpoint_authority || {};
   const activeAuthority = (lca.next_key_id !== undefined) ? { key_id: lca.next_key_id, pub: lca.next_pub, effective_sequence: lca.effective_sequence } : prev.authority;
-  return { result: 'VALID', head: prev.id, length: String(chain.length), sequence: lb.sequence, active_genesis: lb.active_genesis, keylog: lb.keylog, activeAuthority };
+  return { result: 'VALID', head: prev.id, length: String(chain.length), sequence: lb.sequence, active_genesis: lb.active_genesis, keylog: lb.keylog, activeAuthority, authority_root };
 }
 
 // ─── #76 Phase C — CHECKPOINT UNIQUENESS (independent anti-equivocation). `attested` needs a `¬∃ rival at
@@ -1262,8 +1284,8 @@ export function verifyKeylogTerminality({ root, length, head } = {}, proof = {})
 //     (F.5g `compareEvidenceOrder`, never a timestamp compare). This CLOSES the P0-05 stale-prefix overclaim by
 //     earning `corroborated`, NEVER `attested`: a single publisher cannot prove split-view absence — independent
 //     anti-equivocation is Phase C/#42. (Strict last-index terminality is the #77 refinement; here `head ∈ root`.)
-export function deriveCheckpointFreshness(chain, { genesisAuthority, pinnedPrior, target, commitment, terminality, uniqueness, trust } = {}) {
-  const chn = verifyAuthorityCheckpointChain(chain, { genesisAuthority, pinnedPrior });
+export function deriveCheckpointFreshness(chain, { genesis, genesisAuthority, pinnedPrior, target, commitment, terminality, uniqueness, trust } = {}) {
+  const chn = verifyAuthorityCheckpointChain(chain, { genesis, genesisAuthority, pinnedPrior });
   if (chn.result !== 'VALID') return chn.result === 'INDETERMINATE' ? chn
     : { result: 'INVALID', error: chn.error, detail: 'checkpoint chain not authorized: ' + (chn.detail || chn.error), keylog_freshness: 'unverified' };
   const b = chain[chain.length - 1].body, headId = chn.head;
