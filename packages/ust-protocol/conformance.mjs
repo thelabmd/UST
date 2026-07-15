@@ -999,6 +999,37 @@ console.log('\n═════════════════════�
     (r => r.support.length === 0)(P.deriveAssurance({ identity: { strength: 'self-asserted', status: 'verified' }, evidence: [{ proof_kind: 'pow-header-chain', verified_facts: {}, basis: 'admitted-connector-receipt' }] })));
   check('C3 deriveAssurance output is frozen (pure value, no post-hoc mutation)',
     (() => { const r = P.deriveAssurance({}); try { r.tier = 'TOP'; } catch {} try { r.strength.identity = 'authoritative'; } catch {} return r.tier !== 'TOP' && Object.isFrozen(r) && r.strength.identity === 'self-asserted'; })());
+
+  // ── V1 (UST-sul, M1.2) — Reach_C CONFINEMENT: over the FULL verdict grid, the assembler emits ONLY tuples whose
+  //    every coordinate is earned by ITS OWN seam predicate — and each coordinate is a function of ITS verdict alone
+  //    (changing another verdict never moves it). This is the evidence→assurance transition the rc.35 "256 abstract
+  //    combinations" check never exercised.
+  {
+    const ids = [undefined, { strength: 'authoritative' }, { strength: 'authoritative', status: 'verified' },
+      { strength: 'authoritative', status: 'suspect' }, { strength: 'corroborated', status: 'verified' },
+      { strength: 'pinned', status: 'verified' }, { strength: 'self-asserted', status: 'verified' },
+      { strength: 'consumer-override', status: 'verified' }, { strength: 'corroborated', status: 'unavailable' },
+      { strength: 'corroborated', status: 'verified', freshness: 'fresh' }, { strength: 'authoritative', status: 'verified', freshness: 'fresh' }];
+    const frs = [undefined, { result: 'VALID', keylog_freshness: 'corroborated' }, { result: 'VALID', keylog_freshness: 'attested' },
+      { result: 'INDETERMINATE', keylog_freshness: 'corroborated' }, { keylog_freshness: 'attested' }, { result: 'VALID', keylog_freshness: 'unverified' }];
+    const ans = [undefined, { inclusion: true, time: 'anchored' }, { inclusion: false, time: 'anchored' }, { inclusion: true, time: 'unproven' }];
+    // the INDEPENDENT per-coordinate rules (restated here, not shared with the implementation)
+    const expId = (id) => id?.status !== 'verified' ? 'self-asserted' : ['authoritative', 'corroborated', 'pinned'].includes(id.strength) ? (id.strength === 'authoritative' ? 'authoritative' : id.strength) : 'self-asserted';
+    const expFr = (fr, id) => (fr?.result === 'VALID' && ['corroborated', 'attested'].includes(fr.keylog_freshness)) ? fr.keylog_freshness : (id?.freshness === 'fresh' ? 'fresh' : 'unverified');
+    const expTm = (an) => an?.inclusion === true && an?.time === 'anchored' ? 'anchored' : 'unproven';
+    let confined = true, coordinateLocal = true;
+    for (const id of ids) for (const fr of frs) for (const an of ans) {
+      const r = P.deriveAssurance({ identity: id, freshness: fr, anchor: an });
+      if (r.strength.identity !== expId(id) || r.strength.freshness !== expFr(fr, id) || r.strength.time !== expTm(an) || r.strength.integrity !== 'valid') confined = false;
+      if (r.tier !== P.projectTier(r.strength)) confined = false;                       // the report never carries a tier its own strength does not project
+    }
+    for (const id of ids) {                                                             // identity is a function of the identity verdict ALONE
+      const base = P.deriveAssurance({ identity: id }).strength.identity;
+      for (const fr of frs) for (const an of ans) if (P.deriveAssurance({ identity: id, freshness: fr, anchor: an }).strength.identity !== base) coordinateLocal = false;
+    }
+    check('V1 Reach_C confinement: 264-combination verdict grid — every coordinate earned by its own predicate, tier = projection', confined);
+    check('V1 Reach_C per-coordinate locality: a coordinate is a function of ITS verdict alone (no cross-coordinate lift)', coordinateLocal);
+  }
 }
 
 // ─── #39 negative / absence observation — the notary's other half ──────────────────────────────────────

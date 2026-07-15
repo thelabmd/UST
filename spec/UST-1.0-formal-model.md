@@ -300,8 +300,10 @@ honest derivation emits (e.g. `Time = anchored ∧ Freshness = unverified` where
 `C`. Lattice LAWS (meet/join/monotone `Π`) are proved on the ambient product (above); SECURITY properties
 (no-upward-forge, downgrade-resistance, no-rung-without-its-predicate) are stated on `Reach_C` — the
 evidence→assurance transition where the rc.35 findings lived; the exhaustive 64-state checks exercise the rank
-ALGEBRA, not that transition. The confinement property (`deriveAssurance_C` never leaves `Reach_C`) is the Phase-V
-conformance obligation (UST-sul); the C3 seam is REALIZED: `deriveAssurance({identity, freshness, anchor, evidence})`
+ALGEBRA, not that transition. The confinement property (`deriveAssurance_C` never leaves `Reach_C`) is REALIZED as a running sweep:
+*"V1 Reach_C confinement: 264-combination verdict grid — every coordinate earned by its own predicate, tier = projection"*
+and *"V1 Reach_C per-coordinate locality: a coordinate is a function of ITS verdict alone (no cross-coordinate lift)"*.
+The C3 seam is realized: `deriveAssurance({identity, freshness, anchor, evidence})`
 — pure/total/frozen, strength coordinates derived from SEAM VERDICTS by fixed rules (a bare label or a caller boolean
 earns nothing: *"C3 deriveAssurance: a bare strength LABEL without a verified status earns nothing (no caller labels)"*,
 *"C3 deriveAssurance: freshness rung only from a VALID freshness verdict, never a label"*, *"C3 deriveAssurance: anchored time requires inclusion === true AND time === anchored from the anchor seam"*), support = capabilities of

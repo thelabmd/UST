@@ -2256,6 +2256,17 @@ provenance and will be lifted into this ledger when the spec is published.
   (P0-1 witness set), publisher-only checkpoint evidence ⇒ ceiling `corroborated` (F.5i), `attested` reachable only
   through verified chain roots + the receipt seam + consumer config (uniqueness quorum/map) — no parallel old/new
   paths remain. Gates: conformance 374/0, model guard green (+C3 citations), parity (deriveAssurance triaged).
+- **REV 57 (2026-07-15, `rc.36`)** — **authority-layer refactor, phase V (verification of the refactor itself).**
+  V1: the M1.2 `Reach_C` confinement is now a RUNNING conformance sweep — a 264-combination grid over
+  identity/freshness/anchor seam verdicts asserts every emitted coordinate is earned by ITS OWN independently
+  restated predicate, the carried tier always equals the projection of the carried strength, and each coordinate is
+  a function of its verdict ALONE (no cross-coordinate lift). V2: the security-regression census now covers EVERY
+  round-1 + round-2 finding as a SECURE-expectation vector — 29 vectors, adding `rc35-P0j` (cross-scope evidence:
+  a receipt for a FOREIGN active_genesis never corroborates this chain), `rc35-P1c` (recovery-DoS: a canon-throwing
+  recovery statement never throws through chain verification), `rc35-P1d` (the keylogEntries witness ceiling is
+  E-BOUNDS before Merkle work). With this, phases M1–M5, C1–C4, V1–V2 of the rc.35 round-2 structural refactor are
+  COMPLETE: the remaining epic item is A1 — a diverse-model adversarial round-3 over the refactored layer.
+  Gates: conformance 376/0, security 29/0, model guard green, arc 59/0, parity green, npm-drift green.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

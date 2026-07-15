@@ -210,6 +210,42 @@ sec('rc35-P1b', 'UST-6vj', 'quorumTrustDomains with threshold ≤ 0 never report
     && P.quorumTrustDomains([{ source_id: 'x' }], { domains: { x: 'd' }, threshold: -1 }).met !== true;
 });
 
+// rc.35 round-2 (V2 census) — cross-domain/scope evidence: a receipt issued for ANOTHER authority scope (different
+// active_genesis/domain) must never satisfy THIS chain's corroborated conjunction (M3 check 4, scope binding).
+sec('rc35-P0j', 'UST-6vj', 'evidence bound to a FOREIGN authority scope cannot earn corroborated freshness here', () => {
+  const AG1 = 'sha256:' + '55'.repeat(32), AG2 = 'sha256:' + '66'.repeat(32), EP1 = P.genesisEpoch(AG1);
+  const klc = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);
+  const cp0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP1, sequence: '0', active_genesis: AG1, current_key_id: K0.key_id, keylog: { root: klc.root, length: klc.length, head: klc.head } }), K0.priv, K0.pub);
+  const headId = P.authorityCheckpointId(cp0);
+  const connectors = { [KA.key_id]: { pub: KA.pub, trust_domain: 'w', allowed_proof_kinds: ['pow-header-chain'] } };
+  const foreign = (subj, pos) => P.buildEvidenceReceipt({ domain_shard: D, active_genesis: AG2, subject: subj, proof_kind: 'pow-header-chain', facts: { substrate: 'bitcoin', position: String(pos) }, issued_at: '2026-01-01T00:00:00Z' }, KA.priv, KA.pub);
+  const r = P.deriveCheckpointFreshness([cp0], { genesisAuthority: { key_id: K0.key_id, pub: K0.pub },
+    target: { active_genesis: AG1, domain_shard: D, subject: 'ust:target', anchor: foreign('ust:target', 800) },
+    commitment: foreign(headId, 900), terminality: { headProof: klc.headProof, successorProof: klc.successorProof }, trust: { connectors } });
+  return r.keylog_freshness !== 'corroborated' && r.result !== 'VALID';
+});
+
+// rc.35 round-2 (V2 census) — recovery-DoS: a canon-throwing malformed recovery leaf must not throw through chain
+// verification (denial-of-verifiability), and must admit nothing.
+sec('rc35-P1c', 'UST-6vj', 'a malformed recovery statement never throws through chain verification', () => {
+  const AG = 'sha256:' + '77'.repeat(32), EPr = P.genesisEpoch(AG);
+  const klc = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);
+  const cp0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPr, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog: { root: klc.root, length: klc.length, head: klc.head } }), K0.priv, K0.pub);
+  const cp1 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPr, sequence: '1', previous_checkpoint: P.authorityCheckpointId(cp0), active_genesis: AG, current_key_id: KA.key_id, keylog: { root: klc.root, length: klc.length, head: klc.head } }), KA.priv, KA.pub);
+  const bomb = [{ claim: { purpose: 'ust:checkpoint-authority-recovery', domain_shard: D, genesis_epoch: EPr, last_accepted_checkpoint: P.authorityCheckpointId(cp0), effective_sequence: '1', replacement_authority: { key_id: KA.key_id, pub: KA.pub }, junk: undefined }, issuer_id: KA.key_id, sig: { sig: 'AA', pub: KA.pub } }];
+  try { const r = P.verifyAuthorityCheckpointChain([cp0, cp1], { genesisAuthority: { key_id: K0.key_id, pub: K0.pub }, recoveries: { '1': bomb }, recoveryKeys: { [KA.key_id]: KA.pub }, recoveryThreshold: 1 }); return r.result !== 'VALID'; } catch { return false; }
+});
+
+// rc.35 round-2 (V2 census) — resource bound BEFORE work: a keylogEntries witness above the §13 ceiling is rejected
+// as E-BOUNDS before any Merkle recomputation (no CPU-amplification via a huge witness).
+sec('rc35-P1d', 'UST-6vj', 'a keylogEntries witness above the §13 ceiling (257) is E-BOUNDS before Merkle work', () => {
+  const AG = 'sha256:' + '88'.repeat(32), EPb = P.genesisEpoch(AG);
+  const klc = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);
+  const cp0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPb, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog: { root: klc.root, length: klc.length, head: klc.head } }), K0.priv, K0.pub);
+  const r = P.verifyAuthorityCheckpointChain([cp0], { genesisAuthority: { key_id: K0.key_id, pub: K0.pub }, keylogEntries: Array.from({ length: 257 }, () => 'sha256:' + 'ab'.repeat(32)) });
+  return r.result === 'INVALID' && r.error === 'E-BOUNDS';
+});
+
 // ─── report ────────────────────────────────────────────────────────────────────────────────────
 console.log('\n  rc.33 audit — security regression (Phase 0, epic UST-1o6): SECURE-expectation gate');
 for (const [s, id, bd, d] of rows) console.log(s + '  ' + id.padEnd(8) + bd.padEnd(9) + d);
