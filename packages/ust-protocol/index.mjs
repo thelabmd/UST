@@ -472,7 +472,14 @@ export function verify(doc, opts = {}) {
     const nameBound = verified && (nameAuthoritative || identity.strength === 'corroborated');
     // §3.1/§15 — TOP = authoritative identity + anchored time. HIGH = name-bound (corroborated or authoritative).
     // Stream COMPLETENESS is a separate RANGE verdict (verifyStream), never a single-document claim.
-    const tier = authoritative && timeField.strength === 'anchored' ? 'TOP' : nameBound ? 'HIGH' : 'LIGHT';
+    // P1-03 — the tier is the SINGLE-SOURCE projection of the live AssuranceState (§F.5.0), not a second inline
+    // formula: verify() builds ONE state from its resolved strengths and projects it once, so the lattice IS the machine.
+    const assurance = assuranceState({ integrity: 'valid',
+      identity: authoritative ? 'authoritative' : nameBound ? 'corroborated' : (identity.strength === 'pinned' ? 'pinned' : 'self-asserted'),
+      freshness: identity.freshness || 'unverified',
+      time: timeField.strength === 'anchored' ? 'anchored' : 'unproven',
+      evidence: 'opaque' });
+    const tier = projectTier(assurance);
     // §3.1/F.5b DOWNGRADE RESISTANCE — the symmetric floor to requireAuthoritative. A consumer requiring TOP
     // MUST reject anything the evidence proves below TOP, NEVER silently accept a lower tier (stripping the anchor
     // can only LOWER the tier, W1: it cannot forge upward). The rejection NAMES the missing coordinate: a
@@ -489,7 +496,7 @@ export function verify(doc, opts = {}) {
         return bad('E-ANCHOR', 'anchored (TOP) required but no anchor proof is attached (downgrade rejected)');
       return { result: 'INDETERMINATE', reason: 'unavailable', detail: 'anchored (TOP) required; proof present but substrate is ' + timeField.status + '/' + timeField.strength + ' — retry' };
     }
-    return { result: 'VALID:' + tier, tier, identity: { ...identity, mode: shardMode }, disclosed, sources, ...nameField,
+    return { result: 'VALID:' + tier, tier, assurance, identity: { ...identity, mode: shardMode }, disclosed, sources, ...nameField,
       ...(identity.noFork ? { no_fork: identity.noFork } : {}),
       ust_id: st.id.ust_id, class: st.id.class, content_hash: ch, time: timeField, provenance: provenanceReport,
       completeness: 'not_evaluated' };
