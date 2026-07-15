@@ -152,6 +152,14 @@ sec('rc35-P2', 'UST-b64', 'no-event with a blind slot (any non-positive reason) 
     && P.noEventBacking({ from: 'ust:20260628.10', to: 'ust:20260628.12', subject: 'quake' }, sr, mism) !== 'completeness-backed';
 });
 
+// rc.35 round-2 (M2 refactor) — a publisher-CHOSEN genesis_epoch is rejected: the uniqueness namespace is canonical
+// (genesis_epoch = H(active_genesis)), so two rival C0 cannot occupy different map slots and both attest (epoch-split).
+sec('rc35-P0f', 'UST-6vj', 'a non-canonical (publisher-chosen) genesis_epoch is rejected — no rival uniqueness namespace', () => {
+  const AG = 'sha256:' + '22'.repeat(32), klc = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);
+  const cp0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: 'sha256:' + 'ee'.repeat(32), sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog: { root: klc.root, length: klc.length, head: klc.head } }), K0.priv, K0.pub);
+  return P.verifyAuthorityCheckpointChain([cp0], { genesisAuthority: { key_id: K0.key_id, pub: K0.pub } }).result !== 'VALID';
+});
+
 // ─── report ────────────────────────────────────────────────────────────────────────────────────
 console.log('\n  rc.33 audit — security regression (Phase 0, epic UST-1o6): SECURE-expectation gate');
 for (const [s, id, bd, d] of rows) console.log(s + '  ' + id.padEnd(8) + bd.padEnd(9) + d);

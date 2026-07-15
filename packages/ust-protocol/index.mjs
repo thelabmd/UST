@@ -1154,6 +1154,11 @@ export function verifyAuthorityCheckpointChain(chain, { genesis, genesisAuthorit
     if (!ca0 || typeof ca0 !== 'object' || Object.keys(ca0).some((k) => !CP_CA_KEYS.has(k))) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'malformed or unknown checkpoint_authority field' };
     const kl0 = b.keylog;
     if (!kl0 || typeof kl0 !== 'object' || Object.keys(kl0).some((k) => !['root', 'length', 'head'].includes(k)) || !isHashStr(kl0.root) || !isSeq(kl0.length) || !isHashStr(kl0.head)) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'malformed keylog {root,length,head}' };
+    // M2 (rc.36 refactor) — genesis_epoch is CANONICAL: it MUST equal H("ust:genesis-epoch", active_genesis). The publisher
+    // cannot pick the uniqueness namespace: two rival C₀ with the same active_genesis but different epoch (epoch-split)
+    // used to key to DIFFERENT map slots and both attest; now a non-canonical epoch is malformed, so rivals collide in ONE slot.
+    if (!isHashStr(b.active_genesis) || b.genesis_epoch !== genesisEpoch(b.active_genesis))
+      return { result: 'INVALID', error: 'E-MALFORMED', detail: 'genesis_epoch ≠ canonical H("ust:genesis-epoch", active_genesis) — publisher-chosen namespace rejected (M2, epoch-split)' };
     // 1) resolve the EXPECTED signer from PRIOR state (genesis / pinned / previous checkpoint) — before trusting cp
     let expected;
     if (prev === null) {

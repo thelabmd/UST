@@ -621,7 +621,7 @@ console.log('\n═════════════════════�
 {
   const K0 = kp('01'.repeat(32)), K1 = kp('02'.repeat(32)), K2 = kp('03'.repeat(32)), KX = kp('0f'.repeat(32));
   const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
-  const EP = 'sha256:' + 'aa'.repeat(32), AG = 'sha256:' + 'bb'.repeat(32);
+  const AG = 'sha256:' + 'bb'.repeat(32), EP = P.genesisEpoch(AG);   // M2: epoch canonical for the fixture's active_genesis
   const KL = (l, tag) => ({ length: String(l), root: 'sha256:' + (tag + '0').repeat(32).slice(0, 64), head: 'sha256:' + (tag + '1').repeat(32).slice(0, 64) });
   const bc = (seq, prev, cur, nxt, D = 'noosphere.md', ep = EP) => P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: ep, sequence: seq, previous_checkpoint: prev, active_genesis: AG, current_key_id: cur.key_id, ...(nxt ? { next_key_id: nxt.k.key_id, next_pub: nxt.k.pubB64, effective_sequence: nxt.at } : {}), keylog: KL(5 + Number(seq), 'c') });
   const C0 = P.sealAuthorityCheckpoint(bc('0', null, K0, { k: K1, at: '1' }), K0.priv, K0.pubB64); const id0 = P.authorityCheckpointId(C0);
@@ -648,7 +648,7 @@ console.log('\n═════════════════════�
   // three-layer id: external evidence is NOT part of checkpoint_id (same checkpoint, two anchor receipts ⇒ same id)
   check('AC checkpoint_id excludes attached external evidence (stable id)', P.authorityCheckpointId({ ...C2, anchor: { substrate: 'bitcoin-ots', receipt: 'a' } }) === P.authorityCheckpointId({ ...C2, anchor: { substrate: 'rekor', receipt: 'b' } }));
   // tampered body ⇒ signature no longer matches the preimage
-  const C2t = { body: { ...C2.body, active_genesis: 'sha256:' + '00'.repeat(32) }, sig: C2.sig };
+  const C2t = { body: { ...C2.body, keylog: { ...C2.body.keylog, head: 'sha256:' + '00'.repeat(32) } }, sig: C2.sig };   // tamper a sig-only field (active_genesis would now trip the M2 epoch check first)
   check('AC tampered body (sig over the pre-tamper preimage) → INVALID(E-AUTHORITY)', (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C2t], { pinnedPrior: { checkpoint_id: id1, authority: { key_id: K2.key_id, pub: K2.pubB64 }, sequence: '1' } })));
   // domain must not change within one chain
   check('AC domain_shard changes within the chain → INVALID(E-MALFORMED)', (r => r.error === 'E-MALFORMED')(P.verifyAuthorityCheckpointChain([C0, P.sealAuthorityCheckpoint(bc('1', id0, K1, null, 'evil.example'), K1.priv, K1.pubB64)], { genesisAuthority: gAuth })));
@@ -656,10 +656,10 @@ console.log('\n═════════════════════�
 
 // ─── P1-04 — checkpoint-authority root RESOLVED from the signed genesis, not a raw caller pin ───────────────────
 {
-  const K0 = kp('31'.repeat(32)), EP = 'sha256:' + '31'.repeat(32), D = 'noosphere.md';
+  const K0 = kp('31'.repeat(32)), D = 'noosphere.md';
   const genCA = P.seal(P.buildGenesis({ domain_shard: D, ust_id: 'ust:20260701.00', key_id: K0.key_id }, T, K0.pubB64, undefined, undefined, undefined, { key_id: K0.key_id, pub: K0.pubB64 }), K0.priv, K0.pubB64);
   const kl = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);
-  const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: P.contentHash(genCA), current_key_id: K0.key_id, keylog: { root: kl.root, length: kl.length, head: kl.head } }), K0.priv, K0.pubB64);
+  const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: P.genesisEpoch(P.contentHash(genCA)), sequence: '0', active_genesis: P.contentHash(genCA), current_key_id: K0.key_id, keylog: { root: kl.root, length: kl.length, head: kl.head } }), K0.priv, K0.pubB64);
   check('P1-04 roots RESOLVED from the signed genesis → authority_root:"genesis"', (r => r.result === 'VALID' && r.authority_root === 'genesis')(P.verifyAuthorityCheckpointChain([C0], { genesis: genCA })));
   check('P1-04 raw genesisAuthority pin → authority_root:"consumer-pin" (not silently genesis-authorized)', (r => r.result === 'VALID' && r.authority_root === 'consumer-pin')(P.verifyAuthorityCheckpointChain([C0], { genesisAuthority: { key_id: K0.key_id, pub: K0.pubB64 } })));
   check('P1-04 resolveCheckpointRoots rejects a checkpoint_authority key_id ≠ keyId(pub)', P.resolveCheckpointRoots(P.seal(P.buildGenesis({ domain_shard: D, ust_id: 'ust:20260701.01', key_id: K0.key_id }, T, K0.pubB64, undefined, undefined, undefined, { key_id: 'sha256:' + '99'.repeat(32), pub: K0.pubB64 }), K0.priv, K0.pubB64))?.genesisAuthority === undefined);
@@ -673,7 +673,7 @@ console.log('\n═════════════════════�
 {
   const K0 = kp('21'.repeat(32)), KX = kp('2f'.repeat(32));
   const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
-  const EP = 'sha256:' + '11'.repeat(32), AG = 'sha256:' + '22'.repeat(32), D = 'noosphere.md';
+  const AG = 'sha256:' + '22'.repeat(32), EP = P.genesisEpoch(AG), D = 'noosphere.md';
   const kl = P.buildKeylogCommitment(['sha256:' + 'ab'.repeat(32)]);         // strict terminality: head at position L-1 + no successor
   const keylog = { length: kl.length, root: kl.root, head: kl.head }, term = { headProof: kl.headProof, successorProof: kl.successorProof };
   const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), K0.priv, K0.pubB64);
@@ -699,7 +699,7 @@ console.log('\n═════════════════════�
 {
   const K0 = kp('31'.repeat(32)), KX = kp('3f'.repeat(32)), Wa = kp('41'.repeat(32)), Wb = kp('42'.repeat(32)), Wc = kp('43'.repeat(32));
   const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
-  const EP = 'sha256:' + '55'.repeat(32), AG = 'sha256:' + '66'.repeat(32), D = 'noosphere.md';
+  const AG = 'sha256:' + '66'.repeat(32), EP = P.genesisEpoch(AG), D = 'noosphere.md';
   const kl = P.buildKeylogCommitment(['sha256:' + 'cd'.repeat(32)]), keylog = { length: kl.length, root: kl.root, head: kl.head }, term = { headProof: kl.headProof, successorProof: kl.successorProof };
   const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), K0.priv, K0.pubB64);
   const headId = P.authorityCheckpointId(C0);
@@ -727,7 +727,7 @@ console.log('\n═════════════════════�
 {
   const K0 = kp('51'.repeat(32)), KX = kp('5f'.repeat(32));
   const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
-  const EP = 'sha256:' + '77'.repeat(32), AG = 'sha256:' + '88'.repeat(32), D = 'noosphere.md';
+  const AG = 'sha256:' + '88'.repeat(32), EP = P.genesisEpoch(AG), D = 'noosphere.md';
   const kl = P.buildKeylogCommitment(['sha256:' + 'de'.repeat(32)]), keylog = { length: kl.length, root: kl.root, head: kl.head }, term = { headProof: kl.headProof, successorProof: kl.successorProof };
   const C0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog }), K0.priv, K0.pubB64);
   const headId = P.authorityCheckpointId(C0);
@@ -763,7 +763,7 @@ console.log('\n═════════════════════�
   const K0 = kp('61'.repeat(32)), K1 = kp('62'.repeat(32)), KR = kp('6a'.repeat(32)), KR2 = kp('6b'.repeat(32));
   const R1 = kp('71'.repeat(32)), R2 = kp('72'.repeat(32)), R3 = kp('73'.repeat(32)), RX = kp('7f'.repeat(32));
   const gAuth = { key_id: K0.key_id, pub: K0.pubB64 };
-  const EP = 'sha256:' + '88'.repeat(32), AG = 'sha256:' + '99'.repeat(32), D = 'noosphere.md';
+  const AG = 'sha256:' + '99'.repeat(32), EP = P.genesisEpoch(AG), D = 'noosphere.md';
   const KL = { length: '1', root: 'sha256:' + 'c0'.repeat(32), head: 'sha256:' + 'd0'.repeat(32) };
   const bc = (seq, prev, cur, nxt) => P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: seq, previous_checkpoint: prev, active_genesis: AG, current_key_id: cur.key_id, ...(nxt ? { next_key_id: nxt.k.key_id, next_pub: nxt.k.pubB64, effective_sequence: nxt.at } : {}), keylog: KL });
   const C0 = P.sealAuthorityCheckpoint(bc('0', null, K0, { k: K1, at: '1' }), K0.priv, K0.pubB64); const id0 = P.authorityCheckpointId(C0);
@@ -792,7 +792,7 @@ console.log('\n═════════════════════�
 //     by epoch A's authority. Epoch B's C₀ binds A's final checkpoint + the transition's initial sequence.
 {
   const KA0 = kp('a0'.repeat(32)), KB0 = kp('b0'.repeat(32)), KX = kp('af'.repeat(32));
-  const D = 'noosphere.md', EPA = 'sha256:' + 'a1'.repeat(32), EPB = 'sha256:' + 'b1'.repeat(32), AGA = 'sha256:' + 'a2'.repeat(32), AGB = 'sha256:' + 'b2'.repeat(32);
+  const D = 'noosphere.md', AGA = 'sha256:' + 'a2'.repeat(32), AGB = 'sha256:' + 'b2'.repeat(32), EPA = P.genesisEpoch(AGA), EPB = P.genesisEpoch(AGB);
   const KL = { length: '1', root: 'sha256:' + 'c0'.repeat(32), head: 'sha256:' + 'd0'.repeat(32) };
   const C0a = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPA, sequence: '0', active_genesis: AGA, current_key_id: KA0.key_id, keylog: KL }), KA0.priv, KA0.pubB64);
   const idA = P.authorityCheckpointId(C0a), gA = { key_id: KA0.key_id, pub: KA0.pubB64 };
