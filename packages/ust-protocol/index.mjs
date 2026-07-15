@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // ust-protocol — reference implementation of UST 1.0 (the official STATELESS base; the public verification lib) (REV 26), LIGHT floor first.
 // §16: ONE version source — the conformance runner asserts spec/package/vectors all carry the same rc.
-export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 51 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
+export const VERSION = { wire: '1.0', spec: '1.0.0-rc.36', revision: 52 };   // #75 P1-09: machine-readable {wire, spec, revision} — Status line & appendix must agree
 // Written FROM THE SPEC (§ references inline), NOT copied from the vector generator — so running it against
 // the vectors is a cross-check between two independently-written artifacts. Zero-dependency: node:crypto
 // (Ed25519 + SHA-256). Portable note: WebCrypto (SubtleCrypto Ed25519) or @noble/{ed25519,hashes} for
@@ -1187,8 +1187,13 @@ export function verifyCheckpointRecovery(statements, { domain_shard, genesis_epo
 // ─── #76 (audit-8) GENESIS-EPOCH TRANSITION — a new genesis epoch must NOT silently reset the authority chain. The
 //     A→B transition is a typed statement SIGNED BY EPOCH A's checkpoint authority, binding A's final checkpoint and
 //     naming epoch B's initial checkpoint authority + initial sequence. Epoch B's C₀ then binds that final checkpoint.
-export function epochTransitionClaim({ domain_shard, from_genesis_epoch, from_final_checkpoint, to_genesis_epoch, to_key_id, to_pub, to_initial_sequence = '0' }) {
-  return { purpose: 'ust:genesis-epoch-transition', domain_shard, from_genesis_epoch, from_final_checkpoint, to_genesis_epoch,
+export function epochTransitionClaim({ domain_shard, from_genesis_epoch, from_final_checkpoint, to_active_genesis, to_genesis_epoch, to_key_id, to_pub, to_initial_sequence = '0' }) {
+  // M4.4 — a transition hands authority to a VERIFIED new genesis, not a free epoch label: it binds
+  // to_active_genesis, and to_genesis_epoch is CANONICAL to it (derived when omitted; verify re-checks).
+  const toEpoch = to_genesis_epoch ?? (isHashStr(to_active_genesis) ? genesisEpoch(to_active_genesis) : undefined);
+  return { purpose: 'ust:genesis-epoch-transition', domain_shard, from_genesis_epoch, from_final_checkpoint,
+    ...(to_active_genesis !== undefined ? { to_active_genesis } : {}),                 // absence is caught at verify (M4.4), kept out of canon
+    ...(toEpoch !== undefined ? { to_genesis_epoch: toEpoch } : {}),
     to_checkpoint_authority: { key_id: to_key_id, pub: to_pub }, to_initial_sequence: String(to_initial_sequence) };
 }
 export function buildEpochTransition(fields, privKeyObj, issuerPubB64url) {
@@ -1201,18 +1206,25 @@ export function verifyEpochTransition(statement, { domain_shard, from_genesis_ep
   if (!claim || !sig || !sig.sig || !sig.pub || !fromAuthority) return { ok: false, detail: 'malformed transition or no from-authority' };
   if (claim.purpose !== 'ust:genesis-epoch-transition') return { ok: false, detail: 'wrong purpose' };
   if (claim.domain_shard !== domain_shard || claim.from_genesis_epoch !== from_genesis_epoch || claim.from_final_checkpoint !== from_final_checkpoint) return { ok: false, detail: 'transition not bound to this (domain, from-epoch, from-final-checkpoint)' };
+  // M4.4 — the destination is a VERIFIED genesis, never a free epoch label: the transition MUST bind
+  // to_active_genesis, and to_genesis_epoch MUST be canonical to it (the M2 hygiene, uniform).
+  if (!isHashStr(claim.to_active_genesis) || claim.to_genesis_epoch !== genesisEpoch(claim.to_active_genesis)) return { ok: false, detail: 'transition does not bind a verified destination genesis (to_active_genesis missing or to_genesis_epoch non-canonical, M4.4)' };
   const ta = claim.to_checkpoint_authority;
   if (!ta || !ta.key_id || !ta.pub || keyId(ta.pub) !== ta.key_id) return { ok: false, detail: 'to_checkpoint_authority malformed' };
   if (sig.key_id !== fromAuthority.key_id || sig.pub !== fromAuthority.pub || keyId(sig.pub) !== sig.key_id) return { ok: false, detail: 'transition not signed by epoch A checkpoint authority' };
   if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, canon(claim), sig.sig)) return { ok: false, detail: 'Ed25519 verify failed' };
-  return { ok: true, to_genesis_epoch: claim.to_genesis_epoch, to_checkpoint_authority: ta, to_initial_sequence: claim.to_initial_sequence };
+  return { ok: true, to_active_genesis: claim.to_active_genesis, to_genesis_epoch: claim.to_genesis_epoch, to_checkpoint_authority: ta, to_initial_sequence: claim.to_initial_sequence };
 }
 
 const CP_BODY_KEYS = new Set(['version', 'purpose', 'domain_shard', 'genesis_epoch', 'sequence', 'previous_checkpoint', 'previous_epoch_final_checkpoint', 'active_genesis', 'checkpoint_authority', 'keylog']);
 const CP_CA_KEYS = new Set(['current_key_id', 'next_key_id', 'next_pub', 'effective_sequence']);
 const isHashStr = (s) => typeof s === 'string' && /^sha256:[0-9a-f]{64}$/.test(s);
-export function verifyAuthorityCheckpointChain(chain, { genesis, genesisAuthority, pinnedPrior, recoveries, recoveryKeys, recoveryThreshold, epochTransitions } = {}) {
+export function verifyAuthorityCheckpointChain(chain, { genesis, genesisAuthority, pinnedPrior, recoveries, recoveryKeys, recoveryThreshold, epochTransitions, keylogEntries } = {}) {
   if (!Array.isArray(chain) || chain.length === 0) return { error: 'E-MALFORMED', detail: 'empty checkpoint chain' };
+  // M4.2 (C4 bounds-before-work) — the optional full prefix-extension witness is the key-log ENTRY vector itself,
+  // capped by the §13 resolution ceiling BEFORE any Merkle work.
+  if (keylogEntries !== undefined && (!Array.isArray(keylogEntries) || keylogEntries.length > 256 || keylogEntries.some((e) => !isHashStr(e))))
+    return { result: 'INVALID', error: 'E-BOUNDS', detail: 'keylogEntries must be ≤ 256 sha256 entry hashes (§13 key-log ceiling)' };
   // P1-04 — prefer roots RESOLVED from the signed genesis; a raw genesisAuthority is a consumer PIN, reported as such.
   let authority_root = 'consumer-pin';
   if (genesis) { const gr = resolveCheckpointRoots(genesis); if (gr?.genesisAuthority) { genesisAuthority = gr.genesisAuthority; authority_root = 'genesis'; } if (gr?.recoveryKeys && recoveryKeys === undefined) { recoveryKeys = gr.recoveryKeys; recoveryThreshold = recoveryThreshold ?? gr.recoveryThreshold; } }
@@ -1253,6 +1265,10 @@ export function verifyAuthorityCheckpointChain(chain, { genesis, genesisAuthorit
       if (b.domain_shard !== prev.body.domain_shard) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'domain_shard changes within the chain' };
       const et = epochTransitions && epochTransitions[b.genesis_epoch] ? verifyEpochTransition(epochTransitions[b.genesis_epoch], { domain_shard: b.domain_shard, from_genesis_epoch: prev.body.genesis_epoch, from_final_checkpoint: prev.id, fromAuthority: prev.authority }) : { ok: false };
       if (!et.ok || et.to_genesis_epoch !== b.genesis_epoch) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'genesis_epoch changes without an authenticated epoch transition (no silent reset)' };
+      // M4.4 — the epoch-initial checkpoint must LIVE IN the genesis the transition bound: a transition to genesis B
+      // cannot seed a chain for genesis B'. With M2 canonical epochs on BOTH sides this equality is derivable
+      // (epoch match ⇒ genesis match); the explicit check is the hash-collision belt, kept for defense-in-depth.
+      if (b.active_genesis !== et.to_active_genesis) return { result: 'INVALID', error: 'E-GENESIS', detail: 'epoch-initial active_genesis ≠ the transition to_active_genesis (M4.4 — the destination genesis is bound, not a label)' };
       if (b.previous_epoch_final_checkpoint !== prev.id) return { result: 'INVALID', error: 'E-PREV', detail: 'epoch-initial checkpoint does not bind the prior-epoch final checkpoint' };
       if (b.sequence !== String(et.to_initial_sequence)) return { result: 'INVALID', error: 'E-SEQ', detail: 'epoch-initial sequence ≠ the transition to_initial_sequence' };
       expected = { key_id: et.to_checkpoint_authority.key_id, pub: et.to_checkpoint_authority.pub };
@@ -1262,6 +1278,26 @@ export function verifyAuthorityCheckpointChain(chain, { genesis, genesisAuthorit
       if (b.previous_checkpoint !== prev.id) return { result: 'INVALID', error: 'E-PREV', detail: 'previous_checkpoint ≠ id of the prior accepted checkpoint' };
       if (b.sequence !== String(BigInt(prev.sequence) + 1n)) return { result: 'INVALID', error: 'E-SEQ', detail: 'sequence is not prev+1' };
       if (b.domain_shard !== prev.body?.domain_shard && prev.body) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'domain_shard changes within the chain' };
+      // M4.2 ChainConsistent — the key log is APPEND-ONLY ACROSS same-epoch checkpoints (closes keylog-rewind: two
+      // individually-terminal snapshots where Cₙ silently commits a SHORTER/REWRITTEN history). Unconditional:
+      // length is monotone and an equal length commits the IDENTICAL snapshot. (The full prefix-extension proof —
+      // Cₙ₋₁'s vector is a PREFIX of Cₙ's — is the keylogEntries witness below.)
+      if (prev.body) {
+        const Lp = BigInt(prev.body.keylog.length), Ln = BigInt(b.keylog.length);
+        if (Ln < Lp) return { result: 'INVALID', error: 'E-COMMIT', detail: 'keylog length ' + Ln + ' < prior checkpoint ' + Lp + ' — a signed key-log rewind (append-only violated, M4.2)' };
+        if (Ln === Lp && (b.keylog.root !== prev.body.keylog.root || b.keylog.head !== prev.body.keylog.head))
+          return { result: 'INVALID', error: 'E-COMMIT', detail: 'equal-length keylog with a different root/head — a same-length history rewrite (M4.2)' };
+      }
+    }
+    // M4.2 prefix-extension witness — when the consumer supplies the key-log ENTRY vector (it already holds it for
+    // resolveKeys), EVERY checkpoint's committed keylog must be the commitment over a PREFIX of that ONE vector; all
+    // prefixes of one vector are mutually consistent, so this proves ChainConsistent for the whole chain.
+    if (keylogEntries !== undefined) {
+      const L = Number(BigInt(b.keylog.length));
+      if (L > keylogEntries.length) return { result: 'INVALID', error: 'E-COMMIT', detail: 'checkpoint commits a keylog of length ' + L + ' but only ' + keylogEntries.length + ' entries were supplied (M4.2)' };
+      const kc = buildKeylogCommitment(keylogEntries.slice(0, L));
+      if (kc.root !== b.keylog.root || kc.head !== b.keylog.head)
+        return { result: 'INVALID', error: 'E-COMMIT', detail: 'checkpoint keylog is not the commitment over a prefix of the supplied key-log entries (M4.2 prefix-extension)' };
     }
     if (!expected || !expected.key_id || !expected.pub) return { result: 'INDETERMINATE', reason: 'authority_unresolved', detail: 'cannot resolve the expected signer for sequence ' + b.sequence };
     // 2) the signer must be the RESOLVED authority — OR, after key loss, a genesis-recovery-threshold REPLACEMENT for

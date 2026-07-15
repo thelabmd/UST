@@ -176,6 +176,21 @@ sec('rc35-P0g', 'UST-6vj', 'a caller-minted evidence object (no signed receipt, 
   return r.keylog_freshness !== 'corroborated' && r.keylog_freshness !== 'attested' && r.result !== 'VALID';
 });
 
+// rc.35 round-2 (M4 refactor) — keylog-rewind: the corroborated conjunction required each checkpoint be terminal for
+// its OWN snapshot but never related successive snapshots — C₀ could commit length 2 and C₁ (linking C₀) commit
+// length 1: a SIGNED rewind, both individually terminal. Post-M4.2 the chain enforces append-only: monotone length,
+// equal length ⇒ identical snapshot, and an optional full prefix-extension witness (the entry vector itself).
+sec('rc35-P0h', 'UST-6vj', 'a signed key-log rewind across checkpoints (shorter/rewritten history) is rejected', () => {
+  const AG = 'sha256:' + '44'.repeat(32), EPh = P.genesisEpoch(AG);
+  const E = ['sha256:' + 'e1'.repeat(32), 'sha256:' + 'e2'.repeat(32)];
+  const kc = (n) => { const c = P.buildKeylogCommitment(E.slice(0, n)); return { root: c.root, length: c.length, head: c.head }; };
+  const mk = (seq, prevId, kl) => P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPh, sequence: seq, ...(prevId ? { previous_checkpoint: prevId } : {}), active_genesis: AG, current_key_id: K0.key_id, keylog: kl }), K0.priv, K0.pub);
+  const c0 = mk('0', null, kc(2));
+  const rewind = P.verifyAuthorityCheckpointChain([c0, mk('1', P.authorityCheckpointId(c0), kc(1))], { genesisAuthority: { key_id: K0.key_id, pub: K0.pub } });
+  const rewrite = P.verifyAuthorityCheckpointChain([c0, mk('1', P.authorityCheckpointId(c0), (() => { const c = P.buildKeylogCommitment(['sha256:' + 'e1'.repeat(32), 'sha256:' + 'ff'.repeat(32)]); return { root: c.root, length: c.length, head: c.head }; })())], { genesisAuthority: { key_id: K0.key_id, pub: K0.pub } });
+  return rewind.result !== 'VALID' && rewrite.result !== 'VALID';
+});
+
 // ─── report ────────────────────────────────────────────────────────────────────────────────────
 console.log('\n  rc.33 audit — security regression (Phase 0, epic UST-1o6): SECURE-expectation gate');
 for (const [s, id, bd, d] of rows) console.log(s + '  ' + id.padEnd(8) + bd.padEnd(9) + d);

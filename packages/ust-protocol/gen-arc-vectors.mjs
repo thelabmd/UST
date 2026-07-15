@@ -79,10 +79,23 @@ const add = (id, op, fields) => V.push({ id, op, ...fields });
   const KA0 = kp(s(0x51)), KB0 = kp(s(0x52)), AGB = 'sha256:' + 'b2'.repeat(32), EPB = P.genesisEpoch(AGB);   // canonical epoch for the post-transition genesis
   const C0a = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: KA0.key_id, keylog: KL }), KA0.priv, KA0.pub);
   const idA = P.authorityCheckpointId(C0a);
-  const et = P.buildEpochTransition({ domain_shard: D, from_genesis_epoch: EP, from_final_checkpoint: idA, to_genesis_epoch: EPB, to_key_id: KB0.key_id, to_pub: KB0.pub, to_initial_sequence: '0' }, KA0.priv, KA0.pub);
+  const et = P.buildEpochTransition({ domain_shard: D, from_genesis_epoch: EP, from_final_checkpoint: idA, to_active_genesis: AGB, to_genesis_epoch: EPB, to_key_id: KB0.key_id, to_pub: KB0.pub, to_initial_sequence: '0' }, KA0.priv, KA0.pub);   // M4.4: binds the destination genesis
   const C0b = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPB, sequence: '0', previous_epoch_final_checkpoint: idA, active_genesis: AGB, current_key_id: KB0.key_id, keylog: KL }), KB0.priv, KB0.pub);
   add('epoch-transition-valid', 'verifyAuthorityCheckpointChain', { chain: [C0a, C0b], opts: { genesisAuthority: gAuth(KA0), epochTransitions: { [EPB]: et } }, expect: { result: 'VALID' } });
   add('epoch-silent-reset', 'verifyAuthorityCheckpointChain', { chain: [C0a, C0b], opts: { genesisAuthority: gAuth(KA0) }, expect: { result: 'INVALID', error: 'E-MALFORMED' } });
+  add('epoch-transition-labels-only-rejected', 'verifyAuthorityCheckpointChain', { chain: [C0a, C0b], opts: { genesisAuthority: gAuth(KA0), epochTransitions: { [EPB]: P.buildEpochTransition({ domain_shard: D, from_genesis_epoch: EP, from_final_checkpoint: idA, to_genesis_epoch: EPB, to_key_id: KB0.key_id, to_pub: KB0.pub, to_initial_sequence: '0' }, KA0.priv, KA0.pub) } }, expect: { result: 'INVALID' } });   // M4.4: a transition without to_active_genesis is a free label — rejected
+
+  // M4.2 ChainConsistent — the key log is append-only ACROSS same-epoch checkpoints (closes keylog-rewind).
+  const EV = ['sha256:' + '05'.repeat(32), 'sha256:' + '06'.repeat(32), 'sha256:' + '07'.repeat(32)];
+  const kcn = (n) => { const c = P.buildKeylogCommitment(EV.slice(0, n)); return { root: c.root, length: c.length, head: c.head }; };
+  const CC0 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: K0.key_id, keylog: kcn(2) }), K0.priv, K0.pub);
+  const ccid = P.authorityCheckpointId(CC0);
+  const CC1 = (kl) => P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: '1', previous_checkpoint: ccid, active_genesis: AG, current_key_id: K0.key_id, keylog: kl }), K0.priv, K0.pub);
+  add('keylog-grows-across-checkpoints', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1(kcn(3))], opts: { genesisAuthority: gAuth(K0) }, expect: { result: 'VALID' } });
+  add('keylog-rewind-rejected', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1(kcn(1))], opts: { genesisAuthority: gAuth(K0) }, expect: { result: 'INVALID', error: 'E-COMMIT' } });
+  add('keylog-same-length-rewrite-rejected', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1((() => { const c = P.buildKeylogCommitment([EV[0], 'sha256:' + '0f'.repeat(32)]); return { root: c.root, length: c.length, head: c.head }; })())], opts: { genesisAuthority: gAuth(K0) }, expect: { result: 'INVALID', error: 'E-COMMIT' } });
+  add('keylog-prefix-witness-valid', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1(kcn(3))], opts: { genesisAuthority: gAuth(K0), keylogEntries: EV }, expect: { result: 'VALID' } });
+  add('keylog-prefix-witness-mismatch', 'verifyAuthorityCheckpointChain', { chain: [CC0, CC1(kcn(3))], opts: { genesisAuthority: gAuth(K0), keylogEntries: [EV[0], 'sha256:' + '0f'.repeat(32), EV[2]] }, expect: { result: 'INVALID', error: 'E-COMMIT' } });
 
   const e0 = 'sha256:' + '01'.repeat(32), e1 = 'sha256:' + '02'.repeat(32);
   const kl2 = P.buildKeylogCommitment([e0, e1]);
@@ -137,11 +150,12 @@ const add = (id, op, fields) => V.push({ id, op, ...fields });
   const rOpts = { domain_shard: D, genesis_epoch: EP, last_accepted_checkpoint: last, effective_sequence: '1', recoveryKeys: rKeys, threshold: 2 };
   add('recovery-unit-2of3', 'verifyCheckpointRecovery', { statements: [st(R1), st(R2)], opts: rOpts, expect: { recovered: true } });
   add('recovery-unit-below-threshold', 'verifyCheckpointRecovery', { statements: [st(R1)], opts: rOpts, expect: { recovered: false } });
-  const KA = kp(s(0x91)), KB = kp(s(0x92)), KXe = kp(s(0x9f)), idA = 'sha256:' + 'a5'.repeat(32), EPB = 'sha256:' + 'b5'.repeat(32);
-  const ef = { domain_shard: D, from_genesis_epoch: EP, from_final_checkpoint: idA, to_genesis_epoch: EPB, to_key_id: KB.key_id, to_pub: KB.pub, to_initial_sequence: '0' };
+  const KA = kp(s(0x91)), KB = kp(s(0x92)), KXe = kp(s(0x9f)), idA = 'sha256:' + 'a5'.repeat(32), AGBu = 'sha256:' + 'b6'.repeat(32), EPB = P.genesisEpoch(AGBu);
+  const ef = { domain_shard: D, from_genesis_epoch: EP, from_final_checkpoint: idA, to_active_genesis: AGBu, to_genesis_epoch: EPB, to_key_id: KB.key_id, to_pub: KB.pub, to_initial_sequence: '0' };
   const eOpts = { domain_shard: D, from_genesis_epoch: EP, from_final_checkpoint: idA, fromAuthority: { key_id: KA.key_id, pub: KA.pub } };
   add('epoch-unit-valid', 'verifyEpochTransition', { statement: P.buildEpochTransition(ef, KA.priv, KA.pub), opts: eOpts, expect: { ok: true } });
   add('epoch-unit-wrong-signer', 'verifyEpochTransition', { statement: P.buildEpochTransition(ef, KXe.priv, KXe.pub), opts: eOpts, expect: { ok: false } });
+  add('epoch-unit-free-label-rejected', 'verifyEpochTransition', { statement: P.buildEpochTransition({ ...ef, to_active_genesis: undefined }, KA.priv, KA.pub), opts: eOpts, expect: { ok: false } });   // M4.4
 }
 
 // ─── #78 ASSURANCE PRODUCT-LATTICE vectors — pure axis-tuple contracts (no keys): tier projection, the product

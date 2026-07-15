@@ -1041,6 +1041,19 @@ this one covers the KEY AUTHORITY and is verified by the §12.3.1 algorithm, not
    the id** — anchors, map proofs, and any other external evidence are EXCLUDED, so the id is a pure function of
    the signed statement and cannot be ground by shopping for corroboration (the non-circularity invariant, F.5h).
 
+#### 12.3.0a Canonical authority scope — the publisher cannot choose its namespace (M2)
+
+Every scope-bound authority object (checkpoint, transition, evidence receipt) lives in the scope
+`(domain_shard, active_genesis, genesis_epoch)`, and the epoch is DERIVED, never chosen:
+**`genesis_epoch = H("ust:genesis-epoch", active_genesis)`**. A checkpoint (or receipt, or transition destination)
+carrying any other `genesis_epoch` is `E-MALFORMED`/rejected. This closes **epoch-split**: uniqueness predicates
+(§12.3.4) key by `(domain, genesis_epoch, sequence)` — with a publisher-chosen epoch, two rival C₀ over the SAME
+genesis could occupy two different map slots and BOTH earn `attested`; with the canonical epoch they collide in one
+slot, so at most one can be unique. The full scope identifier is
+`scope_id = H("ust:authority-scope", canon({domain, active_genesis, genesis_epoch}))` (`authorityScopeId`), the
+value `verifiedGenesisContext(genesis)` derives after verifying the genesis class + self-signature — the SOLE
+producer of an authority context; downstream layers take the context, never raw genesis fields.
+
 #### 12.3.1 Verification (`verifyAuthorityCheckpointChain` — ordered, resolve-signer-BEFORE-trust, fail-closed)
 
 Authority is carried IN-BAND and NON-CIRCULARLY: **a checkpoint NEVER authorizes its own signer.** The genesis
@@ -1049,8 +1062,8 @@ BEFORE Cₙ's signature is trusted. The verifier MUST supply a root: either `gen
 profile's genesis-authorized checkpoint key) or a `pinnedPrior = {checkpoint_id, authority, sequence}`. No
 root ⇒ **INDETERMINATE (`authority_unresolved`)** — never a silent accept. For each Cₙ, in order:
 
-1. **Shape.** `body.purpose == "ust:authority-checkpoint"` and `sequence` is a canonical decimal string, else
-   `E-MALFORMED`.
+1. **Shape.** `body.purpose == "ust:authority-checkpoint"`, `sequence` is a canonical decimal string, and
+   `genesis_epoch == H("ust:genesis-epoch", active_genesis)` (canonical scope, §12.3.0a), else `E-MALFORMED`.
 2. **Resolve the expected signer from PRIOR state** (before trusting Cₙ):
    - **C₀** (no prior): expected = `genesisAuthority`.
    - **Epoch change** (`genesis_epoch ≠ prior.genesis_epoch`): a new epoch MUST NOT silently reset — require an
@@ -1060,6 +1073,12 @@ root ⇒ **INDETERMINATE (`authority_unresolved`)** — never a silent accept. F
    - **Normal step**: expected = the authority Cₙ₋₁ committed for THIS sequence — `{next_key_id, next_pub}` iff
      Cₙ₋₁'s `effective_sequence == sequence`, else the unchanged prior authority. Require
      `previous_checkpoint == prior.id` (`E-PREV`) and `sequence == prior.sequence + 1` (`E-SEQ`); domain unchanged.
+     **Chain-consistent key log (M4.2):** the key log is APPEND-ONLY across same-epoch checkpoints —
+     `keylog.length` MUST be ≥ the prior checkpoint's, and an EQUAL length MUST commit the identical
+     `root`+`head`; violation ⇒ `E-COMMIT` (a signed rewind/rewrite is a proven contradiction). When the verifier
+     supplies the key-log entry vector (`keylogEntries`, ≤ 256 per §13 — it already holds it for key resolution),
+     EVERY checkpoint's `keylog` must recompute as the commitment over a PREFIX of that one vector (all prefixes of
+     one vector are mutually consistent) — the full prefix-extension witness; mismatch ⇒ `E-COMMIT`.
    - An unresolvable expected signer ⇒ **INDETERMINATE (`authority_unresolved`)**.
 3. **Authenticate against the RESOLVED signer.** The candidate signers are the resolved authority AND — after key
    loss — a bound recovery replacement for exactly this sequence (§12.3.2). Cₙ's `sig` MUST strict-verify (§7)
@@ -1087,9 +1106,13 @@ the last committed `next_*` (if any) else the last matched signer — the key a 
   recovery set is genesis-fixed and role-separated from the data and checkpoint keys. Recovery does not skip
   validation — the recovered checkpoint still passes every step above.
 - **Genesis-epoch transition** (`purpose:"ust:genesis-epoch-transition"`) crosses a re-rooting without a silent
-  reset: `{ purpose, domain_shard, from_genesis_epoch, from_final_checkpoint, to_genesis_epoch,
+  reset: `{ purpose, domain_shard, from_genesis_epoch, from_final_checkpoint, to_active_genesis, to_genesis_epoch,
   to_checkpoint_authority:{key_id, pub}, to_initial_sequence }`, **signed by epoch A's checkpoint authority** and
-  binding A's final checkpoint id. Epoch B's C₀ then binds it back via `previous_epoch_final_checkpoint` (step 2).
+  binding A's final checkpoint id. The destination is a VERIFIED genesis, never a free epoch label (M4.4):
+  `to_active_genesis` is REQUIRED and `to_genesis_epoch` MUST be canonical to it
+  (`H("ust:genesis-epoch", to_active_genesis)`, §12.3.0a) — a transition that binds no genesis, or a non-canonical
+  destination epoch, is rejected; the epoch-initial checkpoint must live in the bound genesis. Epoch B's C₀ then
+  binds it back via `previous_epoch_final_checkpoint` (step 2).
 
 #### 12.3.3 Strict key-log terminality — head is the LAST entry, not merely a member (#77)
 
@@ -2161,6 +2184,23 @@ provenance and will be lifted into this ledger when the spec is published.
   `VerifyEvidence_C` (formal model, in lockstep). Gates: conformance 348/0, arc 50/0 (incl. forge/admission/role
   vectors), model 111/111, security 23/0, parity (new `evidence-receipt` capability). Legacy `verifiedEvidence()`
   remains a raw facts BUILDER with no capability; connector receipt-emission is the C4 follow-up (bd `UST-6vj`).
+- **REV 52 (2026-07-15, `rc.36`)** — **authority-layer refactor, phase M4 (the checkpoint chain's own discipline).**
+  Closes **keylog-rewind** (`rc35-P0h`): per-checkpoint terminality relates a snapshot to ITSELF, so C₀ could commit
+  length 10 and C₁ commit length 4 — a SIGNED rewind, both individually terminal. `verifyAuthorityCheckpointChain`
+  now enforces **ChainConsistent** (M4.2): across same-epoch checkpoints `keylog.length` is monotone and an equal
+  length commits the identical `root`+`head` (violation ⇒ `E-COMMIT`, unconditional); an optional `keylogEntries`
+  witness (≤ 256, `E-BOUNDS` first) proves the FULL prefix-extension — every checkpoint recomputes over a prefix of
+  ONE vector. **Epoch transitions bind a VERIFIED genesis** (M4.4): `to_active_genesis` is REQUIRED in the claim and
+  `to_genesis_epoch` must be canonical to it — a free destination label is rejected; the epoch-initial checkpoint
+  provably lives in the bound genesis (explicit `E-GENESIS` check kept as the hash-collision belt). New normative
+  **§12.3.0a canonical authority scope** (the M2 rule was previously changelog-only — now in the body: epoch DERIVED,
+  `scope_id`, `verifiedGenesisContext` as sole context producer). Formal model in lockstep: F.5h re-based on the
+  checkpoint filtration `𝓗ₙ` (its OWN index, not real time — M4.1), F.5i gains the `ChainConsistent` conjunct,
+  F.5n weakened to honest **SnapshotTerminal** (a snapshot property; the future is `ChainConsistent`'s job — M4.3),
+  F.5m destination-genesis binding (M4.4). Gates: conformance 358/0, arc 57/0 (+7 rewind/prefix/epoch vectors),
+  model 121/121, security 24/0 (rc35-P0h). With M2+M3+M4 all four round-2 P0 classes are closed
+  (epoch-split, verifiedEvidence-forge, keylog-rewind, cross-scope evidence); next — M1 (lattice/EvidenceBasis) +
+  M5 (quorum algebra) + C3 (pure deriveAssurance) (bd `UST-6vj`).
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

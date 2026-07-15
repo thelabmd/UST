@@ -836,7 +836,7 @@ console.log('\n═════════════════════�
   const KL = { length: '1', root: 'sha256:' + 'c0'.repeat(32), head: 'sha256:' + 'd0'.repeat(32) };
   const C0a = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPA, sequence: '0', active_genesis: AGA, current_key_id: KA0.key_id, keylog: KL }), KA0.priv, KA0.pubB64);
   const idA = P.authorityCheckpointId(C0a), gA = { key_id: KA0.key_id, pub: KA0.pubB64 };
-  const etf = (over = {}) => ({ domain_shard: D, from_genesis_epoch: EPA, from_final_checkpoint: idA, to_genesis_epoch: EPB, to_key_id: KB0.key_id, to_pub: KB0.pubB64, to_initial_sequence: '0', ...over });
+  const etf = (over = {}) => ({ domain_shard: D, from_genesis_epoch: EPA, from_final_checkpoint: idA, to_active_genesis: AGB, to_genesis_epoch: EPB, to_key_id: KB0.key_id, to_pub: KB0.pubB64, to_initial_sequence: '0', ...over });
   const et = P.buildEpochTransition(etf(), KA0.priv, KA0.pubB64);
   const c0b = (over = {}) => P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPB, sequence: '0', previous_epoch_final_checkpoint: idA, active_genesis: AGB, current_key_id: KB0.key_id, keylog: KL, ...over }), (over._signer || KB0).priv, (over._signer || KB0).pubB64);
   const C0b = c0b();
@@ -851,6 +851,40 @@ console.log('\n═════════════════════�
   check('EPOCH verifyEpochTransition valid → to_checkpoint_authority + to_initial_sequence', (r => r.ok === true && r.to_checkpoint_authority.key_id === KB0.key_id && r.to_initial_sequence === '0')(VE(et)));
   check('EPOCH transition bound to wrong from_final_checkpoint → not ok', VE(et, { from_final_checkpoint: 'sha256:' + '00'.repeat(32) }).ok === false);
   check('EPOCH transition to_checkpoint_authority malformed (key_id ≠ keyId(pub)) → not ok', VE(P.buildEpochTransition({ ...etf(), to_key_id: KA0.key_id }, KA0.priv, KA0.pubB64)).ok === false);
+  // M4.4 — the destination is a VERIFIED genesis, never a free label.
+  check('M4.4 transition without to_active_genesis → not ok (no free epoch label)', VE(P.buildEpochTransition({ domain_shard: D, from_genesis_epoch: EPA, from_final_checkpoint: idA, to_genesis_epoch: EPB, to_key_id: KB0.key_id, to_pub: KB0.pubB64, to_initial_sequence: '0' }, KA0.priv, KA0.pubB64)).ok === false);
+  check('M4.4 transition with a NON-canonical to_genesis_epoch → not ok (M2 hygiene uniform)', VE(P.buildEpochTransition(etf({ to_genesis_epoch: 'sha256:' + 'ee'.repeat(32) }), KA0.priv, KA0.pubB64)).ok === false);
+  check('M4.4 transition bound to a DIFFERENT destination genesis than the checkpoint lives in → INVALID (no cross-genesis seeding)', (r => r.result === 'INVALID')((() => {
+    const AGC = 'sha256:' + 'c2'.repeat(32);                                            // the transition hands authority to genesis C; the epoch-B checkpoint cannot ride it
+    const etC = P.buildEpochTransition(etf({ to_active_genesis: AGC, to_genesis_epoch: P.genesisEpoch(AGC) }), KA0.priv, KA0.pubB64);
+    return P.verifyAuthorityCheckpointChain([C0a, C0b], { genesisAuthority: gA, epochTransitions: { [EPB]: etC, [P.genesisEpoch(AGC)]: etC } });
+  })()));                                                                              // M2 (canonical epoch both sides) makes b.active_genesis === et.to_active_genesis derivable; the explicit E-GENESIS check in the chain verifier remains as the hash-collision belt
+}
+
+// ─── M4.2 (UST-6vj) CHAIN-CONSISTENT KEY LOG — append-only ACROSS same-epoch checkpoints. Closes keylog-rewind: a
+//     signed rewind was two INDIVIDUALLY-terminal snapshots (C₀ commits length 10, C₁ commits length 4) that the
+//     per-checkpoint terminality check could never relate. Monotone length + equal-length-identical-snapshot are
+//     unconditional; the FULL prefix-extension proof is the consumer-supplied key-log entry vector (≤ 256, §13).
+{
+  const K0 = kp('71'.repeat(32));
+  const gA = { key_id: K0.key_id, pub: K0.pubB64 };
+  const AG = 'sha256:' + '72'.repeat(32), EP = P.genesisEpoch(AG), D = 'noosphere.md';
+  const e = (n) => 'sha256:' + n.toString(16).padStart(2, '0').repeat(32);
+  const E = [e(0x01), e(0x02), e(0x03)];                                               // the ONE honest entry vector
+  const kc = (n) => P.buildKeylogCommitment(E.slice(0, n));
+  const cp = (seq, prevId, kl, over = {}) => P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EP, sequence: seq, ...(prevId ? { previous_checkpoint: prevId } : {}), active_genesis: AG, current_key_id: K0.key_id, keylog: { root: kl.root, length: kl.length, head: kl.head }, ...over }), K0.priv, K0.pubB64);
+  const C0 = cp('0', null, kc(2)), id0 = P.authorityCheckpointId(C0);
+
+  check('M4.2 keylog grows across checkpoints (2→3, same vector) → VALID', (r => r.result === 'VALID')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, kc(3))], { genesisAuthority: gA })));
+  check('M4.2 keylog REWIND (length 2→1) → INVALID(E-COMMIT) — a signed rewind is caught without any proof', (r => r.result === 'INVALID' && r.error === 'E-COMMIT')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, kc(1))], { genesisAuthority: gA })));
+  check('M4.2 equal-length keylog with a DIFFERENT root/head → INVALID(E-COMMIT) — same-length history rewrite', (r => r.result === 'INVALID' && r.error === 'E-COMMIT')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, P.buildKeylogCommitment([e(0x01), e(0x0f)]))], { genesisAuthority: gA })));
+  check('M4.2 prefix-extension witness: every checkpoint is a prefix of the supplied entry vector → VALID', (r => r.result === 'VALID')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, kc(3))], { genesisAuthority: gA, keylogEntries: E })));
+  check('M4.2 prefix-extension witness: a checkpoint whose keylog is NOT a prefix of the vector → INVALID(E-COMMIT)', (r => r.result === 'INVALID' && r.error === 'E-COMMIT')((() => {
+    const rogue = P.buildKeylogCommitment([e(0x01), e(0x0f), e(0x03)]);                // same length 3, middle entry rewritten
+    return P.verifyAuthorityCheckpointChain([C0, cp('1', id0, rogue)], { genesisAuthority: gA, keylogEntries: [e(0x01), e(0x0f), e(0x03)] });
+  })()));                                                                              // the WITNESS is the rewritten vector: C0 (honest prefix of E) no longer matches it
+  check('M4.2 witness longer than the checkpoint keylog is fine; checkpoint longer than the witness → INVALID(E-COMMIT)', (r => r.result === 'INVALID' && r.error === 'E-COMMIT')(P.verifyAuthorityCheckpointChain([C0, cp('1', id0, kc(3))], { genesisAuthority: gA, keylogEntries: E.slice(0, 2) })));
+  check('M4.2 keylogEntries over the §13 ceiling (257) → INVALID(E-BOUNDS) before any Merkle work', (r => r.result === 'INVALID' && r.error === 'E-BOUNDS')(P.verifyAuthorityCheckpointChain([C0], { genesisAuthority: gA, keylogEntries: Array.from({ length: 257 }, () => e(0x01)) })));
 }
 
 // ─── #77 STRICT KEY-LOG TERMINALITY — head = LAST entry (position L-1) AND no successor at L. Strictly stronger than

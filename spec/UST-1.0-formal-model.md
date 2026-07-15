@@ -680,12 +680,17 @@ can commit its own signature (F.2: a document cannot fix its own hash). And `id`
 so external evidence (anchor receipts, map proofs) is outside `id`: one checkpoint under two different anchors has
 ONE `id` — immutable protocol state, distinct from evidence ABOUT it.
 
-**Authority is `𝓕_{n-1}`-adapted.** Define `Auth(0) = genesis.checkpoint_authority` (or a pinned prior's committed
-next); `Auth(n) =` the key `Cₙ₋₁` committed for `n` (its `next_*` with `effective_sequence = n`), else `Auth(n-1)`.
-The signer of `Cₙ` is REQUIRED to equal `Auth(n)`, and `Auth(n)` is a function of `C₀…Cₙ₋₁` only — an ADAPTED
-process (F.4), measurable in the past σ-algebra `𝓕_{n-1}`. `Cₙ`'s own body cannot set `Auth(n)`: its declared next
-is `effective_sequence = n+1`, authorizing only `Cₙ₊₁`. So the authority relation is WELL-FOUNDED — `Auth(n) ≺ Cₙ`
-in causal order, no cycle — which is precisely the F.4 adaptedness the naive self-authorizing head violated.
+**Authority is `𝓗_{n-1}`-adapted — the checkpoint chain carries its OWN filtration (M4.1).** The index `n` is a
+checkpoint SEQUENCE, not real time, so the checkpoint process is adapted to its own filtration, NOT to the real-time
+anchor filtration `𝓕ₜ` (the rc.35 round-2 correction: the two orderings were conflated): `𝓗₋₁ :=
+σ(VerifiedAuthorityContext)` (genesis-verified scope + rooted authority, M2), `𝓗ₙ := σ(𝓗₋₁, C₀,…,Cₙ, admitted
+recovery/transition evidence up to n)`. Define `Auth(0) =` the context's checkpoint authority (or a pinned prior's
+committed next); `Auth(n) =` the key `Cₙ₋₁` committed for `n` (its `next_*` with `effective_sequence = n`), else
+`Auth(n-1)`. The signer of `Cₙ` is REQUIRED to equal `Auth(n)`, and `Auth(n)` is a function of strictly-earlier
+VERIFIED state only — `𝓗_{n-1}`-measurable. `Cₙ`'s own body cannot set `Auth(n)`: its declared next is
+`effective_sequence = n+1`, authorizing only `Cₙ₊₁`. So the authority relation is WELL-FOUNDED — `Auth(n) ≺ Cₙ`
+in causal order, no cycle — which is precisely the F.4-style adaptedness the naive self-authorizing head violated.
+Real time enters ONLY where a checkpoint meets `𝓕ₜ` through evidence (F.5i's `ProvenAfter`), never through `n`.
 
 **Resolve-before-trust; the carried field is redundant.** Verification computes `Auth(n)` from prior state, THEN
 checks `sig` against it; the body's `current_key_id` is a diagnostic that MUST equal `Auth(n)` and NEVER resolves
@@ -717,19 +722,31 @@ F.5h authorized the checkpoint chain; F.5i derives the freshness verdict a targe
 proves the ceiling that closes P0-05.
 
 **The conjunction.** For a target `R` and an authorized chain `C` (head `Cₙ`), define the events
-`Authorized(C)` (F.5h: `verifyAuthorityCheckpointChain = VALID`), `Terminal(C)` (strict last-index terminality —
-`keylog.head` is the entry at position `length-1` AND no successor at `length`, F.5n), `Committed(C)` (the checkpoint
-`id` carried by a VERIFIED external-commitment evidence `e_c` with `subject(e_c) = id`), `ProvenAfter(e_c, R)`
+`Authorized(C)` (F.5h: `verifyAuthorityCheckpointChain = VALID`), `ChainConsistent(C)` (M4.2, below),
+`Terminal(C)` (SNAPSHOT terminality — `keylog.head` is the entry at position `length-1` AND no successor exists
+WITHIN the committed root, F.5n), `Committed(C)` (the checkpoint `id` carried by a VERIFIED external-commitment
+evidence `e_c` from the F.5g seam with `subject(e_c) = id`), `ProvenAfter(e_c, R)`
 (`compareEvidenceOrder(e_c, anchor(R)) = proven-after`, F.5g), and `Binds(C, R)` (`active_genesis(C) =
 active_genesis(R)` ∧ same domain). Then
 
-`CorroboratedFresh(R, C) = Authorized ∧ Binds ∧ Terminal ∧ Committed ∧ ProvenAfter`.
+`CorroboratedFresh(R, C) = Authorized ∧ Binds ∧ ChainConsistent ∧ Terminal ∧ Committed ∧ ProvenAfter`.
+
+**`ChainConsistent` — the key log is append-only ACROSS checkpoints (M4.2, closes keylog-rewind).** Per-checkpoint
+terminality relates a snapshot to ITSELF; nothing yet related successive snapshots — `C₀` could commit length 10
+and `C₁` (correctly linking `C₀`) commit length 4: a SIGNED rewind, both individually terminal. For successive
+same-epoch accepted `C_{n-1}, C_n`: `length(C_n) ≥ length(C_{n-1})`; equal length ⇒ identical `root` AND `head`;
+and the vector committed by `keylog(C_{n-1})` is a PREFIX of the one committed by `keylog(C_n)`. The full prefix
+relation is witnessed by the key-log ENTRY VECTOR itself (≤ 256 by the §13 resolution ceiling — the consumer already
+holds it for `resolveKeys`): every checkpoint's commitment must recompute over a prefix of that ONE vector, and all
+prefixes of one vector are mutually consistent. Monotone length + equal-length-identity hold UNCONDITIONALLY (no
+witness needed); a violation is `INVALID(E-COMMIT)` — a proven contradiction, not an absence.
 
 Each conjunct is separately measurable, so a MISSING coordinate names itself rather than forging the verdict:
-`¬Authorized ⇒ INVALID` (F.5h), `¬Binds ⇒ E-GENESIS`, `¬Terminal ⇒ INDETERMINATE(terminality_unproven)`,
-`¬Committed ⇒ INDETERMINATE(unavailable)`, `¬ProvenAfter ⇒ INDETERMINATE(order_unproven)`. Because `ProvenAfter`
-is the F.5g proof relation, two `not_after` upper bounds give `unproven ⇒ order_unproven` — never a silent
-`corroborated` from comparing two RFC3339 fields (F.2).
+`¬Authorized ⇒ INVALID` (F.5h), `¬Binds ⇒ E-GENESIS`, `¬ChainConsistent ⇒ INVALID(E-COMMIT)` (a signed rewind is
+fraud, not indeterminacy), `¬Terminal ⇒ INDETERMINATE(terminality_unproven)`, `¬Committed ⇒
+INDETERMINATE(unavailable | evidence_unverified)`, `¬ProvenAfter ⇒ INDETERMINATE(order_unproven)`. Because
+`ProvenAfter` is the F.5g proof relation, two `not_after` upper bounds give `unproven ⇒ order_unproven` — never a
+silent `corroborated` from comparing two RFC3339 fields (F.2).
 
 **The `corroborated` ceiling (P0-05 closed by construction).** `AttestedFresh = CorroboratedFresh ∧
 IndependentAntiEquivocation`, where the anti-equivocation event is `¬∃` a rival checkpoint at the same
@@ -742,16 +759,18 @@ independent coordinate of Phase C/#42 (`authenticated-map-uniqueness` or `accept
 (`Terminal` is now STRICT last-index terminality — F.5n — not the earlier `head ∈ root` membership.)
 
 **Realization.** `deriveCheckpointFreshness(chain, {genesisAuthority | pinnedPrior, target, commitment,
-terminalityProof})` composing `verifyAuthorityCheckpointChain` (F.5h) × `verifyAnchor` (membership) ×
-`compareEvidenceOrder` (F.5g); it returns `{keylog_freshness:"corroborated", anti_equivocation:"unverified"}` and
-has no `attested` branch.
+terminalityProof, trust})` composing `verifyAuthorityCheckpointChain` (F.5h — which enforces monotone/identical
+keylog across checkpoints and accepts the optional `keylogEntries` prefix witness, M4.2) × `verifyEvidenceReceipt`
+(the F.5g seam) × `compareEvidenceOrder` (F.5g); it returns `{keylog_freshness:"corroborated",
+anti_equivocation:"unverified"}` and has no `attested` branch.
 
 **Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
 - the conjunction holds ⇒ corroborated: *"PhB all conjuncts (authorized × head∈root × proven-after) → corroborated"*.
 - the ceiling: *"PhB CEILING: corroborated carries anti_equivocation:unverified and is NEVER attested"*.
+- `ChainConsistent` (M4.2): *"M4.2 keylog grows across checkpoints (2→3, same vector) → VALID"*, *"M4.2 keylog REWIND (length 2→1) → INVALID(E-COMMIT) — a signed rewind is caught without any proof"*, *"M4.2 equal-length keylog with a DIFFERENT root/head → INVALID(E-COMMIT) — same-length history rewrite"*, *"M4.2 prefix-extension witness: every checkpoint is a prefix of the supplied entry vector → VALID"*, *"M4.2 prefix-extension witness: a checkpoint whose keylog is NOT a prefix of the vector → INVALID(E-COMMIT)"*, *"M4.2 witness longer than the checkpoint keylog is fine; checkpoint longer than the witness → INVALID(E-COMMIT)"*, *"M4.2 keylogEntries over the §13 ceiling (257) → INVALID(E-BOUNDS) before any Merkle work"*.
 - named indeterminacy per missing conjunct: *"PhB commitment NOT proven-after target → INDETERMINATE(order_unproven)"*, *"PhB two not_after upper bounds → unproven → order_unproven"*, *"PhB terminality missing → INDETERMINATE(terminality_unproven)"*, *"PhB commitment not bound to checkpoint id → INDETERMINATE(evidence_unverified)"* (M3 — a receipt for a different subject is not admissible evidence here), *"PhB unauthorized chain (wrong signer) → INVALID, freshness unverified"*, *"PhB checkpoint active_genesis ≠ target → INVALID(E-GENESIS)"*, *"PhB cold verifier (no root) → INDETERMINATE(authority_unresolved)"*.
 
-All green at REV 44 (conformance 266/0).
+All green at REV 44 (conformance 266/0); ChainConsistent added at REV 52.
 
 ## F.5j `attested` freshness = `corroborated` ∧ INDEPENDENT uniqueness — the ladder completes (#76 Phase C)
 
@@ -889,14 +908,20 @@ All green at REV 45 (conformance 293/0).
 F.5h's authority process runs WITHIN one genesis epoch. A new epoch `B` succeeding `A` must re-root the authority
 without breaking the causal structure and without a self-declared reset. F.5m is the signed hand-off that does so.
 
-**Adaptedness across the boundary.** The transition `τ` is a typed statement SIGNED BY epoch A's authority — the
-authority in force at A's final checkpoint `F_A` — binding `(domain, from_epoch = A, from_final_checkpoint = id(F_A),
-to_epoch = B, to_checkpoint_authority, to_initial_sequence)`. Epoch B's initial checkpoint `C₀ᴮ` binds
-`previous_epoch_final_checkpoint = id(F_A)`, has `sequence = to_initial_sequence`, and is signed by
-`τ.to_checkpoint_authority`. So `Auth(C₀ᴮ) = τ.to_checkpoint_authority`, and `τ` is signed by `Auth(F_A)`, measurable
-in epoch A's past and bound to `id(F_A)`. Hence `Auth(C₀ᴮ) ≺ C₀ᴮ`: the F.4/F.5h adaptedness continues UNBROKEN across
-the epoch boundary — epoch A's authority CHOOSES epoch B's, exactly as `Cₙ₋₁` chooses `Cₙ`. It is a re-rooting inside
-the same well-founded process, not a new independent root.
+**Adaptedness across the boundary — the destination is a VERIFIED genesis, never a free label (M4.4).** The
+transition `τ` is a typed statement SIGNED BY epoch A's authority — the authority in force at A's final checkpoint
+`F_A` — binding `(domain, from_epoch = A, from_final_checkpoint = id(F_A), to_active_genesis = contentHash(g_B),
+to_epoch = H_"ust:genesis-epoch"(to_active_genesis), to_checkpoint_authority, to_initial_sequence)`. The rc.35
+round-2 correction: `to_epoch = B` used to be a free string, so a transition could seed an epoch that binds NO
+genesis; now `to_active_genesis` is REQUIRED and `to_genesis_epoch` must be CANONICAL to it (the M2 hygiene,
+uniform on both sides of the boundary) — with M2 on the checkpoint side, the epoch-initial `C₀ᴮ` provably LIVES IN
+the genesis the transition bound (`active_genesis(C₀ᴮ) = τ.to_active_genesis` is derivable; the explicit chain check
+remains as the hash-collision belt). Epoch B's initial checkpoint `C₀ᴮ` binds `previous_epoch_final_checkpoint =
+id(F_A)`, has `sequence = to_initial_sequence`, and is signed by `τ.to_checkpoint_authority`. So `Auth(C₀ᴮ) =
+τ.to_checkpoint_authority`, and `τ` is signed by `Auth(F_A)`, measurable in epoch A's past (`𝓗`-adapted, F.5h) and
+bound to `id(F_A)`. Hence `Auth(C₀ᴮ) ≺ C₀ᴮ`: the adaptedness continues UNBROKEN across the epoch boundary — epoch
+A's authority CHOOSES epoch B's, exactly as `Cₙ₋₁` chooses `Cₙ`. It is a re-rooting inside the same well-founded
+process, not a new independent root.
 
 **No silent reset.** A checkpoint whose `genesis_epoch` differs from the prior WITHOUT a valid `τ` is
 `INVALID(E-MALFORMED)`: an epoch cannot re-root the authority or reset the sequence on its own say-so. The sequence
@@ -915,6 +940,7 @@ transition's `to_checkpoint_authority` becomes the resolved signer for `C₀ᴮ`
 **Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
 - adapted re-rooting: *"EPOCH A→B with authenticated transition → chain VALID (initial seq 0)"*, *"EPOCH verifyEpochTransition valid → to_checkpoint_authority + to_initial_sequence"*.
 - no silent reset: *"EPOCH silent reset (no transition supplied) → INVALID(E-MALFORMED)"*, *"EPOCH transition NOT signed by epoch A authority → INVALID(E-MALFORMED)"*.
+- the destination genesis is bound (M4.4): *"M4.4 transition without to_active_genesis → not ok (no free epoch label)"*, *"M4.4 transition with a NON-canonical to_genesis_epoch → not ok (M2 hygiene uniform)"*, *"M4.4 transition bound to a DIFFERENT destination genesis than the checkpoint lives in → INVALID (no cross-genesis seeding)"*.
 - binding: *"EPOCH B C₀ does not bind the prior-epoch final checkpoint → INVALID(E-PREV)"*, *"EPOCH B C₀ sequence ≠ transition to_initial_sequence → INVALID(E-SEQ)"*, *"EPOCH transition bound to wrong from_final_checkpoint → not ok"*, *"EPOCH transition to_checkpoint_authority malformed (key_id ≠ keyId(pub)) → not ok"*.
 
 All green at REV 45 (conformance 301/0).
@@ -932,16 +958,20 @@ single-coordinate non-membership cannot cover the suffix: a prover commits entri
 proves `pos 1` empty, and hides the entry at `pos 2`. Sparse-dictionary absence at one coordinate is not
 prefix-contiguity — the claim "non-membership at `L` proves nothing follows" was false.
 
-**Terminality is now a SIZE-BOUND vector commitment.** The key-log is an ORDERED Merkle over EXACTLY `L` leaves
-(padded to a power of two with a domain-separated empty leaf), and the committed root binds the size:
-`root = H("ust:keylog-commit", {length = L, merkle_root})`. `Terminal(root, L, head)` holds iff `head` is the leaf at
-index `L-1`, AND on the authentication path from that leaf every RIGHT sibling (each time the path node is a left
-child) is the empty-subtree default for its level, AND the recomputed root equals the committed root. The
-right-siblings-empty condition proves the entire suffix `[L, ∞)` is empty in ONE bounded proof; binding `length` into
-the root forbids re-reading the same tree at another size. There is no coordinate at which a later entry can hide: a
-length-`L` commitment has no committed leaf beyond `L-1`, and a real leaf there makes some right sibling non-empty ⇒
-`not terminal`. So `Terminal ⊋ HeadInRoot`, and — unlike the SMT version — it is sound against a successor at ANY
-index, adjacent or not.
+**Terminality is a SNAPSHOT property of a SIZE-BOUND vector commitment (M4.3).** The key-log is an ORDERED Merkle
+over EXACTLY `L` leaves (padded to a power of two with a domain-separated empty leaf), and the committed root binds
+the size: `root = H("ust:keylog-commit", {length = L, merkle_root})`. `SnapshotTerminal(root, L, head)` holds iff
+WITHIN the fixed committed root of width `next-pow2(L)`: `head` is the leaf at index `L-1`; every RIGHT sibling on
+its authentication path (each time the path node is a left child) is the empty-subtree default for its level; the
+proof depth is EXACTLY `ceil(log2(width))` with the index fully consumed (the P0-5 refinement — an under-depth proof
+recomputes a smaller tree); and the recomputed root equals the committed root. This proves the admissible index
+domain of THIS SNAPSHOT is exactly `[0, L-1]` — no committed leaf exists at or beyond `L` *in this root*. It is
+deliberately NOT a claim about "the suffix `[L, ∞)` forever" (the rc.35 round-2 over-strength): nothing about a
+FUTURE, larger snapshot follows from one commitment — that relation is `ChainConsistent` (F.5i/M4.2, append-only
+ACROSS snapshots), and currency against real time is `ProvenAfter` (F.5i). Freshness is the COMPOSITION of a
+snapshot-terminal, chain-consistent, committed, proven-after, authorized checkpoint — three orthogonal predicates,
+none overloaded. Still `SnapshotTerminal ⊋ HeadInRoot`, and — unlike the SMT version — sound against a successor at
+ANY index of the committed tree, adjacent or not.
 
 **Realization.** `buildKeylogCommitment(entryHashes)` (ordered size-bound Merkle: `root`/`length`/`head`/`merkle_root`
 /`headProof = {index, siblings}` + a `prove(index)`) and `verifyKeylogTerminality({root, length, head}, {headProof})`
