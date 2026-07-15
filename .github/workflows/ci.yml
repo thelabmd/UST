@@ -27,5 +27,13 @@ jobs:
         run: npm run test:lite
       - name: security regression (external-audit P0/P1 reproductions must stay closed — epic UST-1o6)
         run: npm run test:security
+      - name: SSRF guards (core + MCP)
+        run: npm run test:ssrf
+      - name: connector receipts (OTS + Rekor)
+        run: npm run test:connectors
+      - name: web-signer cross-verification
+        run: npm run test:web-signer
+      - name: MCP live stdio transport (CWD-independent)
+        run: npm run test:mcp-live
       - name: npm-drift gate (a published version is immutable)
         run: node tools/npm-drift-check.mjs

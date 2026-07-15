@@ -18,7 +18,7 @@ let pass = 0, fail = 0; const check = (id, ok, d) => { if (ok) pass++; else { fa
 const call = async (client, name, args) => JSON.parse((await client.callTool({ name, arguments: args })).content[0].text);
 const rawCall = async (client, name, args) => { const r = await client.callTool({ name, arguments: args }); return { isError: !!r.isError, body: JSON.parse(r.content[0].text) }; };
 
-const transport = new StdioClientTransport({ command: 'node', args: ['server.mjs'] });
+const transport = new StdioClientTransport({ command: 'node', args: [new URL('./server.mjs', import.meta.url).pathname] });   // P1-07: absolute path — CWD-independent (was 'server.mjs')
 const client = new Client({ name: 'ust-live-test', version: '1' }, { capabilities: {} });
 await client.connect(transport);
 

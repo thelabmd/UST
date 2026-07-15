@@ -1,6 +1,6 @@
 {
   "name": "ust",
-  "version": "1.0.0-rc.7",
+  "version": "1.0.0-rc.34",
   "private": true,
   "description": "UST (Universal State Transcript) — specification, conformance vectors, and reference implementations. Trust infrastructure for machine-readable state.",
   "license": "Apache-2.0",
@@ -8,7 +8,10 @@
     "packages/ust-protocol",
     "packages/ust-mcp",
     "packages/ust-web-signer",
-    "packages/ust-cli"
+    "packages/ust-cli",
+    "packages/ust-lite",
+    "packages/ust-ots-verify",
+    "packages/ust-rekor-verify"
   ],
   "scripts": {
     "test": "node packages/ust-protocol/conformance.mjs && node packages/ust-protocol/run-arc-vectors.mjs",
@@ -17,6 +20,10 @@
     "test:vectors": "node packages/ust-protocol/gen-arc-vectors.mjs && git diff --exit-code vectors/arc-vectors.json && node packages/ust-protocol/run-arc-vectors.mjs",
     "test:spec-sync": "node tools/gen-spec-registry.mjs && git diff --exit-code spec/UST-1.0.md && node tools/spec-code-sync.mjs",
     "test:lite": "node packages/ust-lite/test.mjs",
-    "test:security": "node packages/ust-protocol/security-regression.mjs"
+    "test:security": "node packages/ust-protocol/security-regression.mjs",
+    "test:ssrf": "node packages/ust-protocol/ssrf.test.mjs && node packages/ust-mcp/ssrf-guard.test.mjs",
+    "test:connectors": "node packages/ust-ots-verify/index.test.mjs && node packages/ust-rekor-verify/index.test.mjs",
+    "test:web-signer": "node packages/ust-web-signer/test.mjs",
+    "test:mcp-live": "node packages/ust-mcp/live-test.mjs"
   }
 }
