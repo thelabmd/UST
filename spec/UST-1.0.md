@@ -3,7 +3,7 @@
 
 *This specification text is licensed under [Creative Commons Attribution 4.0 International (CC BY 4.0)](../LICENSE-SPEC). Reference code in this repository is licensed Apache-2.0. Use of the name **UST** / **Universal State Transcript** and the **UST-compatible** claim: see [TRADEMARK.md](../TRADEMARK.md).*
 
-> **Release candidate — `1.0.0-rc.33`.** This specification has been extensively red-teamed; an independent
+> **Release candidate — `1.0.0-rc.34`.** This specification has been extensively red-teamed; an independent
 > external cryptographic audit is pending. It is subject to change until `1.0.0` final (rc.2 folded in two external reviews — 6 impl findings + spec edge cases + removed domain-less `computed`; rc.3 aligned impl to §3.1 pinned + Y3; rc.4 closed a 4th external audit (ChatGPT 5.5 Max): key-binding by KEY not string, TOP needs a genesis origin, embedded proofs fail-closed, class↔schema enforced, canon strict on names too, raw-bytes verify boundary, ust_id valid frames, and REMOVED secret-url as a privacy mode; rc.6 closed a 5th external audit STRUCTURALLY — the §14a obligations table (every commitment-bearing member recomputed: +`E-SEED`), a typed identity namespace (dns-name | self-certifying key-id), real-calendar semantic consistency, document-tier vs range-completeness separation, MTI registry discipline, one version source; rc.7 explicit `completeness:not_evaluated`; rc.8 admissibility pins (duplicate refs, key-log
 ceiling, layer availability); rc.9 edge pass (full reserved-name registry, verified-node budget, strict-Z);
 rc.10 partition-capacity ladder (floor 64 / genesis-declared ≤ 4096); rc.11 SIZE ladder + VOLUME-vs-STRUCTURE
@@ -18,7 +18,7 @@ graduated tiers (LIGHT / HIGH / TOP, §3.1). Every mechanism below serves that s
 judged by ONE question — *how much trust does this actually earn, and does the protocol say so honestly?* A
 tier must never let a consumer read "signed" as "true," "anchored" as "correct," or "agreeing" as "independent."
 
-Status: **Normative specification — 1.0 REV 47 (2026-07-14).** The SECURELY-STRUCTURED (namespaced) base that
+Status: **Normative specification — 1.0 REV 48 (2026-07-15).** The SECURELY-STRUCTURED (namespaced) base that
 closed all red-team findings STRUCTURALLY (I3 collision unrepresentable, I1 whole-State signature by
 construction, no stored-hash footgun), with ALL v0.29 FEATURES merged IN (not a flat-wire revert): per-partition
 captured/computed hashing (cross-engine corroboration for computed parts), `parent_ust` (hour-close timing),
@@ -2052,6 +2052,22 @@ provenance and will be lifted into this ledger when the spec is published.
   green check (**model↔code 97/97**). Ships together with REV 46 (§12.3) as one **`rc.33`** — unpublished, ahead of
   npm's `rc.32`, so the npm-drift gate stays green (nothing published to drift against). Non-normative model;
   normative spec wins on conflict.
+- **REV 48 (2026-07-15, `rc.34`)** — **the external-audit remediation** (an independent security/crypto/formal
+  audit of `rc.33` found FIVE P0 invariant breaks with reproductions, all confirmed against live code; epic UST-1o6).
+  Fixed STRUCTURALLY, not point-wise — the strong rungs (`authoritative`/`corroborated`/`attested`/TOP) are now
+  forced through one capability-checked, consumer-rooted derivation, each fix earned by a failing→passing
+  `security-regression` vector (10/10, now a CI gate). **P0-01** — a map root is admissible ONLY from the consumer
+  trust config (`trust.mapRoots`), never the evidence bundle (§12.3.4); a self-supplied root no longer earns
+  `authoritative`/`attested`. **P0-02** — the positioned-SMT terminality was UNSOUND (absence at `L` says nothing
+  about `L+1..`); replaced by a SIZE-BOUND ordered vector commitment `H("ust:keylog-commit", {length, merkle_root})`
+  proving the whole suffix empty (§12.3.3, F.5n). **P0-03** — the legacy `keylogHeadAnchor → attested` path is
+  DELETED (an anchored head is membership-at-anchor, not latest-head); strong freshness only via the checkpoint
+  derivation (§12.2a, F.5d). **P0-04** — evidence is capability-typed; `content-addressed`/`authenticated-map` can
+  never satisfy temporal order (§12.3.5, F.5g). **P0-05** — recovery groups signers by canonical claim and REJECTS
+  `> 1` threshold-reaching replacement (equivocation conflict), and validates `1 ≤ threshold ≤ |recoveryKeys|`
+  (F.5l). Plus P1-01 checkpoint fixed-schema enforcement, P1-02 fail-closed `compareEvidenceOrder`, P1-05 duplicate
+  typed-key rejection. Gates: conformance 317/0, arc 44/0, model↔code 97/97, security 10/10, cli 130/0. Remaining
+  audit items (P1-03/04/06/07/08 release+supply-chain, P2 formal deepening) tracked under UST-1o6.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the

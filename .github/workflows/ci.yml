@@ -25,5 +25,7 @@ jobs:
         run: npm run test:cli
       - name: ust-lite is a valid UST subset (byte-identical to the reference impl, both directions)
         run: npm run test:lite
+      - name: security regression (external-audit P0/P1 reproductions must stay closed — epic UST-1o6)
+        run: npm run test:security
       - name: npm-drift gate (a published version is immutable)
         run: node tools/npm-drift-check.mjs
