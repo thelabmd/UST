@@ -700,8 +700,9 @@ console.log('\n═════════════════════�
   const Wq = kp('71'.repeat(32));   // a consumer-admitted witness (trust lives in CONFIG, never inputs — round-4 P0-02)
   const uniqK = { attestations: [P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: P.genesisEpoch(P.contentHash(genCA)), sequence: '0', checkpoint: headK }, Wq.priv, Wq.pubB64)] };
   const cfgQ = { trust: { connectors: connK, witnesses: { [Wq.key_id]: Wq.pubB64 }, domains: { [Wq.key_id]: 'op-a' }, uniqueness_threshold: 1 } };
-  // D1: a witness quorum yields the QUORUM basis (witness-attested), NEVER the scalar `attested`; the legacy scalar stays corroborated.
-  check('K4/D1 witness quorum → anti_equivocation.quorum set, label witness-attested, legacy stays corroborated (never a scalar attested)', (r => r.result === 'VALID' && r.keylog_freshness === 'corroborated' && r.anti_equivocation.quorum && r.anti_equivocation.quorum.domains.length === 1 && !r.anti_equivocation.map && r.label === 'witness-attested' && r.legacy_freshness === 'corroborated' && r.support.includes('quorum'))(P.verifyAuthorityBundle({ ...bundleIn, uniqueness: uniqK }, cfgQ)));
+  // D1: a witness quorum yields the QUORUM basis (witness-attested), NEVER the scalar `attested`; the legacy scalar stays
+  // corroborated; and the quorum basis lives ONLY in anti_equivocation, never in evidence support (carriers disjoint, M-SEP).
+  check('K4/D1 witness quorum → anti_equivocation.quorum set, label witness-attested, legacy stays corroborated; support carries NO quorum', (r => r.result === 'VALID' && r.keylog_freshness === 'corroborated' && r.anti_equivocation.quorum && r.anti_equivocation.quorum.domains.length === 1 && !r.anti_equivocation.map && r.label === 'witness-attested' && r.legacy_freshness === 'corroborated' && !r.support.includes('quorum'))(P.verifyAuthorityBundle({ ...bundleIn, uniqueness: uniqK }, cfgQ)));
   // D1/P0-02: an attacker's witnesses that are NOT in config are not counted — no quorum basis appears.
   check('K4/P0-02 attacker attestations (∉ config witnesses) → no quorum basis (self-supplied trust rejected)', (r => r.result === 'INDETERMINATE' || (r.result === 'VALID' && !r.anti_equivocation.quorum))(P.verifyAuthorityBundle({ ...bundleIn, uniqueness: uniqK }, cfg)));
 

@@ -49,7 +49,7 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   const πQuorum = node('QuorumAgreement', [πChain], uaW);
   const πWitness = node('ReinforceQuorum', [πCorr, πQuorum]);
   const r = checkAuthorityProof({ term: πWitness, witnesses }, CFG);
-  check('ACCEPT reinforce-quorum: quorum basis present, map null (NOT collapsed to attested), support has quorum', r.result === 'VALID' && r.judgment.aeq.quorum && r.judgment.aeq.quorum.domains.length === 2 && !r.judgment.aeq.map && r.judgment.support.includes('quorum') && typeof r.proof_hash === 'string');
+  check('ACCEPT reinforce-quorum: quorum basis in aeq, map null (NOT collapsed to attested); support carries NO quorum (carriers disjoint)', r.result === 'VALID' && r.judgment.aeq.quorum && r.judgment.aeq.quorum.domains.length === 2 && !r.judgment.aeq.map && !r.judgment.support.includes('quorum') && r.judgment.support.includes('order') && typeof r.proof_hash === 'string');
 }
 
 // ── round-3 P0-1 / round-4 P0-1: there is no Verified/PredicateGraph constructor — a caller CANNOT introduce a label ──
@@ -306,6 +306,28 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   const genPad = P.seal(P.buildGenesis({ domain_shard: 'good.example', ust_id: 'ust:20260716.00', key_id: G.key_id }, T, G.pub, undefined, undefined, undefined, { key_id: G.key_id, pub: G.pub + '=' }), G.priv, G.pub);
   const r = checkAuthorityProof({ term: node('Genesis', [], [put(genPad)]), witnesses }, CFG);
   check('STRICT pub (P1-04): a padded (non-canonical) checkpoint_authority pub → INVALID', r.result === 'INVALID' && /checkpoint_authority|pub|self-bound|canonical/.test(r.reason));
+}
+
+// ── cluster F — semantic invariants (M-SEP / M-CONFIG / M-DET) ───────────────────────────────────────────────────────
+// P0-05 carrier separation: ReinforceQuorum/Map never add to EvidenceSupport; the basis lives ONLY in aeq.
+{
+  const rq = checkAuthorityProof({ term: node('ReinforceQuorum', [πCorr, node('QuorumAgreement', [πChain], [put(ua(Wa)), put(ua(Wb))])]), witnesses }, CFG);
+  const support = rq.judgment.support;
+  check('CARRIER separation (P0-05): EvidenceSupport never contains quorum/map-uniqueness (disjoint from aeq)', rq.result === 'VALID' && !support.includes('quorum') && !support.includes('map-uniqueness') && !!rq.judgment.aeq.quorum);
+}
+// P1-02 config_id extensional over pub VALUES: same witness key_ids, different pub values → different config_id.
+{
+  const c2 = { ...CFG, witnesses: { [Wa.key_id]: Wb.pub, [Wb.key_id]: Wa.pub } };
+  const r1 = checkAuthorityProof({ term: πCorr, witnesses }, CFG);
+  const r2 = checkAuthorityProof({ term: πCorr, witnesses }, c2);
+  check('CONFIG extensional (P1-02): swapping witness pub values (same key_ids) changes config_id', r1.result === 'VALID' && typeof r1.config_id === 'string' && r1.config_id !== r2.config_id);
+}
+// P1-03 quorum permutation invariance (M-DET): reversing vote order yields an identical D.
+{
+  const uaFwd = [put(ua(Wa)), put(ua(Wb))];
+  const rFwd = checkAuthorityProof({ term: node('ReinforceQuorum', [πCorr, node('QuorumAgreement', [πChain], uaFwd)]), witnesses }, CFG);
+  const rRev = checkAuthorityProof({ term: node('ReinforceQuorum', [πCorr, node('QuorumAgreement', [πChain], [uaFwd[1], uaFwd[0]])]), witnesses }, CFG);
+  check('QUORUM permutation invariance (P1-03/M-DET): reversing vote order → identical D', rFwd.result === 'VALID' && rRev.result === 'VALID' && JSON.stringify(rFwd.judgment.aeq.quorum.domains) === JSON.stringify(rRev.judgment.aeq.quorum.domains));
 }
 
 console.log('\n  reference-checker vectors (' + (typeof pass === 'number' ? '' : '') + 'L1)   PASS ' + pass + '   FAIL ' + fail);

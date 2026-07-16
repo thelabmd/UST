@@ -78,9 +78,12 @@ function normalizeConfig(rawLive) {
   const uniqueness_threshold = Number.isInteger(policy.uniqueness_threshold) && policy.uniqueness_threshold >= 1 ? policy.uniqueness_threshold : 2;
   const C = Object.freeze({ connectors, mapRoots, domains, witnesses,
     policy: Object.freeze({ uniqueness_threshold, allowExperimentalAttested: policy.allowExperimentalAttested === true }) });
+  // config_id is EXTENSIONAL over every trust-sensitive VALUE (M-CONFIG, P1-02): connector public keys, allowed proof
+  // kinds, trust domains, the full witness key→pub map (VALUES, not just names), domain map, map roots, thresholds.
+  // Changing any witness pub at the same key_id changes config_id. canon canonicalizes (sorted keys, string leaves).
   const config_id = H('ust:consumer-config', canon({
     connectors: Object.fromEntries(Object.entries(connectors).map(([k, v]) => [k, { pub: v.pub, allowed_proof_kinds: v.allowed_proof_kinds || [], ...(v.trust_domain !== undefined ? { trust_domain: v.trust_domain } : {}) }])),
-    mapRoots: [...mapRoots].sort(), domains, witnessKeys: Object.keys(witnesses).sort(),
+    mapRoots: [...mapRoots].sort(), domains, witnesses,
     policy: { uniqueness_threshold: String(uniqueness_threshold), allowExperimentalAttested: C.policy.allowExperimentalAttested ? '1' : '0' } }));
   return { C, config_id };
 }
@@ -319,24 +322,26 @@ function checkTermInner(node, C, W, memo) {
         if (!byClaim.has(cc)) byClaim.set(cc, new Set());
         byClaim.get(cc).add(dom);                                                       // group by the VERIFIED claim
       }
-      let winner = null;
-      for (const [, doms] of byClaim) if (doms.size >= t && (!winner || doms.size > winner.size)) winner = doms;
-      if (!winner) return ind('quorum not met: no claim reaches ' + t + ' distinct domains');
-      return { j: { kind: 'QuorumAgreement', s: CH.j.s, n: CH.j.n, h, D: [...winner].sort(), t } };
+      // winner SET (M-DET, P1-03): a QuorumAgreement exists ONLY if EXACTLY ONE distinct claim reaches the threshold —
+      // 0 → not met, > 1 → ambiguous (two conflicting quorums). Never "first Map entry"; the result is order-independent.
+      const winners = [...byClaim.values()].filter((doms) => doms.size >= t);
+      if (winners.length === 0) return ind('quorum not met: no claim reaches ' + t + ' distinct domains');
+      if (winners.length > 1) return ind('E-QUORUM-AMBIGUOUS: multiple distinct claims each reach the threshold at (γ,n,h)');
+      return { j: { kind: 'QuorumAgreement', s: CH.j.s, n: CH.j.n, h, D: [...winners[0]].sort(), t } };
     }
     case 'ReinforceMap': {
       const F = sub(0), M = sub(1);
       if (!F.j || F.j.kind !== 'Freshness') return F.j ? bad('child 0 must be Freshness') : F;
       if (!M.j || M.j.kind !== 'MapUnique') return M.j ? bad('child 1 must be MapUnique') : M;
       if (F.j.s !== M.j.s || F.j.n !== M.j.n || F.j.h !== M.j.h) return bad('MapUnique does not unify with the freshness (s,n,h)');
-      return { j: { ...F.j, aeq: { ...F.j.aeq, map: { root: M.j.rho } }, support: [...new Set([...F.j.support, 'map-uniqueness'])].sort() } };
+      return { j: { ...F.j, aeq: { ...F.j.aeq, map: { root: M.j.rho } } } };   // aeq ONLY; EvidenceSupport unchanged — carriers are disjoint (M-SEP, P0-05)
     }
     case 'ReinforceQuorum': {
       const F = sub(0), Q = sub(1);
       if (!F.j || F.j.kind !== 'Freshness') return F.j ? bad('child 0 must be Freshness') : F;
       if (!Q.j || Q.j.kind !== 'QuorumAgreement') return Q.j ? bad('child 1 must be QuorumAgreement') : Q;
       if (F.j.s !== Q.j.s || F.j.n !== Q.j.n || F.j.h !== Q.j.h) return bad('QuorumAgreement does not unify with the freshness (s,n,h)');
-      return { j: { ...F.j, aeq: { ...F.j.aeq, quorum: { domains: Q.j.D, threshold: String(Q.j.t) } }, support: [...new Set([...F.j.support, 'quorum'])].sort() } };
+      return { j: { ...F.j, aeq: { ...F.j.aeq, quorum: { domains: Q.j.D, threshold: String(Q.j.t) } } } };   // aeq ONLY; EvidenceSupport unchanged (M-SEP, P0-05)
     }
     case 'FutureGenesisCommitment': {
       const CH = sub(0); if (!CH.j || CH.j.kind !== 'Chain') return CH.j ? bad('child 0 must be Chain (epoch A)') : CH;
