@@ -25,7 +25,15 @@
       "id": "ORDER-SAME-IDENTITY",
       "rule": "AfterOrder",
       "negative_vectors": [
-        "order.cross-clock"
+        "order.cross-clock",
+        "order.cross-namespace"
+      ]
+    },
+    {
+      "id": "ORDER-INTERVAL-WELLFORMED",
+      "rule": "AfterOrder/orderSemantic",
+      "negative_vectors": [
+        "order.inverted-interval"
       ]
     },
     {

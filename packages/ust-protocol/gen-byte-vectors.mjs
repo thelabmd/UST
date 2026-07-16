@@ -66,6 +66,17 @@ add('order.cross-clock', 'two intervals on different clocks cannot be ordered', 
 const genPad = P.seal(P.buildGenesis({ domain_shard: 'good.example', ust_id: 'ust:20260716.00', key_id: G.key_id }, T, G.pub, undefined, undefined, undefined, { key_id: G.key_id, pub: G.pub + '=' }), G.priv, G.pub);
 add('key.padded-pub', 'a padded (non-canonical) checkpoint_authority pub', b64u(canonPkg(N('Genesis', [], [put(genPad)]))), CFG, { result: 'INVALID', code: 'checkpoint_authority' });
 
+// rev4 round-7 cluster H (M-ORDER: identity namespaced by proof_kind; interval well-formedness).
+const CFG_ORD = { connectors: { [KC.key_id]: { pub: KC.pub, trust_domain: 'x', allowed_proof_kinds: ['pow-header-chain', 'transparency-log'] } } };
+const evR = (subj, pk, facts) => P.buildEvidenceReceipt({ domain_shard: 'good.example', active_genesis: AG, subject: subj, proof_kind: pk, facts, issued_at: '2026-01-01T00:00:00Z' }, KC.priv, KC.pub);
+const πTlog = N('ConnectorEvidence', [πG], [put(evR(head, 'transparency-log', { substrate: 'shared-id', position: '900' }))], { subject: head });
+const πPowShared = N('ConnectorEvidence', [πG], [put(evR('ust:target', 'pow-header-chain', { substrate: 'shared-id', position: '800' }))], { subject: 'ust:target' });
+add('order.cross-namespace', 'a transparency-log and a pow-header-chain reusing one substrate string do not collide', b64u(canonPkg(N('Corroborated', [πChain, πTlog, πPowShared, N('AfterOrder', [πTlog, πPowShared])], [put(term)]))), CFG_ORD, { result: 'INDETERMINATE', code: 'order' });
+const tsaIv = (subj, nb, na) => P.buildEvidenceReceipt({ domain_shard: 'good.example', active_genesis: AG, subject: subj, proof_kind: 'rfc3161-tsa', facts: { clock_id: 'clk', not_before: nb, not_after: na }, issued_at: '2026-01-01T00:00:00Z' }, KT.priv, KT.pub);
+const πIvC = N('ConnectorEvidence', [πG], [put(tsaIv(head, '2026-12-31T00:00:00Z', '2026-01-01T00:00:00Z'))], { subject: head });
+const πIvT = N('ConnectorEvidence', [πG], [put(tsaIv('ust:target', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'))], { subject: 'ust:target' });
+add('order.inverted-interval', 'an interval with lower>upper yields no order', b64u(canonPkg(N('Corroborated', [πChain, πIvC, πIvT, N('AfterOrder', [πIvC, πIvT])], [put(term)]))), CFG_T, { result: 'INDETERMINATE', code: 'order' });
+
 // earlier-round security conditions (rounds 3-5), now as normative TCB byte-vectors (not only object-adapter asserts):
 // M-REL detached-After — an After ordering UNRELATED evidences does not satisfy Corroborated over commit/target.
 const o1 = N('ConnectorEvidence', [πG], [put(rc('ust:other', 500))], { subject: 'ust:other' });
@@ -105,7 +116,8 @@ const MANIFEST = {
   security_conditions: [
     { id: 'BYTES-IMMUTABLE-CANONICAL', rule: 'decodePackage', negative_vectors: ['bytes.noncanonical.whitespace', 'bytes.noncanonical.duplicate-key', 'bytes.utf8'] },
     { id: 'TERM-EXACT-ADT', rule: 'decodeTerm', negative_vectors: ['term.unknown-rule', 'term.extra-child', 'term.extra-witness', 'term.free-param', 'term.stored-conclusion'] },
-    { id: 'ORDER-SAME-IDENTITY', rule: 'AfterOrder', negative_vectors: ['order.cross-clock'] },
+    { id: 'ORDER-SAME-IDENTITY', rule: 'AfterOrder', negative_vectors: ['order.cross-clock', 'order.cross-namespace'] },
+    { id: 'ORDER-INTERVAL-WELLFORMED', rule: 'AfterOrder/orderSemantic', negative_vectors: ['order.inverted-interval'] },
     { id: 'KEY-STRICT-PUB32', rule: 'Genesis/sigOk/ConnectorEvidence/QuorumAgreement', negative_vectors: ['key.padded-pub'] },
     { id: 'CONFIG-EXTENSIONAL-OVER-PUB', rule: 'normalizeConfig', negative_vectors: ['config.pub-swap'] },
     { id: 'AFTER-RELATES-ITS-EVIDENCES', rule: 'Corroborated', negative_vectors: ['rel.detached-after'] },

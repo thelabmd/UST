@@ -381,14 +381,15 @@ function checkTermInner(node, C, W, memo) {
       const { claim, sig } = cm.w;
       if (!claim || claim.purpose !== 'ust:genesis-epoch-transition') return bad('not an epoch-transition commitment');
       if (!isHash(claim.to_active_genesis)) return bad('commitment lacks a target genesis hash');
-      if (sig.key_id !== CH.j.activeAuthority.key_id || sig.pub !== CH.j.activeAuthority.pub || !edVerifyStrict(sig.pub, canon(claim), sig.sig)) return bad('commitment not signed by epoch-A authority');
-      // M-REL: bind the FROM-side of the transition to chain A — domain, final checkpoint, epoch (P0-04). The bound
-      // fields carry forward so the activation cannot substitute a different origin or initial coordinate.
+      // M-KEY total: the transition signature is a leaf like any other — strict Sig64 + alg, not a bare edVerifyStrict (P1-04).
+      if (sig.key_id !== CH.j.activeAuthority.key_id || sig.pub !== CH.j.activeAuthority.pub || sig.alg !== 'Ed25519' || strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, canon(claim), sig.sig)) return bad('commitment not signed by epoch-A authority (or non-canonical signature)');
+      // M-ERA total: bind the FULL epoch-A coordinate — domain, final checkpoint, epoch, AND from_sequence = Chain.n; carry nA (P0-02).
       if (claim.domain_shard !== CH.j.domain) return bad('epoch transition domain_shard ≠ chain-A domain');
       if (claim.from_final_checkpoint !== CH.j.head_id) return bad('epoch transition from_final_checkpoint ≠ chain-A head');
       if (claim.from_genesis_epoch !== CH.j.genesis_epoch) return bad('epoch transition from_genesis_epoch ≠ chain-A epoch');
+      if (decodeSeq(claim.from_sequence) !== CH.j.n) return bad('epoch transition from_sequence ≠ chain-A sequence');
       const toInitialSeq = decodeSeq(claim.to_initial_sequence); if (toInitialSeq === null) return bad('epoch transition to_initial_sequence is not a CanonicalSeq');
-      return { j: { kind: 'FutureCommitted', sA: CH.j.s, hA: CH.j.head_id, domain: CH.j.domain, hB: claim.to_active_genesis, toInitialSeq } };
+      return { j: { kind: 'FutureCommitted', sA: CH.j.s, hA: CH.j.head_id, nA: CH.j.n, domain: CH.j.domain, hB: claim.to_active_genesis, toInitialSeq } };
     }
     case 'ActivateGenesis': {
       const FC = sub(0); if (!FC.j || FC.j.kind !== 'FutureCommitted') return FC.j ? bad('child 0 must be FutureCommitted') : FC;
@@ -460,8 +461,13 @@ function orderSemantic(proof_kind, facts) {
   const caps = evidenceCaps(proof_kind), f = facts || {};
   // the order carries its IDENTITY (which substrate / which clock), and the identity must be PRESENT — a position needs a
   // substrate, an interval a clock_id; without it there is no comparable order (P0-03). id is an index of After.
-  if (caps.includes('order') && typeof f.substrate === 'string') return { kind: 'position', id: f.substrate, facts: { substrate: f.substrate, position: f.position } };
-  if (caps.includes('time') && typeof f.clock_id === 'string') return { kind: 'interval', id: f.clock_id, facts: { not_before: f.not_before, not_after: f.not_after } };
+  // the identity is NAMESPACED by the TRUSTED proof_kind (P0-04) — two different kinds reusing one `substrate` string do
+  // NOT collide; and an interval must be well-formed lower ≤ upper (P1-06), else there is no order.
+  if (caps.includes('order') && typeof f.substrate === 'string') return { kind: 'position', id: proof_kind + ' ' + f.substrate, facts: { substrate: f.substrate, position: f.position } };
+  if (caps.includes('time') && typeof f.clock_id === 'string') {
+    if (typeof f.not_before === 'string' && typeof f.not_after === 'string' && f.not_before > f.not_after) return { kind: 'none', id: null, facts: {} };
+    return { kind: 'interval', id: proof_kind + ' ' + f.clock_id, facts: { not_before: f.not_before, not_after: f.not_after } };
+  }
   return { kind: 'none', id: null, facts: {} };
 }
 function sigOk(cp, auth) {
@@ -474,7 +480,7 @@ function rotationOk(b) {
   const ca = b.checkpoint_authority || {};
   const rot = [ca.next_key_id, ca.next_pub, ca.effective_sequence].filter((x) => x !== undefined).length;
   if (rot !== 0 && rot !== 3) return 'rotation fields must be all-present or all-absent';
-  if (rot === 3) { if (keyId(ca.next_pub) !== ca.next_key_id) return 'keyId(next_pub) ≠ next_key_id'; if (ca.effective_sequence !== String(BigInt(b.sequence) + 1n)) return 'effective_sequence ≠ seq+1'; }
+  if (rot === 3) { if (!strictPub(ca.next_pub) || keyId(ca.next_pub) !== ca.next_key_id) return 'keyId(next_pub) ≠ next_key_id (or non-canonical next_pub)'; if (ca.effective_sequence !== String(BigInt(b.sequence) + 1n)) return 'effective_sequence ≠ seq+1'; }   // P1-05 strict rotation pub
   return null;
 }
 const nextAuthority = (b, signer) => { const ca = b.checkpoint_authority || {}; return (ca.next_key_id !== undefined && ca.effective_sequence === String(BigInt(b.sequence) + 1n)) ? { key_id: ca.next_key_id, pub: ca.next_pub } : signer; };
