@@ -1,0 +1,46 @@
+{
+  "note": "Every security side-condition maps to ≥1 negative byte-vector; the runner asserts each vector exists and holds. In round-7 this feeds a mutation harness (remove the condition → the listed vector must start failing).",
+  "security_conditions": [
+    {
+      "id": "BYTES-IMMUTABLE-CANONICAL",
+      "rule": "decodePackage",
+      "negative_vectors": [
+        "bytes.noncanonical.whitespace",
+        "bytes.noncanonical.duplicate-key",
+        "bytes.utf8"
+      ]
+    },
+    {
+      "id": "TERM-EXACT-ADT",
+      "rule": "decodeTerm",
+      "negative_vectors": [
+        "term.unknown-rule",
+        "term.extra-child",
+        "term.extra-witness",
+        "term.free-param",
+        "term.stored-conclusion"
+      ]
+    },
+    {
+      "id": "ORDER-SAME-IDENTITY",
+      "rule": "AfterOrder",
+      "negative_vectors": [
+        "order.cross-clock"
+      ]
+    },
+    {
+      "id": "KEY-STRICT-PUB32",
+      "rule": "Genesis/sigOk/ConnectorEvidence/QuorumAgreement",
+      "negative_vectors": [
+        "key.padded-pub"
+      ]
+    },
+    {
+      "id": "CONFIG-EXTENSIONAL-OVER-PUB",
+      "rule": "normalizeConfig",
+      "negative_vectors": [
+        "config.pub-swap"
+      ]
+    }
+  ]
+}

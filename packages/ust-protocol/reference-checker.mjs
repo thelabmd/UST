@@ -155,7 +155,8 @@ export function checkAuthorityProofBytes(packageBytes, configBytes, limits = {})
     const cb = snapshotBytes(configBytes); if (cb.error) return INVALID('config bytes: ' + cb.error);
     const nc = decodeConfig(cb.bytes); if (nc.err) return INVALID('config: ' + nc.err);
     const { C, config_id } = nc;
-    const pd = decodePackage(pb.bytes, L); if (pd.err) return INVALID(pd.err);
+    const withCfg = (r) => (r && r.result !== 'VALID') ? { ...r, config_id } : r;   // config_id identifies the config USED, whatever the verdict (P1-02)
+    const pd = decodePackage(pb.bytes, L); if (pd.err) return withCfg(INVALID(pd.err));
     const { term, store } = pd;
     // content-addressed witness fetch from the inert store — recompute H(canon) and match. own-keys via null proto.
     const W = (wid) => {
@@ -165,7 +166,7 @@ export function checkAuthorityProofBytes(packageBytes, configBytes, limits = {})
       return { w };
     };
     const R = checkTerm(term, C, W, new WeakMap());
-    if (!R.j) return R.result ? R : INVALID(R.reason || 'derivation failed');
+    if (!R.j) return withCfg(R.result ? R : INVALID(R.reason || 'derivation failed'));
     return { result: 'VALID', judgment: R.j, proof_hash: H('ust:proof-term', canon(stripExpected(term))), config_id };
   } catch (e) { return INVALID('checker threw (should be total — please report): ' + (e && e.message ? e.message : String(e))); }
 }
