@@ -285,6 +285,29 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   check('DECODE exact arity (P1-01): extra child → E-TERM-ARITY, extra witness → E-TERM-WITNESS', fatChild.result === 'INVALID' && /E-TERM-ARITY/.test(fatChild.reason) && fatWit.result === 'INVALID' && /E-TERM-WITNESS/.test(fatWit.reason));
 }
 
+// ── cluster E — canonical refined types (M-ORDER / M-SEQ / M-KEY) ────────────────────────────────────────────────────
+// P0-03 cross-clock: two intervals on DIFFERENT clocks (rfc3161-tsa) cannot be ordered by raw bounds — clock is an index.
+{
+  const KT = kp('7b'.repeat(32));
+  const tsa = (subj, clk, nb, na) => P.buildEvidenceReceipt({ domain_shard: 'good.example', active_genesis: AG, subject: subj, proof_kind: 'rfc3161-tsa', facts: { clock_id: clk, not_before: nb, not_after: na }, issued_at: '2026-01-01T00:00:00Z' }, KT.priv, KT.pub);
+  const CFG_T = { connectors: { [KT.key_id]: { pub: KT.pub, trust_domain: 'tsa', allowed_proof_kinds: ['rfc3161-tsa'] } } };
+  const πc = node('ConnectorEvidence', [πGenesis], [put(tsa(head, 'tsa-A', '2026-02-01T00:00:00Z', '2026-02-01T00:00:00Z'))], { subject: head });
+  const πt = node('ConnectorEvidence', [πGenesis], [put(tsa('ust:target', 'tsa-B', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'))], { subject: 'ust:target' });
+  const r = checkAuthorityProof({ term: node('Corroborated', [πChain, πc, πt, node('AfterOrder', [πc, πt])], [tW]), witnesses }, CFG_T);
+  check('REJECT cross-clock interval (P0-03): different clock_id → incomparable order → INDETERMINATE', r.result === 'INDETERMINATE' && /identity|order/.test(r.reason));
+}
+// P0-04 CanonicalSeq: chain coordinates are canonical STRINGS, never Number-coerced (exact past 2^53).
+{
+  const r = checkAuthorityProof({ term: πChain, witnesses }, CFG);
+  check('CANONICAL SEQ (P0-04): chain coordinate is a canonical string "0", never a JS number', r.result === 'VALID' && r.judgment.n === '0' && typeof r.judgment.n === 'string');
+}
+// P1-04 strict pub: a genesis checkpoint_authority pub carrying base64url padding is rejected (canonical Pub32 only).
+{
+  const genPad = P.seal(P.buildGenesis({ domain_shard: 'good.example', ust_id: 'ust:20260716.00', key_id: G.key_id }, T, G.pub, undefined, undefined, undefined, { key_id: G.key_id, pub: G.pub + '=' }), G.priv, G.pub);
+  const r = checkAuthorityProof({ term: node('Genesis', [], [put(genPad)]), witnesses }, CFG);
+  check('STRICT pub (P1-04): a padded (non-canonical) checkpoint_authority pub → INVALID', r.result === 'INVALID' && /checkpoint_authority|pub|self-bound|canonical/.test(r.reason));
+}
+
 console.log('\n  reference-checker vectors (' + (typeof pass === 'number' ? '' : '') + 'L1)   PASS ' + pass + '   FAIL ' + fail);
 if (fails.length) { fails.forEach((f) => console.log('    ✗ ' + f)); process.exit(1); }
 console.log('  ✓ check_C accepts a genuine corroborated proof; every past P0 is unbuildable or a structured reject');

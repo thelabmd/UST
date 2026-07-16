@@ -49,6 +49,8 @@ export const witnessId = (obj) => H('ust:witness', canon(obj));   // content add
 // "01", "+1", "1.0", " 1" — so the P0-02 "00"→0 alias cannot form. Returns the canonical string, or null.
 const decodeSeq = (x) => (typeof x === 'string' && /^(0|[1-9][0-9]*)$/.test(x)) ? x
   : (typeof x === 'number' && Number.isInteger(x) && x >= 0 ? String(x) : null);
+const seqSucc = (s) => (BigInt(s) + 1n).toString();   // CanonicalSeq successor via BigInt — Number() is forbidden in the TCB (M-SEQ, P0-04)
+const strictPub = (p) => strictB64url(p, 32) !== null;   // Pub32: canonical unpadded base64url of exactly 32 bytes (P1-04)
 // §2 byte-semantics: read a caller value EXACTLY ONCE into an inert internal value. The counting replacer fires each
 // getter once and BOUNDS the read, so a cyclic or exponentially-shared object graph is rejected (not OOM); JSON.parse
 // then yields an own-data-only tree with no getters/prototype/proxy. After this the caller object is never read again.
@@ -198,9 +200,9 @@ function checkTermInner(node, C, W, memo) {
       const doc = g.w;
       if (doc.state?.id?.class !== 'genesis') return bad('not class:genesis');
       if (!isValid(verify(doc, { context: 'genesis' }))) return bad('genesis integrity/signature invalid');
-      if (keyId(doc.sig.pub) !== doc.state.id.key_id) return bad('genesis key not self-bound');
+      if (!strictPub(doc.sig.pub) || keyId(doc.sig.pub) !== doc.state.id.key_id) return bad('genesis key not self-bound (non-canonical or mismatched pub)');   // P1-04
       const ca = doc.state?.data?.genesis?.value?.checkpoint_authority;
-      if (!ca || !ca.key_id || !ca.pub || keyId(ca.pub) !== ca.key_id) return bad('malformed checkpoint_authority');
+      if (!ca || !ca.key_id || !ca.pub || !strictPub(ca.pub) || keyId(ca.pub) !== ca.key_id) return bad('malformed checkpoint_authority');   // P1-04 strict pub
       const active_genesis = contentHash(doc);
       return { j: { kind: 'Genesis', s: authorityScopeId(active_genesis), domain: doc.state.id.domain_shard, active_genesis, chkAuth: { key_id: ca.key_id, pub: ca.pub }, genesis: doc } };
     }
@@ -208,21 +210,21 @@ function checkTermInner(node, C, W, memo) {
       const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
       const c = wit(0); if (c.err) return bad(c.err);
       const b = c.w.body;
-      if (!b || b.purpose !== 'ust:authority-checkpoint' || String(b.sequence) !== '0' || b.previous_checkpoint !== undefined || b.previous_epoch_final_checkpoint !== undefined) return bad('C0 must be a seq-0 checkpoint with no previous links');
+      if (!b || b.purpose !== 'ust:authority-checkpoint' || decodeSeq(b.sequence) !== '0' || b.previous_checkpoint !== undefined || b.previous_epoch_final_checkpoint !== undefined) return bad('C0 must be a seq-0 checkpoint with no previous links');
       const sc = scopeOk(b, G.j); if (sc) return bad(sc);
       if (b.domain_shard !== G.j.domain) return bad('checkpoint domain_shard ≠ genesis domain (§2.y — a diagnostic wire field must agree with the scope)');
       const sg = sigOk(c.w, G.j.chkAuth); if (sg) return bad(sg);
       if (b.checkpoint_authority?.current_key_id !== G.j.chkAuth.key_id) return bad('current_key_id ≠ genesis checkpoint authority');
       const rot = rotationOk(b); if (rot) return bad(rot);
-      if (!keylogWithinCeiling(b.keylog)) return bad('key-log length exceeds the §13 ceiling (' + KEYLOG_CEIL + ')');   // P1-04
-      return { j: { kind: 'Chain', s: G.j.s, domain: G.j.domain, active_genesis: G.j.active_genesis, genesis_epoch: genesisEpoch(G.j.active_genesis), n: 0, keylog: b.keylog, head_id: authorityCheckpointId(c.w), activeAuthority: nextAuthority(b, G.j.chkAuth) } };
+      if (!keylogWithinCeiling(b.keylog)) return bad('key-log length exceeds the §13 ceiling (' + KEYLOG_CEIL + ')');
+      return { j: { kind: 'Chain', s: G.j.s, domain: G.j.domain, active_genesis: G.j.active_genesis, genesis_epoch: genesisEpoch(G.j.active_genesis), n: '0', keylog: b.keylog, head_id: authorityCheckpointId(c.w), activeAuthority: nextAuthority(b, G.j.chkAuth) } };
     }
     case 'CheckpointStep': {
       const CH = sub(0); if (!CH.j || CH.j.kind !== 'Chain') return CH.j ? bad('child 0 must be Chain') : CH;
       const c = wit(0); if (c.err) return bad(c.err);
       const b = c.w.body, prev = CH.j;
       if (!b || b.purpose !== 'ust:authority-checkpoint') return bad('not an authority checkpoint');
-      if (String(b.sequence) !== String(prev.n + 1)) return bad('sequence ≠ prev+1');
+      if (decodeSeq(b.sequence) !== seqSucc(prev.n)) return bad('sequence ≠ prev+1');
       if (b.previous_checkpoint !== prev.head_id) return bad('previous_checkpoint ≠ prior head');
       const sc = scopeOk(b, { s: prev.s, active_genesis: agFromScope(b) }); if (sc) return bad(sc);
       if (authorityScopeId(b.active_genesis) !== prev.s) return bad('checkpoint scope ≠ chain scope (cross-scope)');
@@ -231,15 +233,15 @@ function checkTermInner(node, C, W, memo) {
       if (b.checkpoint_authority?.current_key_id !== prev.activeAuthority.key_id) return bad('current_key_id ≠ resolved authority');
       const rot = rotationOk(b); if (rot) return bad(rot);
       const ap = appendOnly(prev.keylog, b.keylog, wt[1] !== undefined ? W(wt[1]) : null); if (ap.err) return ap.ind ? ind(ap.err) : bad(ap.err);
-      if (!keylogWithinCeiling(b.keylog)) return bad('key-log length exceeds the §13 ceiling (' + KEYLOG_CEIL + ')');   // P1-04
-      return { j: { kind: 'Chain', s: prev.s, domain: prev.domain, active_genesis: prev.active_genesis, genesis_epoch: prev.genesis_epoch, n: prev.n + 1, keylog: b.keylog, head_id: authorityCheckpointId(c.w), activeAuthority: nextAuthority(b, prev.activeAuthority) } };
+      if (!keylogWithinCeiling(b.keylog)) return bad('key-log length exceeds the §13 ceiling (' + KEYLOG_CEIL + ')');
+      return { j: { kind: 'Chain', s: prev.s, domain: prev.domain, active_genesis: prev.active_genesis, genesis_epoch: prev.genesis_epoch, n: seqSucc(prev.n), keylog: b.keylog, head_id: authorityCheckpointId(c.w), activeAuthority: nextAuthority(b, prev.activeAuthority) } };
     }
     case 'ConnectorEvidence': {
       const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
       const r = wit(0); if (r.err) return bad(r.err);
       const cl = r.w.claim, sig = r.w.sig;
       if (!cl || !sig || cl.purpose !== 'ust:evidence-receipt') return bad('not an evidence receipt');
-      if (keyId(sig.pub) !== sig.key_id || r.w.issuer_id !== sig.key_id) return bad('issuer_id ≠ keyId(pub)');
+      if (!strictPub(sig.pub) || keyId(sig.pub) !== sig.key_id || r.w.issuer_id !== sig.key_id) return bad('issuer_id ≠ keyId(pub) (or non-canonical pub)');   // P1-04
       if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, canon({ purpose: 'ust:evidence-receipt-signature', claim: cl }), sig.sig)) return bad('receipt signature invalid');
       for (const k of ['assurance', 'strength', 'trust_domain', 'independent', 'capability', 'attested', 'threshold']) if (k in (cl.facts || {})) return bad('receipt facts must not self-declare ' + k);
       if (cl.active_genesis !== G.j.active_genesis || cl.genesis_epoch !== genesisEpoch(cl.active_genesis)) return bad('receipt scope ≠ genesis scope');
@@ -261,9 +263,9 @@ function checkTermInner(node, C, W, memo) {
       // planted `position` fact; a position order and an interval order are incomparable and never prove-after (P0-07).
       const soC = orderSemantic(A.j.proof_kind, A.j.facts), soT = orderSemantic(B.j.proof_kind, B.j.facts);
       if (soC.kind === 'none' || soT.kind === 'none') return ind('evidence class cannot establish temporal order');
-      if (soC.kind !== soT.kind) return ind('incomparable order semantics (position vs interval)');
+      if (soC.kind !== soT.kind || soC.id !== soT.id) return ind('incomparable order semantics (different order/clock identity)');   // P0-03: interval must share a clock; position a substrate
       if (compareEvidenceOrder({ facts: soC.facts }, { facts: soT.facts }) !== 'proven-after') return ind('commitment not proven-after the target');
-      return { j: { kind: 'After', s: A.j.s, eC: A.j.e, eT: B.j.e } };   // M-REL: After is indexed by the two evidences it orders
+      return { j: { kind: 'After', s: A.j.s, eC: A.j.e, eT: B.j.e, orderIdentity: soC.id } };   // M-REL: After indexed by the two evidences AND the order identity
     }
     case 'Corroborated': {
       const CH = sub(0), CM = sub(1), TG = sub(2), AF = sub(3);
@@ -310,7 +312,7 @@ function checkTermInner(node, C, W, memo) {
         if (claim.domain_shard !== CH.j.domain) continue;                            // attested checkpoint must be in the chain domain (§2.y, P0-03)
         if (claim.genesis_epoch !== CH.j.genesis_epoch || String(claim.sequence) !== n || claim.checkpoint !== h) continue;   // coordinate FROM the chain
         const pub = C.witnesses[issuer_id];                                            // trust roots FROM C, never the term
-        if (!pub || pub !== sig.pub || keyId(sig.pub) !== issuer_id) continue;
+        if (!pub || !strictPub(sig.pub) || pub !== sig.pub || keyId(sig.pub) !== issuer_id) continue;   // P1-04 strict pub
         const cc = canon(claim);
         if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, cc, sig.sig)) continue;   // ADMIT (verify) before grouping
         const dom = C.domains[issuer_id]; if (dom === undefined) continue;              // consumer-resolved domain
@@ -363,14 +365,14 @@ function checkTermInner(node, C, W, memo) {
       if (!b || b.purpose !== 'ust:authority-checkpoint') return bad('C0_B is not an authority checkpoint');
       if (b.previous_checkpoint !== undefined) return bad('C0_B must not carry a same-epoch previous_checkpoint');
       if (b.previous_epoch_final_checkpoint !== FC.j.hA) return bad('C0_B previous_epoch_final_checkpoint ≠ epoch-A final checkpoint');
-      if (String(b.sequence) !== String(FC.j.toInitialSeq)) return bad('C0_B sequence ≠ committed to_initial_sequence');
+      if (decodeSeq(b.sequence) !== FC.j.toInitialSeq) return bad('C0_B sequence ≠ committed to_initial_sequence');
       const sc = scopeOk(b, { s: GB.j.s, active_genesis: GB.j.active_genesis }); if (sc) return bad('C0_B ' + sc);
       if (b.domain_shard !== GB.j.domain) return bad('C0_B domain_shard ≠ epoch-B genesis domain (§2.y)');
       const sg = sigOk(c.w, GB.j.chkAuth); if (sg) return bad('C0_B ' + sg);
       if (b.checkpoint_authority?.current_key_id !== GB.j.chkAuth.key_id) return bad('C0_B current_key_id ≠ epoch-B genesis authority');
       const rot = rotationOk(b); if (rot) return bad('C0_B ' + rot);
       if (!keylogWithinCeiling(b.keylog)) return bad('C0_B key-log exceeds the §13 ceiling');
-      return { j: { kind: 'EpochActivated', sA: FC.j.sA, sB: GB.j.s, hA: FC.j.hA, nB: Number(decodeSeq(b.sequence)), hB0: authorityCheckpointId(c.w), chkAuthB: GB.j.chkAuth } };   // authority from VERIFIED g_B + verified C0_B, never a claim
+      return { j: { kind: 'EpochActivated', sA: FC.j.sA, sB: GB.j.s, hA: FC.j.hA, nB: decodeSeq(b.sequence), hB0: authorityCheckpointId(c.w), chkAuthB: GB.j.chkAuth } };   // nB is a CanonicalSeq string (M-SEQ); authority from VERIFIED g_B + C0_B
     }
     case 'NameBound': {
       const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
@@ -419,13 +421,15 @@ function keylogWithinCeiling(kl) {
 // planted fact outside the authorized coordinate is stripped, so a time-only kind can never assert a position (P0-07).
 function orderSemantic(proof_kind, facts) {
   const caps = evidenceCaps(proof_kind), f = facts || {};
-  if (caps.includes('order')) return { kind: 'position', facts: { substrate: f.substrate, position: f.position } };
-  if (caps.includes('time')) return { kind: 'interval', facts: { not_before: f.not_before, not_after: f.not_after } };
-  return { kind: 'none', facts: {} };
+  // the order carries its IDENTITY (which substrate / which clock), and the identity must be PRESENT — a position needs a
+  // substrate, an interval a clock_id; without it there is no comparable order (P0-03). id is an index of After.
+  if (caps.includes('order') && typeof f.substrate === 'string') return { kind: 'position', id: f.substrate, facts: { substrate: f.substrate, position: f.position } };
+  if (caps.includes('time') && typeof f.clock_id === 'string') return { kind: 'interval', id: f.clock_id, facts: { not_before: f.not_before, not_after: f.not_after } };
+  return { kind: 'none', id: null, facts: {} };
 }
 function sigOk(cp, auth) {
   const s = cp.sig;
-  if (!s || s.alg !== 'Ed25519' || s.key_id !== auth.key_id || s.pub !== auth.pub || keyId(s.pub) !== s.key_id) return 'signer ≠ resolved authority';
+  if (!s || s.alg !== 'Ed25519' || !strictPub(s.pub) || s.key_id !== auth.key_id || s.pub !== auth.pub || keyId(s.pub) !== s.key_id) return 'signer ≠ resolved authority';   // P1-04 strict pub
   if (strictB64url(s.sig, 64) === null || !edVerifyStrict(s.pub, canon({ purpose: 'ust:authority-checkpoint-signature', body: cp.body }), s.sig)) return 'checkpoint signature invalid';
   return null;
 }
