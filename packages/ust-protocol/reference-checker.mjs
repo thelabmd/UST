@@ -163,7 +163,8 @@ function checkTermInner(node, C, W, memo) {
       const sg = sigOk(c.w, G.j.chkAuth); if (sg) return bad(sg);
       if (b.checkpoint_authority?.current_key_id !== G.j.chkAuth.key_id) return bad('current_key_id ≠ genesis checkpoint authority');
       const rot = rotationOk(b); if (rot) return bad(rot);
-      return { j: { kind: 'Chain', s: G.j.s, domain: G.j.domain, n: 0, keylog: b.keylog, head_id: authorityCheckpointId(c.w), activeAuthority: nextAuthority(b, G.j.chkAuth) } };
+      if (!keylogWithinCeiling(b.keylog)) return bad('key-log length exceeds the §13 ceiling (' + KEYLOG_CEIL + ')');   // P1-04
+      return { j: { kind: 'Chain', s: G.j.s, domain: G.j.domain, active_genesis: G.j.active_genesis, genesis_epoch: genesisEpoch(G.j.active_genesis), n: 0, keylog: b.keylog, head_id: authorityCheckpointId(c.w), activeAuthority: nextAuthority(b, G.j.chkAuth) } };
     }
     case 'CheckpointStep': {
       const CH = sub(0); if (!CH.j || CH.j.kind !== 'Chain') return CH.j ? bad('child 0 must be Chain') : CH;
@@ -179,7 +180,8 @@ function checkTermInner(node, C, W, memo) {
       if (b.checkpoint_authority?.current_key_id !== prev.activeAuthority.key_id) return bad('current_key_id ≠ resolved authority');
       const rot = rotationOk(b); if (rot) return bad(rot);
       const ap = appendOnly(prev.keylog, b.keylog, wt[1] !== undefined ? W(wt[1]) : null); if (ap.err) return ap.ind ? ind(ap.err) : bad(ap.err);
-      return { j: { kind: 'Chain', s: prev.s, domain: prev.domain, n: prev.n + 1, keylog: b.keylog, head_id: authorityCheckpointId(c.w), activeAuthority: nextAuthority(b, prev.activeAuthority) } };
+      if (!keylogWithinCeiling(b.keylog)) return bad('key-log length exceeds the §13 ceiling (' + KEYLOG_CEIL + ')');   // P1-04
+      return { j: { kind: 'Chain', s: prev.s, domain: prev.domain, active_genesis: prev.active_genesis, genesis_epoch: prev.genesis_epoch, n: prev.n + 1, keylog: b.keylog, head_id: authorityCheckpointId(c.w), activeAuthority: nextAuthority(b, prev.activeAuthority) } };
     }
     case 'ConnectorEvidence': {
       const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
@@ -196,17 +198,21 @@ function checkTermInner(node, C, W, memo) {
       const conn = C.connectors[sig.key_id];
       if (!conn || conn.pub !== sig.pub) return ind('issuer is not a consumer-admitted connector');
       if (!Array.isArray(conn.allowed_proof_kinds) || !conn.allowed_proof_kinds.includes(cl.proof_kind)) return ind('connector not admitted for proof_kind ' + cl.proof_kind);
-      return { j: { kind: 'Evidence', s: G.j.s, q: cl.subject, caps: evidenceCaps(cl.proof_kind), facts: cl.facts, proof_kind: cl.proof_kind } };
+      return { j: { kind: 'Evidence', s: G.j.s, e: wt[0], q: cl.subject, caps: evidenceCaps(cl.proof_kind), facts: cl.facts, proof_kind: cl.proof_kind } };   // e = content-addressed evidence identity (M-REL)
     }
     case 'AfterOrder': {
       const A = sub(0), B = sub(1);
       if (!A.j || A.j.kind !== 'Evidence') return A.j ? bad('child 0 must be Evidence') : A;
       if (!B.j || B.j.kind !== 'Evidence') return B.j ? bad('child 1 must be Evidence') : B;
       if (A.j.s !== B.j.s) return bad('evidences in different scopes');
-      const cap = (e) => e.caps.includes('order') || e.caps.includes('time');
-      if (!cap(A.j) || !cap(B.j)) return ind('evidence class cannot establish temporal order');
-      if (compareEvidenceOrder({ verified_facts: A.j.facts }, { verified_facts: B.j.facts }) !== 'proven-after') return ind('commitment not proven-after the target');
-      return { j: { kind: 'After', s: A.j.s, commitCaps: A.j.caps, targetCaps: B.j.caps } };
+      // §3 typed order: the comparable coordinate is derived ONLY from the proof_kind's authorized caps, NEVER from
+      // whatever facts happen to be present. A rfc3161-tsa (time-only) cannot assert a substrate POSITION even with a
+      // planted `position` fact; a position order and an interval order are incomparable and never prove-after (P0-07).
+      const soC = orderSemantic(A.j.proof_kind, A.j.facts), soT = orderSemantic(B.j.proof_kind, B.j.facts);
+      if (soC.kind === 'none' || soT.kind === 'none') return ind('evidence class cannot establish temporal order');
+      if (soC.kind !== soT.kind) return ind('incomparable order semantics (position vs interval)');
+      if (compareEvidenceOrder({ facts: soC.facts }, { facts: soT.facts }) !== 'proven-after') return ind('commitment not proven-after the target');
+      return { j: { kind: 'After', s: A.j.s, eC: A.j.e, eT: B.j.e } };   // M-REL: After is indexed by the two evidences it orders
     }
     case 'Corroborated': {
       const CH = sub(0), CM = sub(1), TG = sub(2), AF = sub(3);
@@ -219,6 +225,8 @@ function checkTermInner(node, C, W, memo) {
       const s = CH.j.s;
       if (CM.j.s !== s || TG.j.s !== s || AF.j.s !== s) return bad('scope mismatch across freshness premises (cross-scope)');
       if (CM.j.q !== CH.j.head_id) return bad('commitment not bound to the checkpoint head');
+      // M-REL: the After MUST order THESE two evidences, not a detached proven-after over unrelated ones (P0-01).
+      if (AF.j.eC !== CM.j.e || AF.j.eT !== TG.j.e) return bad('After does not order the commitment/target evidences (detached After)');
       const support = [...new Set([...CM.j.caps, ...TG.j.caps])].sort();
       return { j: { kind: 'Freshness', s, q: TG.j.q, h: CH.j.head_id, n: CH.j.n, base: 'corroborated', aeq: {}, support } };
     }
@@ -236,22 +244,30 @@ function checkTermInner(node, C, W, memo) {
       const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
       const nseq = decodeSeq(p.n); if (nseq === null) return bad('non-canonical sequence coordinate (§3 CanonicalSeq)');
       const t = C.policy.uniqueness_threshold;
-      const domains = new Set(); let ref = null;
+      // WitnessVote → QuorumAgreement (§6): ADMIT each vote FIRST (authenticate + consumer-resolve + coordinate-bind),
+      // THEN group by the ALREADY-VERIFIED claim. An unadmitted or off-coordinate vote never influences the group — so
+      // no quorum-poison via a pre-admission reference claim (P1-01) and no foreign-domain vote (P0-03). Adding junk
+      // votes cannot break an existing agreement (positive monotonicity).
+      const byClaim = new Map();                                                        // verified claim → Set(distinct domains)
       for (const wid of wt) {
         const a = W(wid); if (a.err) continue;
         const { claim, issuer_id, sig } = a.w || {};
         if (!claim || !sig || claim.purpose !== 'ust:checkpoint-uniqueness-attestation') continue;
         if ('trust_domain' in claim || 'issuer_id' in claim) continue;               // no self-declared independence
+        if (claim.domain_shard !== G.j.domain) continue;                             // the attested checkpoint must be in the genesis domain (§2.y, P0-03)
         if (claim.genesis_epoch !== genesisEpoch(G.j.active_genesis) || String(claim.sequence) !== nseq || claim.checkpoint !== p.h) continue;
-        const cc = canon(claim); if (ref === null) ref = cc; else if (cc !== ref) continue;   // BYTE-IDENTICAL claim
         const pub = C.witnesses[issuer_id];                                            // trust roots FROM C, never the term
         if (!pub || pub !== sig.pub || keyId(sig.pub) !== issuer_id) continue;
-        if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, cc, sig.sig)) continue;
+        const cc = canon(claim);
+        if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, cc, sig.sig)) continue;   // ADMIT (verify) before grouping
         const dom = C.domains[issuer_id]; if (dom === undefined) continue;              // consumer-resolved domain
-        domains.add(dom);
+        if (!byClaim.has(cc)) byClaim.set(cc, new Set());
+        byClaim.get(cc).add(dom);                                                       // group by the VERIFIED claim
       }
-      if (domains.size < t) return ind('quorum not met: ' + domains.size + ' distinct domains < ' + t);
-      return { j: { kind: 'QuorumAgreement', s: G.j.s, n: Number(nseq), h: p.h, D: [...domains].sort(), t } };
+      let winner = null;
+      for (const [, doms] of byClaim) if (doms.size >= t && (!winner || doms.size > winner.size)) winner = doms;
+      if (!winner) return ind('quorum not met: no claim reaches ' + t + ' distinct domains');
+      return { j: { kind: 'QuorumAgreement', s: G.j.s, n: Number(nseq), h: p.h, D: [...winner].sort(), t } };
     }
     case 'ReinforceMap': {
       const F = sub(0), M = sub(1);
@@ -274,13 +290,34 @@ function checkTermInner(node, C, W, memo) {
       if (!claim || claim.purpose !== 'ust:genesis-epoch-transition') return bad('not an epoch-transition commitment');
       if (!isHash(claim.to_active_genesis)) return bad('commitment lacks a target genesis hash');
       if (sig.key_id !== CH.j.activeAuthority.key_id || sig.pub !== CH.j.activeAuthority.pub || !edVerifyStrict(sig.pub, canon(claim), sig.sig)) return bad('commitment not signed by epoch-A authority');
-      return { j: { kind: 'FutureCommitted', sA: CH.j.s, hB: claim.to_active_genesis, toAuthorityExpected: claim.to_checkpoint_authority } };
+      // M-REL: bind the FROM-side of the transition to chain A — domain, final checkpoint, epoch (P0-04). The bound
+      // fields carry forward so the activation cannot substitute a different origin or initial coordinate.
+      if (claim.domain_shard !== CH.j.domain) return bad('epoch transition domain_shard ≠ chain-A domain');
+      if (claim.from_final_checkpoint !== CH.j.head_id) return bad('epoch transition from_final_checkpoint ≠ chain-A head');
+      if (claim.from_genesis_epoch !== CH.j.genesis_epoch) return bad('epoch transition from_genesis_epoch ≠ chain-A epoch');
+      const toInitialSeq = decodeSeq(claim.to_initial_sequence); if (toInitialSeq === null) return bad('epoch transition to_initial_sequence is not a CanonicalSeq');
+      return { j: { kind: 'FutureCommitted', sA: CH.j.s, hA: CH.j.head_id, domain: CH.j.domain, hB: claim.to_active_genesis, toInitialSeq } };
     }
     case 'ActivateGenesis': {
       const FC = sub(0); if (!FC.j || FC.j.kind !== 'FutureCommitted') return FC.j ? bad('child 0 must be FutureCommitted') : FC;
       const GB = sub(1); if (!GB.j || GB.j.kind !== 'Genesis') return GB.j ? bad('child 1 must be a VERIFIED Genesis[sB] — a hash cannot introduce it') : GB;
       if (GB.j.active_genesis !== FC.j.hB) return bad('destination genesis contentHash ≠ committed target');
-      return { j: { kind: 'EpochActivated', sA: FC.j.sA, sB: GB.j.s, chkAuthB: GB.j.chkAuth } };   // authority from VERIFIED g_B, not the claim
+      if (GB.j.domain !== FC.j.domain) return bad('epoch transition crosses domains (AllowedTransition requires same domain)');   // P0-04 policy
+      // EpochActivated cannot come from signer+hash equality alone — the epoch-B INITIAL checkpoint C0_B must be verified
+      // under the epoch-B genesis authority and bound to the epoch-A final checkpoint at the committed sequence (P0-04).
+      const c = wit(0); if (c.err) return bad('epoch-B initial checkpoint (C0_B) witness required: ' + c.err);
+      const b = c.w.body;
+      if (!b || b.purpose !== 'ust:authority-checkpoint') return bad('C0_B is not an authority checkpoint');
+      if (b.previous_checkpoint !== undefined) return bad('C0_B must not carry a same-epoch previous_checkpoint');
+      if (b.previous_epoch_final_checkpoint !== FC.j.hA) return bad('C0_B previous_epoch_final_checkpoint ≠ epoch-A final checkpoint');
+      if (String(b.sequence) !== String(FC.j.toInitialSeq)) return bad('C0_B sequence ≠ committed to_initial_sequence');
+      const sc = scopeOk(b, { s: GB.j.s, active_genesis: GB.j.active_genesis }); if (sc) return bad('C0_B ' + sc);
+      if (b.domain_shard !== GB.j.domain) return bad('C0_B domain_shard ≠ epoch-B genesis domain (§2.y)');
+      const sg = sigOk(c.w, GB.j.chkAuth); if (sg) return bad('C0_B ' + sg);
+      if (b.checkpoint_authority?.current_key_id !== GB.j.chkAuth.key_id) return bad('C0_B current_key_id ≠ epoch-B genesis authority');
+      const rot = rotationOk(b); if (rot) return bad('C0_B ' + rot);
+      if (!keylogWithinCeiling(b.keylog)) return bad('C0_B key-log exceeds the §13 ceiling');
+      return { j: { kind: 'EpochActivated', sA: FC.j.sA, sB: GB.j.s, hA: FC.j.hA, nB: Number(decodeSeq(b.sequence)), hB0: authorityCheckpointId(c.w), chkAuthB: GB.j.chkAuth } };   // authority from VERIFIED g_B + verified C0_B, never a claim
     }
     case 'NameBound': {
       const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
@@ -301,6 +338,7 @@ function checkTermInner(node, C, W, memo) {
       if (!F.j || F.j.kind !== 'Freshness') return F.j ? bad('child 1 must be Freshness') : F;
       if (!T.j || T.j.kind !== 'Time') return T.j ? bad('child 2 must be Time') : T;
       if (I.j.s !== F.j.s || F.j.s !== T.j.s) return bad('assurance premises span different scopes');
+      if (F.j.q !== T.j.q) return bad('freshness and time speak about different subjects (subject unification, P1-03)');
       const tier = (I.j.rung === 'authoritative' && T.j.rung === 'anchored') ? 'TOP' : (I.j.rung === 'authoritative' || I.j.rung === 'corroborated') ? 'HIGH' : 'LIGHT';
       const freshness = { base: F.j.base, anti_equivocation: { quorum: F.j.aeq.quorum || null, map: F.j.aeq.map || null } };
       return { j: { kind: 'Assurance', scope_id: I.j.s, subject: F.j.q, tier, identity: I.j.rung, time: T.j.rung, freshness, support: [...new Set([...F.j.support, ...I.j.caps])].sort() } };
@@ -317,6 +355,21 @@ function scopeOk(b, gLike) {
   return null;
 }
 const agFromScope = (b) => b.active_genesis;
+const KEYLOG_CEIL = 256;   // §13 key-log ceiling — enforced at every checkpoint introduction (P1-04)
+function keylogWithinCeiling(kl) {
+  if (!kl || kl.length === undefined) return false;
+  const n = decodeSeq(kl.length);
+  return n !== null && Number(n) <= KEYLOG_CEIL;
+}
+// §3 OrderSemantic — the order coordinate an evidence may assert is fixed by its proof_kind's caps, NOT its facts.
+// 'order' cap → a Position(substrate, position); else 'time' cap → an Interval(not_before, not_after); else none. A
+// planted fact outside the authorized coordinate is stripped, so a time-only kind can never assert a position (P0-07).
+function orderSemantic(proof_kind, facts) {
+  const caps = evidenceCaps(proof_kind), f = facts || {};
+  if (caps.includes('order')) return { kind: 'position', facts: { substrate: f.substrate, position: f.position } };
+  if (caps.includes('time')) return { kind: 'interval', facts: { not_before: f.not_before, not_after: f.not_after } };
+  return { kind: 'none', facts: {} };
+}
 function sigOk(cp, auth) {
   const s = cp.sig;
   if (!s || s.alg !== 'Ed25519' || s.key_id !== auth.key_id || s.pub !== auth.pub || keyId(s.pub) !== s.key_id) return 'signer ≠ resolved authority';

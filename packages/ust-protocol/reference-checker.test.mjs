@@ -176,6 +176,49 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   check('CONFIG snapshot (P1-05): config read once into an inert value → VALID and connectors getter read exactly once', r.result === 'VALID' && creads === 1);
 }
 
+// ── cluster B — proof-relevant indexed judgments (M-REL / M-ERA): a relation is indexed by every object it relates ──
+// P0-01 detached After: an After that orders UNRELATED evidences does not satisfy Corroborated over commit/target.
+{
+  const o1 = put(rc('ust:other', 500)), o2 = put(rc('ust:other2', 100));
+  const πo1 = node('ConnectorEvidence', [πGenesis], [o1], { subject: 'ust:other' });
+  const πo2 = node('ConnectorEvidence', [πGenesis], [o2], { subject: 'ust:other2' });
+  const πAfterForeign = node('AfterOrder', [πo1, πo2]);                              // proves 500>100 — over other1/other2
+  const πCorrDetached = node('Corroborated', [πChain, πCommit, πTarget, πAfterForeign], [tW]);
+  const r = checkAuthorityProof({ term: πCorrDetached, witnesses }, CFG);
+  check('REJECT detached After (P0-01): After must order THESE commit/target evidences → INVALID (M-REL)', r.result === 'INVALID' && /detached After|does not order/.test(r.reason));
+}
+// P0-07 typed order: a time-only kind (rfc3161-tsa) with a planted position fact cannot assert a substrate order.
+{
+  const KT = kp('7a'.repeat(32));
+  const tsaWithPos = P.buildEvidenceReceipt({ domain_shard: 'good.example', active_genesis: AG, subject: 'ust:target', proof_kind: 'rfc3161-tsa', facts: { substrate: 'bitcoin', position: '999999' }, issued_at: '2026-01-01T00:00:00Z' }, KT.priv, KT.pub);
+  const CFG_T = { connectors: { [KC.key_id]: CONN.connectors[KC.key_id], [KT.key_id]: { pub: KT.pub, trust_domain: 'tsa', allowed_proof_kinds: ['rfc3161-tsa'] } } };
+  const πTsa = node('ConnectorEvidence', [πGenesis], [put(tsaWithPos)], { subject: 'ust:target' });
+  const πAfterTsa = node('AfterOrder', [πCommit, πTsa]);                             // pow(position) vs tsa(planted position)
+  const r = checkAuthorityProof({ term: node('Corroborated', [πChain, πCommit, πTsa, πAfterTsa], [tW]), witnesses }, CFG_T);
+  check('REJECT tsa-position (P0-07): position order and interval order are incomparable → INDETERMINATE', r.result === 'INDETERMINATE' && /incomparable|order/.test(r.reason));
+}
+// P0-03 foreign-domain quorum: votes attesting a foreign domain are not counted in the good-scope quorum.
+{
+  const uaEvil = (W) => P.buildUniquenessAttestation({ domain_shard: 'evil.example', genesis_epoch: EP, sequence: '0', checkpoint: head }, W.priv, W.pub);
+  const πQevil = node('QuorumAgreement', [πGenesis], [put(uaEvil(Wa)), put(uaEvil(Wb))], { n: '0', h: head });
+  const r = checkAuthorityProof({ term: node('ReinforceQuorum', [πCorr, πQevil]), witnesses }, CFG);
+  check('REJECT foreign-domain quorum (P0-03): votes for a foreign domain are not counted → quorum not met', r.result === 'INDETERMINATE' && /quorum not met/.test(r.reason));
+}
+// P1-01 positive monotonicity: an unadmitted junk vote listed FIRST does not starve the genuine quorum (admit-then-group).
+{
+  const Ez = kp('ee'.repeat(32));                                                   // attacker witness, NOT in CFG
+  const junk = P.buildUniquenessAttestation({ domain_shard: 'good.example', genesis_epoch: EP, sequence: '0', checkpoint: head }, Ez.priv, Ez.pub);
+  const πQpoison = node('QuorumAgreement', [πGenesis], [put(junk), put(ua(Wa)), put(ua(Wb))], { n: '0', h: head });
+  const r = checkAuthorityProof({ term: node('ReinforceQuorum', [πCorr, πQpoison]), witnesses }, CFG);
+  check('RESIST quorum poison (P1-01): a junk vote first does not break the genuine quorum → VALID witness-basis (monotonicity)', r.result === 'VALID' && r.judgment.aeq.quorum && r.judgment.aeq.quorum.domains.length === 2);
+}
+// P1-04 §13 ceiling: a checkpoint claiming a 257-length key-log is rejected at introduction.
+{
+  const c0big = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: 'good.example', genesis_epoch: EP, sequence: '0', active_genesis: AG, current_key_id: G.key_id, keylog: { root: kl.root, length: '257', head: kl.head } }), G.priv, G.pub);
+  const r = checkAuthorityProof({ term: node('CheckpointZero', [πGenesis], [put(c0big)]), witnesses }, CFG);
+  check('REJECT over-ceiling key-log (P1-04): C0 length 257 > 256 → INVALID(ceiling)', r.result === 'INVALID' && /ceiling/.test(r.reason));
+}
+
 console.log('\n  reference-checker vectors (' + (typeof pass === 'number' ? '' : '') + 'L1)   PASS ' + pass + '   FAIL ' + fail);
 if (fails.length) { fails.forEach((f) => console.log('    ✗ ' + f)); process.exit(1); }
 console.log('  ✓ check_C accepts a genuine corroborated proof; every past P0 is unbuildable or a structured reject');
