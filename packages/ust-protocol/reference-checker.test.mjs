@@ -2,7 +2,7 @@
 // Reference-checker vectors — the checker ACCEPTS a genuine corroborated proof, and every past P0 is either an
 // UNBUILDABLE term or a structured reject. An UNTRUSTED prover (this file) proposes packages; check_C is the oracle.
 import * as P from './index.mjs';
-import { checkAuthorityProof, checkAuthorityProofBytes, witnessId, REFERENCE_CHECKER_RULES } from './reference-checker.mjs';
+import { checkAuthorityProof, checkAuthorityProofBytes, witnessId, canonJSON, REFERENCE_CHECKER_RULES } from './reference-checker.mjs';
 const U8 = (s) => new TextEncoder().encode(s);
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 const kp = (h) => { const priv = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.from(h, 'hex')]), format: 'der', type: 'pkcs8' }); const pub = createPublicKey(priv).export({ format: 'der', type: 'spki' }).slice(-32).toString('base64url'); return { priv, pub, key_id: P.keyId(pub) }; };
@@ -119,7 +119,7 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   // flip a byte in the genesis witness AFTER content-addressing → the content address no longer matches → reject
   tampered.witnesses[gW] = { ...witnesses[gW], sig: { ...witnesses[gW].sig, sig: 'AAAA' } };
   const r = checkAuthorityProof(tampered, CFG);
-  check('REJECT mutated-witness: a post-hoc-mutated witness fails its content address → INVALID', r.result === 'INVALID' && /content address/.test(r.reason));
+  check('REJECT mutated-witness: a post-hoc-mutated witness fails its content address → INVALID', r.result === 'INVALID' && /content address|E-WITNESS-ADDRESS/.test(r.reason));
 }
 
 // ── round-4 P1-1: total — policy:null / config:null never throws ──
@@ -257,25 +257,25 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
 // ── cluster D — the byte boundary (M-BYTE / M-DEC): the TCB accepts immutable bytes; one canonical form ──────────────
 // M-BYTE: the normative bytes API accepts canonical package bytes; the object API is exactly the adapter over it.
 {
-  const viaBytes = checkAuthorityProofBytes(U8(P.canon({ term: πCorr, witnesses })), U8(JSON.stringify(CFG)));
+  const viaBytes = checkAuthorityProofBytes(U8(P.canon({ term: πCorr, witnesses })), U8(canonJSON(CFG)));
   const viaObj = checkAuthorityProof({ term: πCorr, witnesses }, CFG);
   check('BYTES API (M-BYTE): checkAuthorityProofBytes accepts canonical bytes; object adapter == bytes core (same proof_hash/config_id)', viaBytes.result === 'VALID' && viaObj.result === 'VALID' && viaBytes.proof_hash === viaObj.proof_hash && viaBytes.config_id === viaObj.config_id);
 }
 // M-DEC round-trip guard: non-canonical (pretty-printed) package bytes → INVALID(E-NONCANONICAL).
 {
-  const r = checkAuthorityProofBytes(U8(JSON.stringify({ term: πCorr, witnesses }, null, 2)), U8(JSON.stringify(CFG)));
+  const r = checkAuthorityProofBytes(U8(JSON.stringify({ term: πCorr, witnesses }, null, 2)), U8(canonJSON(CFG)));
   check('BYTES non-canonical (M-DEC): whitespace/non-canonical package bytes → INVALID(E-NONCANONICAL)', r.result === 'INVALID' && /E-NONCANONICAL/.test(r.reason));
 }
 // M-DEC: duplicate JSON keys collapse on parse but fail the canonical round-trip → INVALID.
 {
   const dup = P.canon({ term: πCorr, witnesses }).replace('{', '{"__x":"1","__x":"2",', 1);
-  const r = checkAuthorityProofBytes(U8(dup), U8(JSON.stringify(CFG)));
+  const r = checkAuthorityProofBytes(U8(dup), U8(canonJSON(CFG)));
   check('BYTES duplicate-key (M-DEC): duplicate keys collapse on parse but fail the round-trip → INVALID', r.result === 'INVALID' && /E-NONCANONICAL/.test(r.reason));
 }
 // M-DEC: invalid UTF-8 package bytes → INVALID(E-UTF8); a non-Uint8Array input → INVALID(E-BYTES-TYPE).
 {
-  const rUtf8 = checkAuthorityProofBytes(new Uint8Array([0xff, 0xfe, 0x00]), U8(JSON.stringify(CFG)));
-  const rType = checkAuthorityProofBytes({ not: 'bytes' }, U8(JSON.stringify(CFG)));
+  const rUtf8 = checkAuthorityProofBytes(new Uint8Array([0xff, 0xfe, 0x00]), U8(canonJSON(CFG)));
+  const rType = checkAuthorityProofBytes({ not: 'bytes' }, U8(canonJSON(CFG)));
   check('BYTES UTF-8 / type (M-BYTE/M-DEC): invalid UTF-8 → E-UTF8, non-Uint8Array → E-BYTES-TYPE', rUtf8.result === 'INVALID' && /E-UTF8/.test(rUtf8.reason) && rType.result === 'INVALID' && /E-BYTES-TYPE/.test(rType.reason));
 }
 // P1-01 exact arity at decode: an extra child on Corroborated → INVALID(E-TERM-ARITY); an extra witness → E-TERM-WITNESS.

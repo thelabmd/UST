@@ -16,29 +16,30 @@ import { canon, H, keyId, edVerifyStrict, contentHash, verify, isValid, verifyKe
   verifyCheckpointMapUniqueness, evidenceCaps, compareEvidenceOrder, authorityScopeId, genesisEpoch,
   resolveKeys, buildKeylogCommitment, authorityCheckpointId, strictB64url } from './index.mjs';
 
-export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev3';
+export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev4';
 // RULE_CONTRACTS (§2b) — the STRUCTURAL source of truth: exactly one inference rule per name, one switch branch per
 // name, and a fixed (children arity, witness count, allowed params, conclusion kind). DecodeTerm enforces these on
 // decode; a term with an extra child / extra witness / free param / unknown field / stored conclusion is rejected
 // BEFORE any rule (M-DEC, closes P1-01). NO semantic security logic lives here — clock/scope/signature/identity checks
 // stay in the rule interpreter, so the registry never becomes a second clever TCB. Grammar↔RULES parity derives from it.
 const wc = (min, max = min) => ({ min, max });
+const rp = { req: true, type: 'string' };   // a REQUIRED string param (M-ADT: params are a typed schema, not an allowed-name list)
 export const RULE_CONTRACTS = Object.freeze({
-  Genesis:                 { children: 0, witnesses: wc(1),        params: [],                conclusion: 'Genesis' },
-  CheckpointZero:          { children: 1, witnesses: wc(1),        params: [],                conclusion: 'Chain' },
-  CheckpointStep:          { children: 1, witnesses: wc(1, 2),     params: [],                conclusion: 'Chain' },       // consistency witness optional
-  ConnectorEvidence:       { children: 1, witnesses: wc(1),        params: ['subject'],       conclusion: 'Evidence' },
-  AfterOrder:              { children: 2, witnesses: wc(0),        params: [],                conclusion: 'After' },
-  Corroborated:            { children: 4, witnesses: wc(1),        params: [],                conclusion: 'Freshness' },   // terminality is the head witness (folded)
-  MapUnique:               { children: 1, witnesses: wc(1),        params: [],                conclusion: 'MapUnique' },   // coordinate FROM πChain (no params)
-  QuorumAgreement:         { children: 1, witnesses: wc(0, Infinity), params: [],             conclusion: 'QuorumAgreement' }, // variadic admitted votes
-  ReinforceMap:            { children: 2, witnesses: wc(0),        params: [],                conclusion: 'Freshness' },
-  ReinforceQuorum:         { children: 2, witnesses: wc(0),        params: [],                conclusion: 'Freshness' },
-  FutureGenesisCommitment: { children: 1, witnesses: wc(1),        params: [],                conclusion: 'FutureCommitted' },
-  ActivateGenesis:         { children: 2, witnesses: wc(1),        params: [],                conclusion: 'EpochActivated' }, // requires the verified C0_B witness
-  NameBound:               { children: 1, witnesses: wc(0, 1),     params: ['doc_key_id'],    conclusion: 'Identity' },
-  Anchored:                { children: 0, witnesses: wc(1),        params: ['s', 'subject'],  conclusion: 'Time' },
-  ProjectAssurance:        { children: 3, witnesses: wc(0),        params: [],                conclusion: 'Assurance' },
+  Genesis:                 { children: 0, witnesses: wc(1),        params: {},                conclusion: 'Genesis' },
+  CheckpointZero:          { children: 1, witnesses: wc(1),        params: {},                conclusion: 'Chain' },
+  CheckpointStep:          { children: 1, witnesses: wc(1, 2),     params: {},                conclusion: 'Chain' },       // consistency witness optional
+  ConnectorEvidence:       { children: 1, witnesses: wc(1),        params: { subject: rp },       conclusion: 'Evidence' },
+  AfterOrder:              { children: 2, witnesses: wc(0),        params: {},                conclusion: 'After' },
+  Corroborated:            { children: 4, witnesses: wc(1),        params: {},                conclusion: 'Freshness' },   // terminality is the head witness (folded)
+  MapUnique:               { children: 1, witnesses: wc(1),        params: {},                conclusion: 'MapUnique' },   // coordinate FROM πChain (no params)
+  QuorumAgreement:         { children: 1, witnesses: wc(0, Infinity), params: {},             conclusion: 'QuorumAgreement' }, // variadic admitted votes
+  ReinforceMap:            { children: 2, witnesses: wc(0),        params: {},                conclusion: 'Freshness' },
+  ReinforceQuorum:         { children: 2, witnesses: wc(0),        params: {},                conclusion: 'Freshness' },
+  FutureGenesisCommitment: { children: 1, witnesses: wc(1),        params: {},                conclusion: 'FutureCommitted' },
+  ActivateGenesis:         { children: 2, witnesses: wc(1),        params: {},                conclusion: 'EpochActivated' }, // requires the verified C0_B witness
+  NameBound:               { children: 1, witnesses: wc(0, 1),     params: { doc_key_id: rp },    conclusion: 'Identity' },
+  Anchored:                { children: 0, witnesses: wc(1),        params: { s: rp, subject: rp },  conclusion: 'Time' },
+  ProjectAssurance:        { children: 3, witnesses: wc(0),        params: {},                conclusion: 'Assurance' },
 });
 export const REFERENCE_CHECKER_RULES = Object.freeze(Object.keys(RULE_CONTRACTS));   // parity DERIVES from the registry
 const RULES = new Set(REFERENCE_CHECKER_RULES);
@@ -116,10 +117,28 @@ function decodeTerm(raw, L, depth, ctr) {
   for (const w of witnesses) if (typeof w !== 'string') return { err: 'E-TERM-WITNESS-TYPE' };
   const params = raw.params === undefined ? {} : raw.params;
   if (typeof params !== 'object' || params === null || Array.isArray(params)) return { err: 'E-TERM-PARAMS' };
-  for (const pk of Object.keys(params)) if (!contract.params.includes(pk)) return { err: 'E-TERM-PARAM:' + pk };
+  for (const pk of Object.keys(params)) {                                    // M-ADT: params are a TYPED schema, not an allowed-name list
+    const spec = contract.params[pk];
+    if (!spec) return { err: 'E-TERM-PARAM:' + pk };
+    if (typeof params[pk] !== spec.type) return { err: 'E-TERM-PARAM-TYPE:' + pk };
+  }
+  for (const [pk, spec] of Object.entries(contract.params)) if (spec.req && !(pk in params)) return { err: 'E-TERM-PARAM-MISSING:' + pk };   // required present (P1-02)
   const kids = [];
   for (const c of children) { const dc = decodeTerm(c, L, depth + 1, ctr); if (dc.err) return dc; kids.push(dc.term); }
-  return { term: { rule: raw.rule, children: kids, witnesses, params } };
+  // canonical node shape: params OMITTED when empty (one normal form), so params:{} vs absent cannot be two wire forms.
+  return { term: { rule: raw.rule, children: kids, witnesses, ...(Object.keys(params).length ? { params } : {}) } };
+}
+// canonJSON — a canonical JSON encoder that ADMITS numbers/booleans (for CONFIG bytes, which carry a threshold): sorted
+// keys, canonical numbers, no whitespace. Used for the config round-trip guard so ConfigBytes are language-neutral too.
+export function canonJSON(v) {
+  if (v === null) return 'null';
+  const t = typeof v;
+  if (t === 'string') return JSON.stringify(v);
+  if (t === 'number') { if (!Number.isFinite(v)) throw new Error('E-NUM'); return JSON.stringify(v); }
+  if (t === 'boolean') return v ? 'true' : 'false';
+  if (Array.isArray(v)) return '[' + v.map(canonJSON).join(',') + ']';
+  if (t === 'object') { const ks = Object.keys(v).sort(); return '{' + ks.map((k) => JSON.stringify(k) + ':' + canonJSON(v[k])).join(',') + '}'; }
+  throw new Error('E-TYPE');
 }
 // DecodePackage: bytes → strict UTF-8 → JSON.parse → canonical ROUND-TRIP guard (CanonicalEncode(V)==B) → exact Term ADT
 // + content-addressed witness store. The round-trip guard rejects whitespace, key order, duplicate keys, numeric alias,
@@ -128,20 +147,32 @@ function decodePackage(bytes, L) {
   if (bytes.byteLength > L.maxPackageBytes) return { err: 'E-PACKAGE-SIZE' };
   let text; try { text = TEXT_DEC.decode(bytes); } catch { return { err: 'E-UTF8' }; }
   let parsed; try { parsed = JSON.parse(text); } catch { return { err: 'E-JSON' }; }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !parsed.term || typeof parsed.term !== 'object' || !parsed.witnesses || typeof parsed.witnesses !== 'object')
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !parsed.term || typeof parsed.term !== 'object' || Array.isArray(parsed.term) || !parsed.witnesses || typeof parsed.witnesses !== 'object' || Array.isArray(parsed.witnesses))
     return { err: 'E-PACKAGE-SHAPE' };
-  let reB; try { reB = canon(parsed); } catch { return { err: 'E-NONCANONICAL' }; }
-  if (reB !== text) return { err: 'E-NONCANONICAL' };
   const td = decodeTerm(parsed.term, L, 0, { n: 0 }); if (td.err) return { err: td.err };
   const wkeys = Object.keys(parsed.witnesses);
   if (wkeys.length > L.maxWitnesses) return { err: 'E-WITNESS-COUNT' };
-  const store = Object.create(null);                       // own keys only; parsed values are inert canonical data
-  for (const k of wkeys) store[k] = parsed.witnesses[k];
+  const store = Object.create(null);
+  for (const k of wkeys) {                                 // EVERY witness content-addressed + byte-bounded, even if unreferenced (M-DEC domain, P1-03)
+    const w = parsed.witnesses[k];
+    let wb; try { wb = canon(w); } catch { return { err: 'E-WITNESS-NONCANONICAL' }; }
+    if (wb.length > L.maxWitnessBytes) return { err: 'E-WITNESS-SIZE' };
+    if (witnessId(w) !== k) return { err: 'E-WITNESS-ADDRESS' };
+    store[k] = w;
+  }
+  // M-DEC: canonical round-trip over the DECODED ADT, not raw JSON — CanonicalEncode(decode(B)) == B. An extra top-level
+  // field is absent from the ADT (re-encode differs); params:{} vs absent has one normal form (proof_hash injective).
+  let reB; try { reB = canon({ term: td.term, witnesses: parsed.witnesses }); } catch { return { err: 'E-NONCANONICAL' }; }
+  if (reB !== text) return { err: 'E-NONCANONICAL' };
   return { term: td.term, store };
 }
 function decodeConfig(bytes) {
   let text; try { text = TEXT_DEC.decode(bytes); } catch { return { err: 'E-UTF8' }; }
   let parsed; try { parsed = JSON.parse(text); } catch { return { err: 'E-JSON' }; }
+  // M-DEC over ConfigBytes: the config must be canonical too — no whitespace / key order / duplicate keys / numeric
+  // alias, so the consumer trust world is language-neutral, not parser-dependent (P0-01).
+  let reB; try { reB = canonJSON(parsed); } catch { return { err: 'E-CONFIG-NONCANONICAL' }; }
+  if (reB !== text) return { err: 'E-CONFIG-NONCANONICAL' };
   return normalizeConfig(parsed);
 }
 
@@ -174,7 +205,7 @@ export function checkAuthorityProofBytes(packageBytes, configBytes, limits = {})
 // EncodeLive — the UNTRUSTED encoding adapter (outside the TCB). It MAY run getters/toJSON; that only chooses the bytes
 // (a caller could hand any bytes directly), never produces a proof. Package uses canonical string-leaf bytes (`canon`),
 // config uses JSON. checkAuthorityProof(obj,cfg) := checkAuthorityProofBytes(EncodeLive(pkg), EncodeLive(cfg)).
-const encodeLive = (x, kind) => { try { return { bytes: TEXT_ENC.encode(kind === 'package' ? canon(x) : JSON.stringify(x ?? null)) }; } catch { return { error: 'E-ENCODE' }; } };
+const encodeLive = (x, kind) => { try { return { bytes: TEXT_ENC.encode(kind === 'package' ? canon(x) : canonJSON(x ?? null)) }; } catch { return { error: 'E-ENCODE' }; } };
 export function checkAuthorityProof(obj, config, limits = {}) {
   const p = encodeLive(obj, 'package'); if (p.error) return { result: 'INVALID', reason: 'package: ' + p.error };
   const c = encodeLive(config, 'config'); if (c.error) return { result: 'INVALID', reason: 'config: ' + c.error };

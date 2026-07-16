@@ -5,7 +5,7 @@
 // The manifest maps each security side-condition → ≥1 negative vector (owner completion criterion 8). Regenerate then
 // `git diff --exit-code` the outputs (like arc-vectors) so the corpus is deterministic.
 import * as P from './index.mjs';
-import { witnessId, REFERENCE_CHECKER_VERSION } from './reference-checker.mjs';
+import { witnessId, canonJSON, REFERENCE_CHECKER_VERSION } from './reference-checker.mjs';
 import { writeFileSync } from 'node:fs';
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 
@@ -39,7 +39,7 @@ const CFG_T = { connectors: { [KT.key_id]: { pub: KT.pub, trust_domain: 'tsa', a
 // each vector supplies package bytes (canonical from an object, or a RAW string for byte-level malformed cases) + config.
 const canonPkg = (rootTerm) => P.canon(pkg(rootTerm));
 const V = [];
-const add = (id, note, package_b64url, config_obj, expected) => V.push({ id, note, package_b64url, config_b64url: b64u(JSON.stringify(config_obj)), expected });
+const add = (id, note, package_b64url, config_obj, expected) => V.push({ id, note, package_b64url, config_b64url: b64u(canonJSON(config_obj)), expected });
 
 // positive
 add('accept.corroborated', 'genuine corroborated proof', b64u(canonPkg(πCorr)), CFG, { result: 'VALID', judgment_kind: 'Freshness' });
@@ -86,12 +86,18 @@ const uaE = (W) => P.buildUniquenessAttestation({ domain_shard: 'good.example', 
 add('quorum.self-trust', 'attacker witnesses not admitted by config', b64u(canonPkg(N('ReinforceQuorum', [πCorr, N('QuorumAgreement', [πChain], [put(uaE(Ez1)), put(uaE(Ez2))])]))), CFG, { result: 'INDETERMINATE', code: 'quorum not met' });
 // P0-03(r4) content address — a witness tampered after addressing fails its content address.
 const genW = put(gen);
-add('witness.content-address', 'a tampered witness fails its content address', b64u(P.canon({ term: πChain, witnesses: { ...store, [genW]: { ...store[genW], __tamper: 'x' } } })), CFG, { result: 'INVALID', code: 'content address' });
+add('witness.content-address', 'a tampered witness fails its content address', b64u(P.canon({ term: πChain, witnesses: { ...store, [genW]: { ...store[genW], __tamper: 'x' } } })), CFG, { result: 'INVALID', code: 'E-WITNESS-ADDRESS' });
 
 // F — semantic invariants (M-CONFIG): same package, config with a swapped witness pub → a DIFFERENT config_id.
 // swapping witness pub VALUES at the same key_ids BREAKS admission (the attestations no longer verify) → INDETERMINATE,
 // AND the config_id must differ from the genuine one — proof that config_id is extensional over pub values (P1-02).
 add('config.pub-swap', 'witness pubs swapped at the same key_ids: quorum breaks + config_id changes', b64u(canonPkg(πWit)), { ...CFG, witnesses: { [Wa.key_id]: Wb.pub, [Wb.key_id]: Wa.pub } }, { result: 'INDETERMINATE', config_id_differs_from: 'accept.reinforce-quorum' });
+
+// rev4 round-7 cluster G (M-DEC total + M-ADT): config canonicality, package closure over the decoded ADT, required params.
+V.push({ id: 'config.noncanonical', note: 'whitespace-prefixed (non-canonical) config bytes', package_b64url: b64u(canonPkg(πCorr)), config_b64url: b64u('  ' + canonJSON(CFG)), expected: { result: 'INVALID', code: 'E-CONFIG-NONCANONICAL' } });
+add('package.extra-field', 'an extra top-level package field (schema not closed over raw JSON)', b64u(P.canon({ term: πCorr, witnesses: store, __extra: 'x' })), CFG, { result: 'INVALID', code: 'E-NONCANONICAL' });
+add('package.params-empty', 'an explicit params:{} node — a second wire form of the canonical (no-params) term', b64u(P.canon({ term: { ...πCorr, params: {} }, witnesses: store })), CFG, { result: 'INVALID', code: 'E-NONCANONICAL' });
+add('term.missing-param', 'Anchored with required s/subject omitted', b64u(canonPkg(N('Anchored', [], [put(rc('ust:x', 1))]))), CFG, { result: 'INVALID', code: 'E-TERM-PARAM-MISSING' });
 
 // ── security-condition coverage manifest (owner completion criterion 8) ──────────────────────────────────────────────
 const MANIFEST = {
@@ -108,6 +114,9 @@ const MANIFEST = {
     { id: 'QUORUM-DOMAIN-BINDING', rule: 'QuorumAgreement', negative_vectors: ['quorum.foreign-domain'] },
     { id: 'QUORUM-TRUST-FROM-CONFIG', rule: 'QuorumAgreement', negative_vectors: ['quorum.self-trust'] },
     { id: 'WITNESS-CONTENT-ADDRESS', rule: 'decodePackage/W', negative_vectors: ['witness.content-address'] },
+    { id: 'CONFIG-CANONICAL', rule: 'decodeConfig', negative_vectors: ['config.noncanonical'] },
+    { id: 'PACKAGE-CLOSURE-DECODED-ADT', rule: 'decodePackage', negative_vectors: ['package.extra-field', 'package.params-empty'] },
+    { id: 'TERM-REQUIRED-PARAMS', rule: 'decodeTerm', negative_vectors: ['term.missing-param'] },
   ],
 };
 

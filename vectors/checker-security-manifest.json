@@ -83,6 +83,28 @@
       "negative_vectors": [
         "witness.content-address"
       ]
+    },
+    {
+      "id": "CONFIG-CANONICAL",
+      "rule": "decodeConfig",
+      "negative_vectors": [
+        "config.noncanonical"
+      ]
+    },
+    {
+      "id": "PACKAGE-CLOSURE-DECODED-ADT",
+      "rule": "decodePackage",
+      "negative_vectors": [
+        "package.extra-field",
+        "package.params-empty"
+      ]
+    },
+    {
+      "id": "TERM-REQUIRED-PARAMS",
+      "rule": "decodeTerm",
+      "negative_vectors": [
+        "term.missing-param"
+      ]
     }
   ]
 }
