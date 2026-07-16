@@ -28,11 +28,11 @@ const node = (rule, children = [], wids = [], params) => ({ rule, children, witn
 const gW = put(gen), c0W = put(C0), tW = put(term), commitW = put(commit), anchorW = put(anchor);
 
 const πGenesis = node('Genesis', [], [gW]);
-const πChain = node('CheckpointZero', [πGenesis], [c0W, tW]);
+const πChain = node('CheckpointZero', [πGenesis], [c0W]);
 const πCommit = node('ConnectorEvidence', [πGenesis], [commitW], { subject: head });
 const πTarget = node('ConnectorEvidence', [πGenesis], [anchorW], { subject: 'ust:target' });
 const πAfter = node('AfterOrder', [πCommit, πTarget]);
-const πCorr = node('Corroborated', [πChain, πCommit, πTarget, πAfter]);
+const πCorr = node('Corroborated', [πChain, πCommit, πTarget, πAfter], [tW]);   // terminality of the head
 
 const CONN = { connectors: { [KC.key_id]: { pub: KC.pub, trust_domain: 'btc-watch', allowed_proof_kinds: ['pow-header-chain'] } } };
 const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, domains: { [Wa.key_id]: 'op-a', [Wb.key_id]: 'op-b' }, policy: { uniqueness_threshold: 2 } };
@@ -81,9 +81,9 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   const c0evil = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: 'evil.example', genesis_epoch: EP2, sequence: '0', active_genesis: AG2, current_key_id: G.key_id, keylog: { root: kl.root, length: kl.length, head: kl.head } }), G.priv, G.pub);
   const gW2 = put(gen2), c0W2 = put(c0evil), headEvil = P.authorityCheckpointId(c0evil);
   const πGen2 = node('Genesis', [], [gW2]);
-  const πChainEvil = node('CheckpointZero', [πGen2], [c0W2, tW]);           // chain in scope(gen2)
+  const πChainEvil = node('CheckpointZero', [πGen2], [c0W2]);           // chain in scope(gen2)
   // try to corroborate the evil chain with GOOD-scope evidence → scope mismatch
-  const πCorrX = node('Corroborated', [πChainEvil, πCommit, πTarget, πAfter]);  // πCommit/πTarget are in scope(gen)
+  const πCorrX = node('Corroborated', [πChainEvil, πCommit, πTarget, πAfter], [tW]);  // πCommit/πTarget are in scope(gen)
   const r = checkAuthorityProof({ term: πCorrX, witnesses }, CFG);
   check('REJECT cross-scope: chain scope ≠ evidence scope → INVALID (does not unify)', r.result === 'INVALID' && /scope/.test(r.reason));
 }
@@ -96,7 +96,7 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   const rcE = (subj, pos) => P.buildEvidenceReceipt({ domain_shard: 'evil.example', active_genesis: AG, subject: subj, proof_kind: 'pow-header-chain', facts: { substrate: 'bitcoin', position: String(pos) }, issued_at: '2026-01-01T00:00:00Z' }, KC.priv, KC.pub);
   const gWx = put(gen), c0Wx = put(c0evil), tWx = put(term), cmx = put(rcE(headE, 900)), anx = put(rcE('ust:target', 800));
   const πGx = node('Genesis', [], [gWx]);
-  const πChx = node('CheckpointZero', [πGx], [c0Wx, tWx]);
+  const πChx = node('CheckpointZero', [πGx], [c0Wx]);
   const r = checkAuthorityProof({ term: πChx, witnesses }, CFG);
   check('REJECT foreign-domain (§2.y): checkpoint domain_shard ≠ genesis domain → INVALID even when active_genesis matches', r.result === 'INVALID' && /domain_shard ≠ genesis domain/.test(r.reason));
 }

@@ -47,7 +47,8 @@ const CAPS = {
   // K3 (UST-znh) — the opaque-handle brand: consumers may TEST provenance (image-membership), never MINT it.
   'verified-handle':    { core: ['isVerifiedHandle'] },
   // K4 (UST-znh) — the ONE public authority entrypoint: raw inputs + config in, single verdict + derivation trace out.
-  'authority-bundle':   { core: ['verifyAuthorityBundle'] },
+  // K4 → Closed Proof Kernel: the ONE public authority verdict is prover ∘ check_C (reference-checker.mjs).
+  'authority-bundle':   { core: ['verifyAuthorityBundle', 'buildAuthorityProof', 'checkAuthorityProof'] },
   'checkpoint-chain':   { core: ['buildAuthorityCheckpoint', 'sealAuthorityCheckpoint', 'authorityCheckpointId', 'verifyAuthorityCheckpointChain', 'resolveCheckpointRoots', 'deriveCheckpointFreshness', 'verifiedGenesisContext', 'genesisEpoch', 'authorityScopeId'], cli: 'buildCeremony' },
   'recovery':           { core: ['checkpointRecoveryClaim', 'buildRecoveryStatement', 'verifyCheckpointRecovery'] },
   'epoch-transition':   { core: ['epochTransitionClaim', 'buildEpochTransition', 'verifyEpochTransition'] },
@@ -62,7 +63,7 @@ const CAPS = {
 };
 
 // Internal primitives — not user-capability units (raw hash, encoders, error types, the registry itself).
-const PRIMITIVES = new Set(['VERSION', 'STABILITY', 'H', 'Hbytes', 'edVerifyStrict', 'strictB64url', 'parseCadenceInt', 'UstInvalid', 'UstIndeterminate', 'REGISTRY', 'noFraudProof']);
+const PRIMITIVES = new Set(['VERSION', 'STABILITY', 'REFERENCE_CHECKER_VERSION', 'H', 'Hbytes', 'edVerifyStrict', 'strictB64url', 'parseCadenceInt', 'UstInvalid', 'UstIndeterminate', 'REGISTRY', 'noFraudProof']);
 
 // A connector exposes the substrate seam (verifyAnchor delegate + typed evidence emit), not core names.
 const connector = (X) => (cap) => ['anchor-verify', 'typed-evidence', 'substrate-registry'].includes(cap) && typeof X.substrateVerify !== 'undefined' && typeof X.toVerifiedEvidence === 'function';

@@ -118,7 +118,6 @@ function checkTermInner(node, C, W, memo) {
     case 'CheckpointZero': {
       const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
       const c = wit(0); if (c.err) return bad(c.err);
-      const t = wit(1); if (t.err) return bad(t.err);
       const b = c.w.body;
       if (!b || b.purpose !== 'ust:authority-checkpoint' || String(b.sequence) !== '0' || b.previous_checkpoint !== undefined || b.previous_epoch_final_checkpoint !== undefined) return bad('C0 must be a seq-0 checkpoint with no previous links');
       const sc = scopeOk(b, G.j); if (sc) return bad(sc);
@@ -126,13 +125,11 @@ function checkTermInner(node, C, W, memo) {
       const sg = sigOk(c.w, G.j.chkAuth); if (sg) return bad(sg);
       if (b.checkpoint_authority?.current_key_id !== G.j.chkAuth.key_id) return bad('current_key_id ≠ genesis checkpoint authority');
       const rot = rotationOk(b); if (rot) return bad(rot);
-      if (!verifyKeylogTerminality(b.keylog, t.w).terminal) return ind('key-log head terminality not proven');
       return { j: { kind: 'Chain', s: G.j.s, domain: G.j.domain, n: 0, keylog: b.keylog, head_id: authorityCheckpointId(c.w), activeAuthority: nextAuthority(b, G.j.chkAuth) } };
     }
     case 'CheckpointStep': {
       const CH = sub(0); if (!CH.j || CH.j.kind !== 'Chain') return CH.j ? bad('child 0 must be Chain') : CH;
       const c = wit(0); if (c.err) return bad(c.err);
-      const t = wit(2); if (t.err) return bad(t.err);
       const b = c.w.body, prev = CH.j;
       if (!b || b.purpose !== 'ust:authority-checkpoint') return bad('not an authority checkpoint');
       if (String(b.sequence) !== String(prev.n + 1)) return bad('sequence ≠ prev+1');
@@ -144,7 +141,6 @@ function checkTermInner(node, C, W, memo) {
       if (b.checkpoint_authority?.current_key_id !== prev.activeAuthority.key_id) return bad('current_key_id ≠ resolved authority');
       const rot = rotationOk(b); if (rot) return bad(rot);
       const ap = appendOnly(prev.keylog, b.keylog, wt[1] !== undefined ? W(wt[1]) : null); if (ap.err) return ap.ind ? ind(ap.err) : bad(ap.err);
-      if (!verifyKeylogTerminality(b.keylog, t.w).terminal) return ind('key-log head terminality not proven');
       return { j: { kind: 'Chain', s: prev.s, domain: prev.domain, n: prev.n + 1, keylog: b.keylog, head_id: authorityCheckpointId(c.w), activeAuthority: nextAuthority(b, prev.activeAuthority) } };
     }
     case 'ConnectorEvidence': {
@@ -180,6 +176,8 @@ function checkTermInner(node, C, W, memo) {
       if (!CM.j || CM.j.kind !== 'Evidence') return CM.j ? bad('child 1 must be Evidence (commitment)') : CM;
       if (!TG.j || TG.j.kind !== 'Evidence') return TG.j ? bad('child 2 must be Evidence (target anchor)') : TG;
       if (!AF.j || AF.j.kind !== 'After') return AF.j ? bad('child 3 must be After') : AF;
+      const tm = wit(0); if (tm.err) return bad(tm.err);                                 // terminality of the HEAD key-log
+      if (!verifyKeylogTerminality(CH.j.keylog, tm.w).terminal) return ind('key-log head terminality not proven');
       const s = CH.j.s;
       if (CM.j.s !== s || TG.j.s !== s || AF.j.s !== s) return bad('scope mismatch across freshness premises (cross-scope)');
       if (CM.j.q !== CH.j.head_id) return bad('commitment not bound to the checkpoint head');
@@ -304,4 +302,49 @@ function appendOnly(prevKl, newKl, entriesWit) {
   const kp = buildKeylogCommitment(E.slice(0, Number(Lp))), kn = buildKeylogCommitment(E.slice(0, Number(Ln)));
   if (kp.root !== prevKl.root || kp.head !== prevKl.head || kn.root !== newKl.root || kn.head !== newKl.head) return { err: 'key-logs are not prefixes of one entry vector (append-only unproven)', ind: true };
   return {};
+}
+
+// ─── PROVER (untrusted) + demoted public bundle. The prover assembles a candidate proof term π from RAW bundle
+//     inputs (no verdicts, no trust); check_C is the SOLE acceptance oracle. This is the round-4 demotion: the old
+//     producer stack no longer HONORS a strong verdict — it only proposes a term, and check_C accepts or rejects.
+export function buildAuthorityProof(inputs = {}) {
+  const { genesis, checkpoints = [], commitment, target, terminality, uniqueness, keylogEntries } = inputs || {};
+  const witnesses = {};
+  // normalize each witness (drop undefined-valued fields the prover may carry, e.g. an optional terminality field) so
+  // the content address is over canon-clean bytes; the checker re-addresses identically.
+  const put = (o) => { const c = JSON.parse(JSON.stringify(o ?? {})); const id = witnessId(c); witnesses[id] = c; return id; };
+  const N = (rule, children = [], wids = [], params) => ({ rule, children, witnesses: wids, ...(params ? { params } : {}) });
+  if (!genesis || !checkpoints.length) return { term: N('Genesis', [], [genesis ? put(genesis) : 'sha256:' + '00'.repeat(32)]), witnesses };
+  const πG = N('Genesis', [], [put(genesis)]);
+  let πChain = N('CheckpointZero', [πG], [put(checkpoints[0])]);
+  const entW = keylogEntries !== undefined ? put(keylogEntries) : undefined;
+  for (let i = 1; i < checkpoints.length; i++) πChain = N('CheckpointStep', [πChain], entW !== undefined ? [put(checkpoints[i]), entW] : [put(checkpoints[i])]);
+  const last = checkpoints[checkpoints.length - 1], head = authorityCheckpointId(last), n = last.body.sequence;
+  const πC = N('ConnectorEvidence', [πG], [put(commitment)], { subject: head });
+  const πT = N('ConnectorEvidence', [πG], [put(target?.anchor)], { subject: target?.subject });
+  const πAfter = N('AfterOrder', [πC, πT]);
+  let root = N('Corroborated', [πChain, πC, πT, πAfter], [put(terminality || {})]);
+  if (uniqueness?.map) root = N('ReinforceMap', [root, N('MapUnique', [πG], [put({ proof: uniqueness.map.proof, mapRoot: uniqueness.map.mapRoot })], { n, h: head })]);
+  if (uniqueness?.attestations) root = N('ReinforceQuorum', [root, N('QuorumAgreement', [πG], uniqueness.attestations.map(put), { n, h: head })]);
+  return { term: root, witnesses };
+}
+// The ONE public authority verdict — prover ∘ check_C. Trust (connectors/mapRoots/witnesses/domains/threshold) comes
+// ONLY from config, never from inputs (§2.w / round-4 P0-02). D1: returns base + anti-equivocation basis, never a
+// collapsed scalar `attested`; the legacy `attested` label is a projection requiring MapUnique behind the K1 gate.
+export function verifyAuthorityBundle(inputs = {}, config = {}) {
+  const trust = config?.trust || {}, policy = config?.policy || {};
+  if (!inputs?.genesis) return Object.freeze({ result: 'INDETERMINATE', reason: 'authority_unresolved', detail: 'no genesis — an authority bundle roots in a verified genesis' });
+  const chkCfg = { connectors: trust.connectors || {}, mapRoots: trust.mapRoots || [], witnesses: trust.witnesses || {}, domains: trust.domains || {},
+    policy: { uniqueness_threshold: Number.isInteger(trust.uniqueness_threshold) ? trust.uniqueness_threshold : 2, allowExperimentalAttested: policy.allowExperimentalAttested === true } };
+  const r = checkAuthorityProof(buildAuthorityProof(inputs), chkCfg);
+  if (r.result !== 'VALID' || !r.judgment || r.judgment.kind !== 'Freshness')
+    return Object.freeze({ result: r.result, ...(r.reason ? { reason: r.reason } : {}), ...(r.judgment ? { judgment_kind: r.judgment.kind } : {}) });
+  const j = r.judgment, aeq = j.aeq || {};
+  const label = aeq.map && aeq.quorum ? 'dual-attested' : aeq.map ? 'map-attested' : aeq.quorum ? 'witness-attested' : 'corroborated';
+  // K1 legacy projection: the scalar `attested` requires MapUnique (cryptographic non-membership) AND the experimental opt-in.
+  const legacy = (aeq.map && chkCfg.policy.allowExperimentalAttested) ? 'attested' : 'corroborated';
+  return Object.freeze({ result: 'VALID', scope_id: j.s, subject: j.q, head: j.h,
+    keylog_freshness: j.base, label, anti_equivocation: { quorum: aeq.quorum || null, map: aeq.map || null },
+    ...(aeq.map && !chkCfg.policy.allowExperimentalAttested ? { attested_withheld: 'experimental-gate' } : {}),
+    legacy_freshness: legacy, support: j.support, proof_hash: r.proof_hash, config_id: r.config_id });
 }

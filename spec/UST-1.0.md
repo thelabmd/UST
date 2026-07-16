@@ -2334,6 +2334,19 @@ provenance and will be lifted into this ledger when the spec is published.
   `provenAtoms`; `verifyAuthorityBundle` surfaces them. Coordinate values are unchanged — the win is that assurance
   is a DERIVATION over admitted atoms (calculus §7), and no-upward-forge is visible (a rung is in the closure iff
   every premise atom is). Gates: conformance 392/0, model guard green.
+- **REV 64 (2026-07-16, `rc.37` line)** — **Closed Proof Kernel: the public authority verdict is PROVER ∘ check_C.**
+  Round-4 found 5 P0 that were one bug — the introduction-rule set was not closed, so each producer became an extra
+  informal rule (whack-a-mole). The fix (owner direction) reframes authority verification as a deductive PROOF SYSTEM:
+  assurance is a PROOF TERM, and the reference checker (`packages/ust-protocol/reference-checker.mjs`, `check_C`) is
+  the SOLE acceptance oracle — a total, decidable, structural recursion that re-derives every judgment from leaf
+  crypto over content-addressed bytes, imports NO producer function, and closes the mint-oracle / cross-scope /
+  mutable-handle / self-trust / unverified-epoch classes at the level of what a derivation can be TYPED to contain.
+  `verifyAuthorityBundle` is now `buildAuthorityProof` (an untrusted prover) ∘ `check_C`; trust comes ONLY from config
+  (round-4 P0-02); D1: it returns a base + anti-equivocation basis, never a scalar `attested`. Differential fuzz
+  (`rnd/fuzz-differential.mjs`) proves check_C is strictly stricter than the raw producer `deriveCheckpointFreshness`
+  on exactly the round-4 holes (120/120 over-claims, 0 completeness-gaps, 0 throws). New `test:reference-checker`
+  (13/0). Producer functions stay exported (`@internal`) pending removal (the differential shows why). Gates:
+  conformance 392/0, reference-checker 13/0, all 14 green.
 
 **Design principle throughout:** every normative clause answers "mechanism (protocol) or operator
 instantiation (profile)?"; operator specifics (substrate, partition schema, completeness, cadence) live in the
