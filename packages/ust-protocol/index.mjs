@@ -1610,7 +1610,7 @@ export function deriveCheckpointFreshness(chain, { genesis, context, genesisAuth
 //     producer path on exactly the round-4 residual holes. `verifyAuthorityBundle` + `buildAuthorityProof` are
 //     RE-EXPORTED from the checker module (call-time cyclic import is safe — the checker uses index's leaf primitives
 //     only inside function bodies).
-export { verifyAuthorityBundle, buildAuthorityProof, checkAuthorityProof, REFERENCE_CHECKER_VERSION } from './reference-checker.mjs';
+export { verifyAuthorityBundle, buildAuthorityProof, checkAuthorityProof, checkAuthorityProofBytes, RULE_CONTRACTS, REFERENCE_CHECKER_RULES, REFERENCE_CHECKER_VERSION } from './reference-checker.mjs';
 
 // ─── #78 ASSURANCE PRODUCT-LATTICE (formal-model F.5.0, CODE realization — the math must pass through code +
 //     vectors + guard before it ships). The linear tier LIGHT ⊆ HIGH ⊆ TOP is ONE policy projection of a PRODUCT of

@@ -16,21 +16,35 @@ import { canon, H, keyId, edVerifyStrict, contentHash, verify, isValid, verifyKe
   verifyCheckpointMapUniqueness, evidenceCaps, compareEvidenceOrder, authorityScopeId, genesisEpoch,
   resolveKeys, buildKeylogCommitment, authorityCheckpointId, strictB64url } from './index.mjs';
 
-export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev2';
-// The closed constructor registry — EXACTLY one inference rule per name, and one `switch` branch below per name. This
-// list is the single source of truth for the grammar↔RULES parity gate (P2-02): the spec grammar (§4) and this array
-// must match, and a term naming any other constructor (incl. reserved DirectEvidence/NameAuthoritative, or the
-// spec-ideal SnapshotTerminal/WitnessVote/EpochCheckpointZero that are realized as folded premises of Corroborated /
-// QuorumAgreement / ActivateGenesis) is a structured INVALID('unknown rule'), never silently accepted.
-export const REFERENCE_CHECKER_RULES = Object.freeze(['Genesis', 'CheckpointZero', 'CheckpointStep', 'ConnectorEvidence',
-  'AfterOrder', 'Corroborated', 'MapUnique', 'QuorumAgreement', 'ReinforceMap', 'ReinforceQuorum',
-  'FutureGenesisCommitment', 'ActivateGenesis', 'NameBound', 'Anchored', 'ProjectAssurance']);
+export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev3';
+// RULE_CONTRACTS (§2b) — the STRUCTURAL source of truth: exactly one inference rule per name, one switch branch per
+// name, and a fixed (children arity, witness count, allowed params, conclusion kind). DecodeTerm enforces these on
+// decode; a term with an extra child / extra witness / free param / unknown field / stored conclusion is rejected
+// BEFORE any rule (M-DEC, closes P1-01). NO semantic security logic lives here — clock/scope/signature/identity checks
+// stay in the rule interpreter, so the registry never becomes a second clever TCB. Grammar↔RULES parity derives from it.
+const wc = (min, max = min) => ({ min, max });
+export const RULE_CONTRACTS = Object.freeze({
+  Genesis:                 { children: 0, witnesses: wc(1),        params: [],                conclusion: 'Genesis' },
+  CheckpointZero:          { children: 1, witnesses: wc(1),        params: [],                conclusion: 'Chain' },
+  CheckpointStep:          { children: 1, witnesses: wc(1, 2),     params: [],                conclusion: 'Chain' },       // consistency witness optional
+  ConnectorEvidence:       { children: 1, witnesses: wc(1),        params: ['subject'],       conclusion: 'Evidence' },
+  AfterOrder:              { children: 2, witnesses: wc(0),        params: [],                conclusion: 'After' },
+  Corroborated:            { children: 4, witnesses: wc(1),        params: [],                conclusion: 'Freshness' },   // terminality is the head witness (folded)
+  MapUnique:               { children: 1, witnesses: wc(1),        params: [],                conclusion: 'MapUnique' },   // coordinate FROM πChain (no params)
+  QuorumAgreement:         { children: 1, witnesses: wc(0, Infinity), params: [],             conclusion: 'QuorumAgreement' }, // variadic admitted votes
+  ReinforceMap:            { children: 2, witnesses: wc(0),        params: [],                conclusion: 'Freshness' },
+  ReinforceQuorum:         { children: 2, witnesses: wc(0),        params: [],                conclusion: 'Freshness' },
+  FutureGenesisCommitment: { children: 1, witnesses: wc(1),        params: [],                conclusion: 'FutureCommitted' },
+  ActivateGenesis:         { children: 2, witnesses: wc(1),        params: [],                conclusion: 'EpochActivated' }, // requires the verified C0_B witness
+  NameBound:               { children: 1, witnesses: wc(0, 1),     params: ['doc_key_id'],    conclusion: 'Identity' },
+  Anchored:                { children: 0, witnesses: wc(1),        params: ['s', 'subject'],  conclusion: 'Time' },
+  ProjectAssurance:        { children: 3, witnesses: wc(0),        params: [],                conclusion: 'Assurance' },
+});
+export const REFERENCE_CHECKER_RULES = Object.freeze(Object.keys(RULE_CONTRACTS));   // parity DERIVES from the registry
 const RULES = new Set(REFERENCE_CHECKER_RULES);
-const DEFAULT_LIMITS = { maxNodes: 512, maxDepth: 32, maxWitnesses: 1024, maxWitnessBytes: 1 << 20 };
-const BOUNDED_READ_FACTOR = 256;   // caps the single-read encode against exponential DAG expansion (totality, §10)
+const DEFAULT_LIMITS = { maxNodes: 512, maxDepth: 32, maxWitnesses: 1024, maxWitnessBytes: 1 << 20, maxPackageBytes: 1 << 22 };
 const isHash = (s) => typeof s === 'string' && /^sha256:[0-9a-f]{64}$/.test(s);
 export const witnessId = (obj) => H('ust:witness', canon(obj));   // content address a witness (for provers building packages)
-const POISON = Symbol('malformed-witness');   // a caller witness with non-canonical bytes — reachable only as a structured per-use reject
 // CanonicalSeq (§3): a sequence is a canonical decimal string, never a wire value coerced by Number(). Rejects "00",
 // "01", "+1", "1.0", " 1" — so the P0-02 "00"→0 alias cannot form. Returns the canonical string, or null.
 const decodeSeq = (x) => (typeof x === 'string' && /^(0|[1-9][0-9]*)$/.test(x)) ? x
@@ -69,66 +83,96 @@ function normalizeConfig(rawLive) {
   return { C, config_id };
 }
 
-// ── the checker ───────────────────────────────────────────────────────────────────────────────────────────────
-export function checkAuthorityProof(pkg, rawConfig, limits = {}) {
+// ── the byte boundary (§2, M-BYTE/M-DEC) — the TCB is over immutable octets ───────────────────────────────────────
+const TEXT_ENC = new TextEncoder();
+const TEXT_DEC = new TextDecoder('utf-8', { fatal: true });   // invalid UTF-8 throws → E-UTF8
+// SnapshotBytes: copy the live view into a fresh immutable buffer; reject non-Uint8Array and SharedArrayBuffer-backed
+// views (another thread could mutate mid-check). A convenience string input is UTF-8 encoded. The theorem begins here.
+function snapshotBytes(input) {
+  if (typeof input === 'string') return { bytes: TEXT_ENC.encode(input) };
+  if (!(input instanceof Uint8Array)) return { error: 'E-BYTES-TYPE' };
+  if (typeof SharedArrayBuffer !== 'undefined' && input.buffer instanceof SharedArrayBuffer) return { error: 'E-BYTES-SHARED' };
+  const copy = new Uint8Array(input.byteLength); copy.set(input); return { bytes: copy };
+}
+// DecodeTerm (§2b, M-DEC): build the closed Term ADT strictly to each RULE_CONTRACTS entry — exact children arity, exact
+// witness count, allowed params only, NO unknown fields / stored conclusion / extra children/witnesses/free params. A
+// JSON value is a finite tree (no cycles/sharing to guard), so bounds are just depth + node count.
+function decodeTerm(raw, L, depth, ctr) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { err: 'E-TERM-NODE' };
+  if (depth > L.maxDepth) return { err: 'E-TERM-DEPTH' };
+  if (++ctr.n > L.maxNodes) return { err: 'E-TERM-NODES' };
+  for (const k of Object.keys(raw)) if (k !== 'rule' && k !== 'children' && k !== 'witnesses' && k !== 'params') return { err: 'E-TERM-FIELD:' + k };
+  const contract = RULE_CONTRACTS[raw.rule];
+  if (!contract) return { err: 'E-TERM-RULE:' + String(raw.rule) };
+  const children = raw.children === undefined ? [] : raw.children;
+  if (!Array.isArray(children) || children.length !== contract.children) return { err: 'E-TERM-ARITY:' + raw.rule };
+  const witnesses = raw.witnesses === undefined ? [] : raw.witnesses;
+  if (!Array.isArray(witnesses) || witnesses.length < contract.witnesses.min || witnesses.length > contract.witnesses.max) return { err: 'E-TERM-WITNESS:' + raw.rule };
+  for (const w of witnesses) if (typeof w !== 'string') return { err: 'E-TERM-WITNESS-TYPE' };
+  const params = raw.params === undefined ? {} : raw.params;
+  if (typeof params !== 'object' || params === null || Array.isArray(params)) return { err: 'E-TERM-PARAMS' };
+  for (const pk of Object.keys(params)) if (!contract.params.includes(pk)) return { err: 'E-TERM-PARAM:' + pk };
+  const kids = [];
+  for (const c of children) { const dc = decodeTerm(c, L, depth + 1, ctr); if (dc.err) return dc; kids.push(dc.term); }
+  return { term: { rule: raw.rule, children: kids, witnesses, params } };
+}
+// DecodePackage: bytes → strict UTF-8 → JSON.parse → canonical ROUND-TRIP guard (CanonicalEncode(V)==B) → exact Term ADT
+// + content-addressed witness store. The round-trip guard rejects whitespace, key order, duplicate keys, numeric alias,
+// non-NFC, padded crypto strings as a class (M-DEC). The parsed value is plain inert data (no getters/prototype/toJSON).
+function decodePackage(bytes, L) {
+  if (bytes.byteLength > L.maxPackageBytes) return { err: 'E-PACKAGE-SIZE' };
+  let text; try { text = TEXT_DEC.decode(bytes); } catch { return { err: 'E-UTF8' }; }
+  let parsed; try { parsed = JSON.parse(text); } catch { return { err: 'E-JSON' }; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !parsed.term || typeof parsed.term !== 'object' || !parsed.witnesses || typeof parsed.witnesses !== 'object')
+    return { err: 'E-PACKAGE-SHAPE' };
+  let reB; try { reB = canon(parsed); } catch { return { err: 'E-NONCANONICAL' }; }
+  if (reB !== text) return { err: 'E-NONCANONICAL' };
+  const td = decodeTerm(parsed.term, L, 0, { n: 0 }); if (td.err) return { err: td.err };
+  const wkeys = Object.keys(parsed.witnesses);
+  if (wkeys.length > L.maxWitnesses) return { err: 'E-WITNESS-COUNT' };
+  const store = Object.create(null);                       // own keys only; parsed values are inert canonical data
+  for (const k of wkeys) store[k] = parsed.witnesses[k];
+  return { term: td.term, store };
+}
+function decodeConfig(bytes) {
+  let text; try { text = TEXT_DEC.decode(bytes); } catch { return { err: 'E-UTF8' }; }
+  let parsed; try { parsed = JSON.parse(text); } catch { return { err: 'E-JSON' }; }
+  return normalizeConfig(parsed);
+}
+
+// checkAuthorityProofBytes — THE NORMATIVE TCB. Immutable bytes in; VALID/INVALID/INDETERMINATE out. A live object never
+// enters (M-BYTE): the package/config are decoded ONCE from bytes into inert typed values, then rules run over those.
+export function checkAuthorityProofBytes(packageBytes, configBytes, limits = {}) {
   const L = { ...DEFAULT_LIMITS, ...limits };
   const INVALID = (reason) => ({ result: 'INVALID', reason });
   try {
-    if (!pkg || typeof pkg !== 'object' || !pkg.term || typeof pkg.term !== 'object' || !pkg.witnesses || typeof pkg.witnesses !== 'object')
-      return INVALID('ProofPackage must be { term, witnesses }');
-    const nc = normalizeConfig(rawConfig);
-    if (nc.err) return INVALID('config: ' + nc.err);
+    const pb = snapshotBytes(packageBytes); if (pb.error) return INVALID('package bytes: ' + pb.error);
+    const cb = snapshotBytes(configBytes); if (cb.error) return INVALID('config bytes: ' + cb.error);
+    const nc = decodeConfig(cb.bytes); if (nc.err) return INVALID('config: ' + nc.err);
     const { C, config_id } = nc;
-
-    // §2 byte-semantics: read every caller input EXACTLY ONCE into an inert internal value, then never touch the caller
-    // object again. Kills, as a CLASS: stateful getters between hash and rule (P0-05), post-hash mutation, prototype
-    // inheritance (P1-02), planted non-own fields, representation divergence between two reads, mutable witness refs.
-    const ti = inertRead(pkg.term, L.maxNodes * BOUNDED_READ_FACTOR);
-    if (ti.err) return INVALID('term is ' + ti.err);
-    const term = ti.v;
-    // §10 witness COUNT before snapshot (DoS); OWN keys only — a prototype-planted witness is invisible here and, via
-    // the null-proto store below, unreachable in W. Snapshot each witness to its canonical inert form (content-address
-    // stable): one bounded read → canon → parse, so hashing and every rule read see the SAME frozen bytes.
-    const rawKeys = Object.keys(pkg.witnesses);
-    if (rawKeys.length > L.maxWitnesses) return INVALID('too many witnesses (> ' + L.maxWitnesses + ')');
-    const store = Object.create(null);
-    for (const k of rawKeys) {
-      const wi = inertRead(pkg.witnesses[k], L.maxWitnessBytes);
-      if (wi.err) { store[k] = POISON; continue; }
-      let bytes; try { bytes = canon(wi.v); } catch { store[k] = POISON; continue; }
-      if (bytes.length > L.maxWitnessBytes) return INVALID('witness exceeds byte cap');
-      store[k] = JSON.parse(bytes);
-    }
-    // §10 acyclic-DAG guard over the INERT term: sharing is expanded to a bounded tree; still reject cycles (defensive)
-    // and enforce node/depth caps. Count unique nodes once; bound depth.
-    let nodes = 0;
-    const counted = new WeakSet();
-    const boundTerm = (node, depth, onPath) => {
-      if (!node || typeof node !== 'object') throw { reject: INVALID('malformed term node') };
-      if (onPath.has(node)) throw { reject: INVALID('cyclic term (a node is its own ancestor)') };
-      if (!RULES.has(node.rule)) throw { reject: INVALID('unknown rule "' + node.rule + '" (closed enum)') };
-      if ('expected' in node || 'conclusion' in node) throw { reject: INVALID('term node must not carry a conclusion (§5 — the checker recomputes it; a stored conclusion is never trusted, P2-01)') };
-      if (depth > L.maxDepth) throw { reject: INVALID('term too deep (> ' + L.maxDepth + ')') };
-      if (!counted.has(node)) { counted.add(node); if (++nodes > L.maxNodes) throw { reject: INVALID('too many term nodes (> ' + L.maxNodes + ')') }; }
-      onPath.add(node);
-      for (const c of node.children || []) boundTerm(c, depth + 1, onPath);
-      onPath.delete(node);
-    };
-    try { boundTerm(term, 0, new Set()); } catch (e) { if (e.reject) return e.reject; throw e; }
-
-    // content-addressed witness fetch from the INERT store — recompute H(canon) and match (§2). The null-proto store
-    // resolves OWN keys only, so a wid absent from the caller's own witnesses (e.g. planted on a prototype) is missing.
+    const pd = decodePackage(pb.bytes, L); if (pd.err) return INVALID(pd.err);
+    const { term, store } = pd;
+    // content-addressed witness fetch from the inert store — recompute H(canon) and match. own-keys via null proto.
     const W = (wid) => {
       const w = store[wid];
       if (w === undefined) return { err: 'missing witness ' + wid };
-      if (w === POISON) return { err: 'malformed witness bytes (non-canonical) ' + wid };
       if (witnessId(w) !== wid) return { err: 'witness_id mismatch (content address)' };
       return { w };
     };
-    const R = checkTerm(term, C, W, new WeakMap());   // returns { j } | { result, reason }; memoized over the DAG
+    const R = checkTerm(term, C, W, new WeakMap());
     if (!R.j) return R.result ? R : INVALID(R.reason || 'derivation failed');
     return { result: 'VALID', judgment: R.j, proof_hash: H('ust:proof-term', canon(stripExpected(term))), config_id };
   } catch (e) { return INVALID('checker threw (should be total — please report): ' + (e && e.message ? e.message : String(e))); }
+}
+
+// EncodeLive — the UNTRUSTED encoding adapter (outside the TCB). It MAY run getters/toJSON; that only chooses the bytes
+// (a caller could hand any bytes directly), never produces a proof. Package uses canonical string-leaf bytes (`canon`),
+// config uses JSON. checkAuthorityProof(obj,cfg) := checkAuthorityProofBytes(EncodeLive(pkg), EncodeLive(cfg)).
+const encodeLive = (x, kind) => { try { return { bytes: TEXT_ENC.encode(kind === 'package' ? canon(x) : JSON.stringify(x ?? null)) }; } catch { return { error: 'E-ENCODE' }; } };
+export function checkAuthorityProof(obj, config, limits = {}) {
+  const p = encodeLive(obj, 'package'); if (p.error) return { result: 'INVALID', reason: 'package: ' + p.error };
+  const c = encodeLive(config, 'config'); if (c.error) return { result: 'INVALID', reason: 'config: ' + c.error };
+  return checkAuthorityProofBytes(p.bytes, c.bytes, limits);
 }
 
 const stripExpected = (n) => ({ rule: n.rule, ...(n.params !== undefined ? { params: n.params } : {}), ...(n.witnesses ? { witnesses: n.witnesses } : {}), children: (n.children || []).map(stripExpected) });
