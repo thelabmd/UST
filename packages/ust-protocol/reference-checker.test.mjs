@@ -45,7 +45,7 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
 // ── ACCEPT: reinforce with quorum → witness-basis; and the proof_hash/config_id are present ──
 {
   const uaW = [put(ua(Wa)), put(ua(Wb))];
-  const πQuorum = node('QuorumAgreement', [πGenesis], uaW, { n: '0', h: head });
+  const πQuorum = node('QuorumAgreement', [πChain], uaW);
   const πWitness = node('ReinforceQuorum', [πCorr, πQuorum]);
   const r = checkAuthorityProof({ term: πWitness, witnesses }, CFG);
   check('ACCEPT reinforce-quorum: quorum basis present, map null (NOT collapsed to attested), support has quorum', r.result === 'VALID' && r.judgment.aeq.quorum && r.judgment.aeq.quorum.domains.length === 2 && !r.judgment.aeq.map && r.judgment.support.includes('quorum') && typeof r.proof_hash === 'string');
@@ -68,7 +68,7 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
 {
   const Ea = kp('e1'.repeat(32)), Eb = kp('e2'.repeat(32));  // ATTACKER witnesses, NOT in CFG.witnesses/domains
   const eua = (W) => P.buildUniquenessAttestation({ domain_shard: 'good.example', genesis_epoch: EP, sequence: '0', checkpoint: head }, W.priv, W.pub);
-  const πQ = node('QuorumAgreement', [πGenesis], [put(eua(Ea)), put(eua(Eb))], { n: '0', h: head });
+  const πQ = node('QuorumAgreement', [πChain], [put(eua(Ea)), put(eua(Eb))]);
   const r = checkAuthorityProof({ term: node('ReinforceQuorumBad', []), witnesses });  // wrong rule name → closed enum
   const r2 = checkAuthorityProof({ term: node('ReinforceQuorum', [πCorr, πQ]), witnesses }, CFG);
   check('REJECT self-trust: attacker witnesses (∉ C) do not reach quorum → INDETERMINATE, never attested', r2.result === 'INDETERMINATE' && /quorum not met/.test(r2.reason));
@@ -161,12 +161,20 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   const r = checkAuthorityProof({ term: node('Genesis', [], [gW]), witnesses: witnessesInherited }, CFG);
   check('REJECT prototype-planted witness (P1-02): inherited witness is not in the own-key store → INVALID(missing)', r.result === 'INVALID' && /missing witness/.test(r.reason));
 }
-// P0-02 non-canonical coordinate: MapUnique at n="00" cannot decode to a CanonicalSeq, so it never aliases n=0.
+// P0-02 closed STRUCTURALLY (Cluster B.1): MapUnique/QuorumAgreement take the coordinate FROM πChain, not params —
+// there is no free coordinate a term could pick or alias. A MapUnique/QuorumAgreement over a Genesis child is INVALID.
 {
-  const dummyMap = put({ proof: {}, mapRoot: 'sha256:' + '00'.repeat(32) });
-  const πMU = node('MapUnique', [πGenesis], [dummyMap], { n: '00', h: head });
-  const r = checkAuthorityProof({ term: node('ReinforceMap', [πCorr, πMU]), witnesses }, CFG);
-  check('REJECT non-canonical coordinate (P0-02): MapUnique n="00" → INVALID(CanonicalSeq), cannot alias n=0', r.result === 'INVALID' && /non-canonical sequence/.test(r.reason));
+  const rMU = checkAuthorityProof({ term: node('MapUnique', [πGenesis], [put({ proof: {}, mapRoot: 'sha256:' + '00'.repeat(32) })]), witnesses }, CFG);
+  const rQA = checkAuthorityProof({ term: node('QuorumAgreement', [πGenesis], []), witnesses }, CFG);
+  check('COORDINATE SOURCE (P0-02/B.1): MapUnique/QuorumAgreement require a Chain child (coordinate provenance), not Genesis → INVALID', rMU.result === 'INVALID' && /must be Chain/.test(rMU.reason) && rQA.result === 'INVALID' && /must be Chain/.test(rQA.reason));
+}
+// Cluster B.1 coordinate provenance: a leftover coordinate param is IGNORED — (n,h) are derived from πChain, so a term
+// can never select a "convenient" coordinate for MapUnique/QuorumAgreement, only reference an already-proven chain.
+{
+  const uaW = [put(ua(Wa)), put(ua(Wb))];
+  const clean = checkAuthorityProof({ term: node('ReinforceQuorum', [πCorr, node('QuorumAgreement', [πChain], uaW)]), witnesses }, CFG);
+  const bogus = checkAuthorityProof({ term: node('ReinforceQuorum', [πCorr, node('QuorumAgreement', [πChain], uaW, { n: '999', h: 'sha256:' + 'ff'.repeat(32) })]), witnesses }, CFG);
+  check('COORDINATE PROVENANCE (B.1): a bogus coordinate param is ignored → identical quorum (term cannot pick a coordinate)', clean.result === 'VALID' && bogus.result === 'VALID' && JSON.stringify(clean.judgment.aeq.quorum) === JSON.stringify(bogus.judgment.aeq.quorum));
 }
 // P1-05 config snapshot: the consumer config is read once into an inert value; a getter fires exactly once.
 {
@@ -200,7 +208,7 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
 // P0-03 foreign-domain quorum: votes attesting a foreign domain are not counted in the good-scope quorum.
 {
   const uaEvil = (W) => P.buildUniquenessAttestation({ domain_shard: 'evil.example', genesis_epoch: EP, sequence: '0', checkpoint: head }, W.priv, W.pub);
-  const πQevil = node('QuorumAgreement', [πGenesis], [put(uaEvil(Wa)), put(uaEvil(Wb))], { n: '0', h: head });
+  const πQevil = node('QuorumAgreement', [πChain], [put(uaEvil(Wa)), put(uaEvil(Wb))]);
   const r = checkAuthorityProof({ term: node('ReinforceQuorum', [πCorr, πQevil]), witnesses }, CFG);
   check('REJECT foreign-domain quorum (P0-03): votes for a foreign domain are not counted → quorum not met', r.result === 'INDETERMINATE' && /quorum not met/.test(r.reason));
 }
@@ -208,7 +216,7 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
 {
   const Ez = kp('ee'.repeat(32));                                                   // attacker witness, NOT in CFG
   const junk = P.buildUniquenessAttestation({ domain_shard: 'good.example', genesis_epoch: EP, sequence: '0', checkpoint: head }, Ez.priv, Ez.pub);
-  const πQpoison = node('QuorumAgreement', [πGenesis], [put(junk), put(ua(Wa)), put(ua(Wb))], { n: '0', h: head });
+  const πQpoison = node('QuorumAgreement', [πChain], [put(junk), put(ua(Wa)), put(ua(Wb))]);
   const r = checkAuthorityProof({ term: node('ReinforceQuorum', [πCorr, πQpoison]), witnesses }, CFG);
   check('RESIST quorum poison (P1-01): a junk vote first does not break the genuine quorum → VALID witness-basis (monotonicity)', r.result === 'VALID' && r.judgment.aeq.quorum && r.judgment.aeq.quorum.domains.length === 2);
 }

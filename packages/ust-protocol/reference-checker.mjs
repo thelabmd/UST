@@ -238,31 +238,33 @@ function checkTermInner(node, C, W, memo) {
       return { j: { kind: 'Freshness', s, q: TG.j.q, h: CH.j.head_id, n: CH.j.n, base: 'corroborated', aeq: {}, support } };
     }
     case 'MapUnique': {
-      const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
+      // Coordinate provenance (Cluster B.1): (γ,n,h) come FROM the proven Chain, never from term params — there is no
+      // free checkpoint coordinate a term could pick, so P0-02 is closed STRUCTURALLY (not "non-canonical → caught").
+      const CH = sub(0); if (!CH.j || CH.j.kind !== 'Chain') return CH.j ? bad('child 0 must be Chain (coordinate provenance)') : CH;
       const m = wit(0); if (m.err) return bad(m.err);
-      const nseq = decodeSeq(p.n); if (nseq === null) return bad('non-canonical sequence coordinate (§3 CanonicalSeq)');   // P0-02: "00" ≠ "0"
       const { proof, mapRoot } = m.w;
       if (!C.mapRoots.includes(mapRoot)) return ind('map root is not consumer-admitted (ρ ∉ C.mapRoots)');
-      const u = verifyCheckpointMapUniqueness(proof, { domain_shard: G.j.domain, genesis_epoch: genesisEpoch(G.j.active_genesis), sequence: nseq, checkpoint: p.h, mapRoot });
-      if (!u.attested) return ind('map non-membership not proven at (s,n)');
-      return { j: { kind: 'MapUnique', s: G.j.s, n: Number(nseq), h: p.h, rho: mapRoot } };
+      const u = verifyCheckpointMapUniqueness(proof, { domain_shard: CH.j.domain, genesis_epoch: CH.j.genesis_epoch, sequence: String(CH.j.n), checkpoint: CH.j.head_id, mapRoot });
+      if (!u.attested) return ind('map non-membership not proven at the chain coordinate (γ,n,h)');
+      return { j: { kind: 'MapUnique', s: CH.j.s, n: CH.j.n, h: CH.j.head_id, rho: mapRoot } };
     }
     case 'QuorumAgreement': {
-      const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
-      const nseq = decodeSeq(p.n); if (nseq === null) return bad('non-canonical sequence coordinate (§3 CanonicalSeq)');
+      // Coordinate provenance (Cluster B.1): (γ,n,h) come FROM the proven Chain, never from term params.
+      const CH = sub(0); if (!CH.j || CH.j.kind !== 'Chain') return CH.j ? bad('child 0 must be Chain (coordinate provenance)') : CH;
       const t = C.policy.uniqueness_threshold;
-      // WitnessVote → QuorumAgreement (§6): ADMIT each vote FIRST (authenticate + consumer-resolve + coordinate-bind),
-      // THEN group by the ALREADY-VERIFIED claim. An unadmitted or off-coordinate vote never influences the group — so
-      // no quorum-poison via a pre-admission reference claim (P1-01) and no foreign-domain vote (P0-03). Adding junk
-      // votes cannot break an existing agreement (positive monotonicity).
+      const n = String(CH.j.n), h = CH.j.head_id;
+      // WitnessVote admission is a LOCAL sub-derivation of QuorumAgreement, performed independently per raw attestation
+      // BEFORE grouping: authenticate + consumer-resolve + coordinate/domain-bind, THEN group by the ALREADY-VERIFIED
+      // claim. An unadmitted or off-coordinate vote never influences the group — no quorum-poison via a pre-admission
+      // reference claim (P1-01), no foreign-domain vote (P0-03); adding junk cannot break an agreement (monotonicity).
       const byClaim = new Map();                                                        // verified claim → Set(distinct domains)
       for (const wid of wt) {
         const a = W(wid); if (a.err) continue;
         const { claim, issuer_id, sig } = a.w || {};
         if (!claim || !sig || claim.purpose !== 'ust:checkpoint-uniqueness-attestation') continue;
         if ('trust_domain' in claim || 'issuer_id' in claim) continue;               // no self-declared independence
-        if (claim.domain_shard !== G.j.domain) continue;                             // the attested checkpoint must be in the genesis domain (§2.y, P0-03)
-        if (claim.genesis_epoch !== genesisEpoch(G.j.active_genesis) || String(claim.sequence) !== nseq || claim.checkpoint !== p.h) continue;
+        if (claim.domain_shard !== CH.j.domain) continue;                            // attested checkpoint must be in the chain domain (§2.y, P0-03)
+        if (claim.genesis_epoch !== CH.j.genesis_epoch || String(claim.sequence) !== n || claim.checkpoint !== h) continue;   // coordinate FROM the chain
         const pub = C.witnesses[issuer_id];                                            // trust roots FROM C, never the term
         if (!pub || pub !== sig.pub || keyId(sig.pub) !== issuer_id) continue;
         const cc = canon(claim);
@@ -274,7 +276,7 @@ function checkTermInner(node, C, W, memo) {
       let winner = null;
       for (const [, doms] of byClaim) if (doms.size >= t && (!winner || doms.size > winner.size)) winner = doms;
       if (!winner) return ind('quorum not met: no claim reaches ' + t + ' distinct domains');
-      return { j: { kind: 'QuorumAgreement', s: G.j.s, n: Number(nseq), h: p.h, D: [...winner].sort(), t } };
+      return { j: { kind: 'QuorumAgreement', s: CH.j.s, n: CH.j.n, h, D: [...winner].sort(), t } };
     }
     case 'ReinforceMap': {
       const F = sub(0), M = sub(1);
@@ -419,13 +421,13 @@ export function buildAuthorityProof(inputs = {}) {
   let πChain = N('CheckpointZero', [πG], [put(checkpoints[0])]);
   const entW = keylogEntries !== undefined ? put(keylogEntries) : undefined;
   for (let i = 1; i < checkpoints.length; i++) πChain = N('CheckpointStep', [πChain], entW !== undefined ? [put(checkpoints[i]), entW] : [put(checkpoints[i])]);
-  const last = checkpoints[checkpoints.length - 1], head = authorityCheckpointId(last), n = last.body.sequence;
+  const last = checkpoints[checkpoints.length - 1], head = authorityCheckpointId(last);
   const πC = N('ConnectorEvidence', [πG], [put(commitment)], { subject: head });
   const πT = N('ConnectorEvidence', [πG], [put(target?.anchor)], { subject: target?.subject });
   const πAfter = N('AfterOrder', [πC, πT]);
   let root = N('Corroborated', [πChain, πC, πT, πAfter], [put(terminality || {})]);
-  if (uniqueness?.map) root = N('ReinforceMap', [root, N('MapUnique', [πG], [put({ proof: uniqueness.map.proof, mapRoot: uniqueness.map.mapRoot })], { n, h: head })]);
-  if (uniqueness?.attestations) root = N('ReinforceQuorum', [root, N('QuorumAgreement', [πG], uniqueness.attestations.map(put), { n, h: head })]);
+  if (uniqueness?.map) root = N('ReinforceMap', [root, N('MapUnique', [πChain], [put({ proof: uniqueness.map.proof, mapRoot: uniqueness.map.mapRoot })])]);   // coordinate FROM πChain (B.1)
+  if (uniqueness?.attestations) root = N('ReinforceQuorum', [root, N('QuorumAgreement', [πChain], uniqueness.attestations.map(put))]);
   return { term: root, witnesses };
 }
 // The ONE public authority verdict — prover ∘ check_C. Trust (connectors/mapRoots/witnesses/domains/threshold) comes
