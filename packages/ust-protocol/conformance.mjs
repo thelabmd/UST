@@ -170,7 +170,15 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const C = '2026-06-28T15:00:00Z';
   const rev = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1902', key_id: G.key_id }, T, { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: C }, P.contentHash(add)));
   check('revocation boundary U == C → E-KEY (X1: VALID only if U < C)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], anchorTime: C }).error === 'E-KEY');
-  check('revocation U < C → pre-compromise accepted (suspect)', (r => r.strength === 'authoritative' && r.status === 'suspect')(P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], ...nfe(gen), anchorTime: '2026-06-28T14:59:59Z' })));
+  // round-16 P1-01 — the compromise estimate C can taint EARLIER signatures but NEVER lengthen the active window past
+  // the revoke transition R (F.5e). Here R = the revoke entry time (14:03:12); a doc at U=14:59:59 (R < U < C) is AFTER
+  // the key left the active set ⇒ EXPIRED, not suspect. (rev12 used C alone as the upper bound — the reversed bug.)
+  check('revocation R < U < C (after the revoke transition) → expired, not suspect (round-16 P1-01)', (r => r.strength === 'self-asserted' && r.status === 'expired')(P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], ...nfe(gen), anchorTime: '2026-06-28T14:59:59Z' })));
+  // realistic pre-compromise (U < C ≤ R, inside the active window): add@14:04, revoke(compromised, C=14:40)@14:50, doc anchored@14:20 → authoritative/suspect (C is a publisher estimate).
+  const teC = (g) => ({ generated_at: g, valid_from: g, valid_to: '2026-06-28T15:00:00Z' });
+  const addE = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1921', key_id: G.key_id }, teC('2026-06-28T14:04:00Z'), { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(gen)));
+  const revE = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1922', key_id: G.key_id }, teC('2026-06-28T14:50:00Z'), { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: '2026-06-28T14:40:00Z' }, P.contentHash(addE)));
+  check('revocation U < C ≤ R (provably pre-compromise, in the active window) → authoritative/suspect', (r => r.strength === 'authoritative' && r.status === 'suspect')(P.resolveAuthority(docK, { genesis: gen, keylog: [addE, revE], ...nfe(gen), anchorTime: '2026-06-28T14:20:00Z' })));
   const revBad = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1903', key_id: G.key_id }, T, { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: '2026-06-28T15:00:00.5Z' }, P.contentHash(add)));
   check('fractional compromised_since → E-MALFORMED (strict-Z, §12.2)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, revBad], anchorTime: C }).error === 'E-MALFORMED');
   // round-15 P1-01 — compromised_since must be a REAL calendar instant: "9999-99-99T99:99:99Z" matches the regex but is
@@ -184,12 +192,22 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   // round-15 P0-02 — a key's lifetime is a SET of authorization windows (two-sided K_n(t)). add→retire→re-add→retire: a doc
   // anchored in the FIRST retired GAP must be EXPIRED. Scalar first/last collapsed the two windows → the gap doc wrongly passed.
   const Tt = (g) => ({ generated_at: g, valid_from: g, valid_to: '2026-06-28T15:00:00Z' });
-  const kAdd1 = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1911', key_id: G.key_id }, Tt('2026-06-28T14:00:00Z'), { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(gen)));
+  const kAdd1 = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1911', key_id: G.key_id }, Tt('2026-06-28T14:04:00Z'), { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(gen)));   // AFTER the genesis (14:03:12) — the key-log timeline is nondecreasing (round-16 P1-02)
   const kRet1 = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1912', key_id: G.key_id }, Tt('2026-06-28T14:10:00Z'), { op: 'revoke', pub: K.pubB64, reason: 'retired' }, P.contentHash(kAdd1)));
   const kAdd2 = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1913', key_id: G.key_id }, Tt('2026-06-28T14:20:00Z'), { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(kRet1)));
   const kRet2 = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1914', key_id: G.key_id }, Tt('2026-06-28T14:30:00Z'), { op: 'revoke', pub: K.pubB64, reason: 'retired' }, P.contentHash(kAdd2)));
   check('P0-02 doc anchored in a retired GAP (add→retire→re-add→retire) → expired, not authoritative (interval collapse closed)', (r => r.status === 'expired' && r.strength === 'self-asserted')(P.resolveAuthority(docK, { genesis: gen, keylog: [kAdd1, kRet1, kAdd2, kRet2], ...nfe(gen), anchorTime: '2026-06-28T14:15:00Z' })));
   check('P0-02 doc anchored AFTER the re-add (second window) → still authoritative (the fix does not over-reject)', (r => r.strength === 'authoritative')(P.resolveAuthority(docK, { genesis: gen, keylog: [kAdd1, kRet1, kAdd2], ...nfe(gen), anchorTime: '2026-06-28T14:25:00Z' })));
+  // round-16 P0-01 — a key that has LEFT the active set + a doc with NO proven U cannot be authoritative (window
+  // membership undecidable ⇒ fail closed); and verify() feeds K_n(t) ONLY the proven anchor, never a raw opts.anchorTime
+  // (a forged early string once made a post-retirement doc VALID:HIGH while the honest late U rejected it).
+  const kRetOnly = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1915', key_id: G.key_id }, Tt('2026-06-28T14:10:00Z'), { op: 'revoke', pub: K.pubB64, reason: 'retired' }, P.contentHash(kAdd1)));
+  check('P0-01 retired key + UNANCHORED doc → NOT authoritative (fail-closed, K_n needs a proven U)', (r => r.strength !== 'authoritative' && r.status === 'expired')(P.resolveAuthority(docK, { genesis: gen, keylog: [kAdd1, kRetOnly], ...nfe(gen) })));
+  check('P0-01 verify() ignores a forged raw opts.anchorTime (early) on a retired key → not VALID:HIGH', P.verify(docK, { genesis: gen, keylog: [kAdd1, kRetOnly], ...nfe(gen), requireAuthoritative: true, anchorTime: '2026-06-28T14:05:00Z', context: 'data' }).result !== 'VALID:HIGH');
+  // round-16 P1-02 — the key-log timeline is NONDECREASING along the prev-chain: an entry claiming an EARLIER
+  // generated_at than a prior entry inverts the intervals and is rejected (M-KEY-INTERVAL), never silently ordered.
+  const kBack = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1916', key_id: G.key_id }, Tt('2026-06-28T14:02:00Z'), { op: 'revoke', pub: K.pubB64, reason: 'retired' }, P.contentHash(kAdd1)));
+  check('P1-02 non-monotone key-log timeline (entry predates a prior entry) → E-MALFORMED', P.resolveKeys(gen, [kAdd1, kBack]).error === 'E-MALFORMED');
   // ─── #45 F.5b DOWNGRADE RESISTANCE — requireAnchored is the symmetric floor to requireAuthoritative. Stripping
   //     the anchor can only LOWER the tier; a TOP-needing consumer REJECTS, never silently accepts a lower tier.
   const anchorSV = () => ({ final: true, time: '2027-01-01T00:00:00Z' });
@@ -573,7 +591,15 @@ console.log('\n═════════════════════�
   const headProof = { root: P.Hbytes('ust:leaf', Buffer.from(P.contentHash(add), 'utf8')), path: [], anchor: { substrate: 'bitcoin-ots' } };
   check('#40 keylogHeadAnchor WITHOUT substrateVerify → NOT attested (overclaim closed)', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, keylogHeadAnchor: headProof }).freshness !== 'attested');
   check('#40 VERIFIED keylogHeadAnchor NO LONGER earns attested — legacy shortcut removed (UST-0ol Phase 3, P0-03: anchored head ≠ latest head; strong freshness only via checkpoint derivation)', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, keylogHeadAnchor: headProof, substrateVerify: () => ({ final: true, time: '2027-01-01T00:00:00Z' }) }).freshness !== 'attested');
-  check('#40 keylogFreshAsOf ≥ anchorTime → freshness:fresh', P.resolveAuthority(docK, { genesis: gen, keylog: [add], noForkConfirmed: true, anchorTime: Aft, keylogFreshAsOf: '2026-06-28T15:00:00Z' }).freshness === 'fresh');
+  // round-16 P0-02 — a RAW keylogFreshAsOf (a string, OR an unbranded look-alike object) can NEVER mint `fresh`:
+  // freshness is EARNED from an authenticated fetch (F.5d), not a caller assertion. It stays `unverified`, so
+  // requireFreshKeylog still floors to INDETERMINATE — a caller string cannot lift the FreshnessStrength axis.
+  check('#40/P0-02 raw string keylogFreshAsOf → freshness:unverified (never minted from a caller string)', P.resolveAuthority(docK, { genesis: gen, keylog: [add], ...nfe(gen), anchorTime: Aft, keylogFreshAsOf: '2026-06-28T15:00:00Z' }).freshness === 'unverified');
+  check('#40/P0-02 unbranded look-alike freshness object → unverified (not in VERIFIED_FRESH)', P.resolveAuthority(docK, { genesis: gen, keylog: [add], ...nfe(gen), anchorTime: Aft, keylogFreshAsOf: { observed_at: '2026-06-28T15:00:00Z', domain: dom, active_genesis: P.contentHash(gen) } }).freshness === 'unverified');
+  // the EARNED path — resolveByDiscovery actually fetched /.well-known/ust-keylog ⇒ mints a VERIFIED_FRESH token ⇒ fresh.
+  const freshMock = (u) => { const p = new URL(u).pathname; const body = p.endsWith('ust-genesis') ? JSON.stringify(gen) : p.endsWith('ust-keylog') ? JSON.stringify([add]) : null; return Promise.resolve(body === null ? { ok: false, status: 404 } : { ok: true, text: () => Promise.resolve(body) }); };
+  const rFresh = await P.resolveByDiscovery(docK, { context: 'data', noForkConfirmed: true, acceptConsumerOverride: true }, { fetchImpl: freshMock });
+  check('#40/P0-02 resolveByDiscovery key-log fetch → freshness:fresh (EARNED, branded token)', rFresh.verdict?.identity?.freshness === 'fresh');
   // ─── P0-2 (audit) — NAME NO-FORK EVIDENCE reclassification (UST-0l5). `authoritative` name-authority is EARNED
   //     from a verified, CONSUMER-trusted witness statement bound to this domain + active genesis; a raw
   //     `noForkConfirmed` boolean is only a transparent `consumer-override`, never silently authoritative.

@@ -470,9 +470,11 @@ export function verify(doc, opts = {}) {
     const provenAnchorTime = timeField.strength === 'anchored' ? timeField.anchorTime : undefined;   // the proven upper bound U (else undefined)
     // step 3 — name authority (§14.3): HIGH resolves genesis+key-log; else a PINNED key (TOFU, §3.1) if the caller
     // supplies pinnedKeys — a key NOT in the pin set is INVALID (that is what pinning means); else self-asserted.
-    // The PROVEN anchor time wins over any caller-supplied anchorTime (a caller cannot undercut it to evade X1).
+    // round-16 P0-01 — ONLY the PROVEN anchor time feeds the K_n(t) query; a raw caller `opts.anchorTime` is NOT a
+    // proven upper bound and must never become the coordinate (it made a retired-key doc VALID:HIGH with a forged/absent
+    // string while the honest late U rejected it). No proof ⇒ U is undefined ⇒ a closed key lifecycle fails closed.
     let identity;
-    if (opts.genesis) identity = resolveAuthority(doc, { ...opts, anchorTime: provenAnchorTime ?? opts.anchorTime });
+    if (opts.genesis) identity = resolveAuthority(doc, { ...opts, anchorTime: provenAnchorTime });
     else if (opts.pinnedKeys) identity = opts.pinnedKeys.includes(st.id.key_id)
       ? { strength: 'pinned', status: 'verified' }
       : { error: 'E-KEY', detail: 'key_id not in the pinned set (§3.1 TOFU)' };
@@ -615,6 +617,9 @@ function walkReferents(st, opts, depth, visited, budget) {
   return { depth: reached, referents: sawUnresolved ? 'partial' : 'verified' };
 }
 
+// a REAL RFC3339-Z calendar instant (not just the regex shape — 9999-99-99T99:99:99Z matches the shape but is not a
+// time); module-level so resolveKeys, resolveAuthority and resolveByDiscovery share ONE definition (round-15 P1-01).
+const isRealRfc3339Z = (x) => { if (typeof x !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(x)) return false; const t = Date.parse(x); return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 19) + 'Z' === x; };
 // §12.2 — the SHARED key-log walk (genesis self-signed root + prev-chained entries each signed by a CURRENT
 // valid key). Returns { validKeys: Map<key_id,pub>, revoked: Map } or { error, detail }. Used by BOTH
 // resolveAuthority (name authority) AND resolveCadence — a cadence-log entry MUST be signed by an AUTHORIZED
@@ -628,7 +633,7 @@ export function resolveKeys(genesis, keylog = []) {
   if (keylog.length > 256) return { error: 'E-BOUNDS', detail: 'key-log > 256 (§13)' };
   let prevHash = contentHash(genesis);
   const gKid = genesis.state.id.key_id, gPub = genesis.sig.pub, gDomain = genesis.state.id.domain_shard;
-  const isRealRfc3339Z = (x) => { if (typeof x !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(x)) return false; const t = Date.parse(x); return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 19) + 'Z' === x; };   // round-15 P1-01: a REAL calendar instant (9999-99-99T99:99:99Z is shape-valid but not a time), not just a regex shape
+  let prevTime = genesis.state.time.generated_at;                                   // round-16 P1-02: the key-log timeline must be NONDECREASING along the prev-chain, else intervals are unordered/inverted and the K_n(t) shortcuts over intervals[0]/last are unjustified (M-KEY-INTERVAL)
   // §12.2 #75 ROOT 2 — the key-log is a TEMPORAL STATE MACHINE (reducer), not a growing set. Two sets that used to
   // be ONE (the bug behind P0-02): `all` = every key ever authorized (key_id→pub) for DOCUMENT BINDING (a retired
   // key's earlier doc still binds, then X1 judges it by time — continuity); `active` = the keys that may sign the
@@ -650,6 +655,10 @@ export function resolveKeys(genesis, keylog = []) {
     if (e.state.id.class !== 'key') return { error: 'E-KEY', detail: 'entry ' + i + ' not class:key' };
     if (e.state.id.domain_shard !== gDomain) return { error: 'E-KEY', detail: 'entry ' + i + ' domain_shard ≠ genesis domain (round-15 P0-03: the single-domain key-log invariant lives IN the reducer, not only in the NameBound caller — the reducer is a TCB unit and must be sound in isolation, since resolveAuthority consumes it directly)' };
     if (e.state.provenance?.prev !== prevHash) return { error: 'E-PREV', detail: 'entry ' + i + ' prev not chained' };
+    // round-16 P1-02 — the key-log timeline is NONDECREASING: a later prev-chain entry cannot claim an EARLIER
+    // generated_at, else the emitted intervals invert ({from > to}) and the ordered-window precondition breaks.
+    if (e.state.time.generated_at < prevTime) return { error: 'E-MALFORMED', detail: 'entry ' + i + ' generated_at precedes an earlier key-log entry (non-monotone timeline — intervals would be unordered, M-KEY-INTERVAL)' };
+    prevTime = e.state.time.generated_at;
     // #75 P0-02a/b — the signer MUST be ACTIVE at this point, not merely ever-seen: a revoked or rotated-out key
     // can no longer authorize a later entry.
     const sKid = keyId(e.sig.pub);
@@ -874,6 +883,11 @@ const mapRootAdmitted = (trust, root) => Array.isArray(trust?.mapRoots) && trust
 // P0-1 (rc.35 audit) — a module-private capability set. Only resolveByDiscovery (which actually ran witnessNoFork)
 // mints a servedNoFork object into it; a transcript caller cannot add to it, so a plain look-alike object earns nothing.
 const VERIFIED_SERVED = new WeakSet();
+// round-16 P0-02 — the SAME unforgeable-token discipline for key-log freshness. `fresh` is EARNED by an authenticated
+// fetch (F.5d), never a raw caller timestamp (a bare string, even 9999-99-99…, minted `fresh` and bypassed
+// requireFreshKeylog). Only resolveByDiscovery, which actually fetched /.well-known/ust-keylog, mints an observation
+// token into this set, bound to (domain, active_genesis, observed_at). A raw string/object is a caller assertion.
+const VERIFIED_FRESH = new WeakSet();
 export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, noForkEvidence, nameMap, trustRoots, corroborated = false, servedNoFork, anchorTime, keylogFreshAsOf, keylogHeadAnchor, substrateVerify, trust } = {}) {
   if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
   if (genesis.state?.id?.domain_shard !== doc.state.id.domain_shard) return { error: 'E-GENESIS', detail: 'genesis domain mismatch' };
@@ -887,9 +901,14 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
   // FOLLOWS the anchored prefix is invisible to it. Strong key-log freshness (corroborated/attested) is reachable
   // ONLY through the one checkpoint derivation (deriveCheckpointFreshness): authorization + strict terminality +
   // proven-after ordering + independent uniqueness. resolveAuthority reports at most `fresh` (single-view): a
-  // `keylogFreshAsOf` from an AUTHORITATIVE fetch ≥ the doc anchor ⇒ `fresh`; else `unverified` — TOLD, never forged.
+  // round-16 P0-02 / F.5d — `fresh` is EARNED from an authenticated fetch, NEVER a raw caller string (that self-declared
+  // the FreshnessStrength axis and bypassed requireFreshKeylog). Only a token minted by resolveByDiscovery into
+  // VERIFIED_FRESH — bound to THIS domain + active genesis and observed no earlier than the proven U — lifts it; a bare
+  // string/object is a caller assertion that stays `unverified` (⇒ requireFreshKeylog still floors to INDETERMINATE).
   let freshness = 'unverified';
-  if (keylogFreshAsOf && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(keylogFreshAsOf) && (!anchorTime || keylogFreshAsOf >= anchorTime)) freshness = 'fresh';
+  if (keylogFreshAsOf && typeof keylogFreshAsOf === 'object' && VERIFIED_FRESH.has(keylogFreshAsOf)
+      && keylogFreshAsOf.domain === doc.state.id.domain_shard && keylogFreshAsOf.active_genesis === contentHash(genesis)
+      && isRealRfc3339Z(keylogFreshAsOf.observed_at) && (!anchorTime || keylogFreshAsOf.observed_at >= anchorTime)) freshness = 'fresh';
   // rc.12: surface the ceremony-declared CAPACITY so callers can pass it as opts.capacity to verify()
   // once authority is established — the grant flows FROM resolution, never from a raw genesis.
   const gvCap = genesis.state?.data?.genesis?.value ?? {};
@@ -908,20 +927,29 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
   if (U && hk && U < hk.intervals[0].from)
     return { strength: 'self-asserted', status: 'premature', detail: 'document anchored before its signing key was authorized (K_n(t) lower bound §12.2)' };
   // §12.2 X1 — the UPPER bound, decided against the proven anchor U. Compromise is terminal; retirement leaves a GAP.
-  // Per-interval "active until": a COMPROMISED interval extends to compromised_since C (the X1 boundary, which the
-  // publisher may set AFTER the revoke entry's own timestamp), a retired/open interval uses its own close time. A doc
-  // must land inside SOME window; a doc in a retired GAP between intervals (add→retire→re-add→…) ⇒ expired.
+  // Per-interval "active until": the revoke transition R (v.to) ends the authorization window — F.5e: a key leaves the
+  // active process at R, and the compromise estimate C can only SHORTEN/taint the window, never LENGTHEN it past R
+  // (round-16 P1-01: rev12 used C alone, so a future C let a doc long after R still count as in-window). So the
+  // compromised upper bound is min(R, C); a retired/open interval uses its own close time. A doc must land inside SOME
+  // window; a doc in a retired GAP between intervals (add→retire→re-add→…) ⇒ expired.
   const rev = revoked.get(doc.state.id.key_id);
-  const inWindow = (U && hk) ? hk.intervals.some((v) => { const upper = v.end === 'compromised' ? rev.compromised_since : v.to; return U >= v.from && (upper === null || U <= upper); }) : false;
+  const minStr = (a, b) => (a === null ? b : b === null ? a : a < b ? a : b);
+  const inWindow = (U && hk) ? hk.intervals.some((v) => { const upper = v.end === 'compromised' ? minStr(v.to, rev.compromised_since) : v.to; return U >= v.from && (upper === null || U <= upper); }) : false;
+  // round-16 P0-01 — a key that has LEFT the active set (its LAST interval is closed: retired/revoked, not re-added)
+  // cannot be authorized WITHOUT a proven U: window membership is undecidable, so it must fail closed rather than fall
+  // through to authoritative. (An OPEN last interval = currently active; that path is unaffected.)
+  const lastClosed = !!(hk && hk.intervals[hk.intervals.length - 1].to !== null);
   let suspect = false;
   if (rev) {
     if (rev.reason === 'compromised') {
       if (!U) return { strength: 'self-asserted', status: 'revoked-untrusted', detail: 'compromised key + UNANCHORED doc → untrusted (X1)' };
       if (U >= rev.compromised_since) return { error: 'E-KEY', detail: 'signature not provably before compromise (U ≥ compromised_since, X1)' };
-      if (!inWindow) return { strength: 'self-asserted', status: 'expired', detail: 'provably pre-compromise but signed in a retired GAP outside every active interval (K_n(t) two-sided §12.2)' };
+      if (!inWindow) return { strength: 'self-asserted', status: 'expired', detail: 'provably pre-compromise but signed outside every active window — retired GAP or past the revoke transition (K_n(t) two-sided §12.2)' };
       suspect = true;                                                             // provably pre-compromise AND within an active window, but C is a publisher estimate
-    } else if (rev.reason === 'retired' && U && !inWindow)
-      return { strength: 'self-asserted', status: 'expired', detail: 'signed outside the key active interval — retired GAP / after retirement (K_n(t) two-sided §12.2 X1)' };
+    } else if (rev.reason === 'retired') {
+      if (!U && lastClosed) return { strength: 'self-asserted', status: 'expired', detail: 'retired key currently out of the active set + UNANCHORED — cannot prove the signature predates retirement (K_n(t) needs a proven U, round-16 P0-01)' };
+      if (U && !inWindow) return { strength: 'self-asserted', status: 'expired', detail: 'signed outside the key active interval — retired GAP / after retirement (K_n(t) two-sided §12.2 X1)' };
+    }
   }
   // §12.1a / formal model F.5a — the name is now KEY-BOUND (K_n: doc key ∈ resolved set). The no-fork STRENGTH
   // is a function of the BASIS of the non-membership evidence, and honesty forbids collapsing them:
@@ -2055,11 +2083,14 @@ export async function resolveByDiscovery(doc, opts = {}, { fetchImpl = fetch, su
   // VERIFIED served-list evidence (bound to THIS genesis) — the ONLY way the stateless core earns `corroborated`; a
   // bare boolean would be a mere assertion (self-audit rc.35). Present only when witnessNoFork actually confirmed.
   let servedNoFork; if (witnessConfirmed) { servedNoFork = { confirmed: true, active_genesis: genesisHash }; VERIFIED_SERVED.add(servedNoFork); }   // P0-1: mint the trusted token ONLY after witnessNoFork confirmed
-  const authOpts = { genesis, keylog, noForkConfirmed: opts.noForkConfirmed, noForkEvidence: opts.noForkEvidence, trustRoots: opts.trustRoots, servedNoFork };
+  // round-16 P0-02 — key-log freshness is EARNED here: we JUST fetched /.well-known/ust-keylog for THIS domain+genesis,
+  // so mint an unforgeable observation token (observed_at = the fetch instant). A raw caller string can never do this.
+  let keylogFreshAsOf; if (kRaw !== undefined) { keylogFreshAsOf = { observed_at: new Date().toISOString().slice(0, 19) + 'Z', domain: shard, active_genesis: genesisHash }; VERIFIED_FRESH.add(keylogFreshAsOf); }
+  const authOpts = { genesis, keylog, noForkConfirmed: opts.noForkConfirmed, noForkEvidence: opts.noForkEvidence, trustRoots: opts.trustRoots, servedNoFork, keylogFreshAsOf };
   const auth = resolveAuthority(doc, authOpts);
   if (auth.error) return { verdict: base, resolution: { error: auth.error + (auth.detail ? ' — ' + auth.detail : '') } };
   if (callerNoFork) noFork = auth.independently_verified ? 'accepted-external-witness (authoritative)' : 'caller-asserted (consumer-override)';
-  const verdict = await verifyAsync(doc, { ...opts, genesis, keylog, noForkConfirmed: opts.noForkConfirmed, servedNoFork, capacity: auth.capacity, substrateVerify });   // #69 E1 — await the doc's own anchor substrate (TOP)
+  const verdict = await verifyAsync(doc, { ...opts, genesis, keylog, noForkConfirmed: opts.noForkConfirmed, servedNoFork, keylogFreshAsOf, capacity: auth.capacity, substrateVerify });   // #69 E1 — await the doc's own anchor substrate (TOP); carry the EARNED freshness token (round-16 P0-02) into the final verdict
   return { verdict, resolution: { publisher: auth.publisher ?? shard, strength: auth.strength, capacity: auth.capacity, noFork, source: `https://${shard}/.well-known/ (§20.1 discovery + §12.1a witness)` } };
 }
 
