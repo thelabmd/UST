@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 516" role="img" aria-label="UST 1.0.0-rc.36 — release candidate status panel">
+<title>UST 1.0.0-rc.36 — a release candidate, not a final 1.0</title>
+<g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="15">
+  <rect x="1.5" y="1.5" width="877" height="513" rx="10" fill="#0d1117" stroke="#3d444d" stroke-width="1.5"/>
+  <text x="28" y="40" fill="#58a6ff" font-size="17" font-weight="600">UST Protocol</text>
+  <text x="28" y="70" fill="#c9d1da" >Verify machine-readable state without trusting whoever handed it to you.</text>
+  <line x1="16" y1="106" x2="864" y2="106" stroke="#30363d" stroke-width="1"/>
+  <rect x="24" y="97" width="128.79999999999998" height="17" fill="#0d1117"/>
+  <text x="30" y="110" fill="#58a6ff" font-size="12" font-weight="600" letter-spacing="2">RELEASE STATUS</text>
+  <text x="42" y="136" fill="#8b949e" >Version</text>
+  <text x="192" y="136" fill="#8b949e" >:</text>
+  <text x="214" y="136" fill="#79c0ff" >1.0.0-rc.36</text>
+  <text x="42" y="162" fill="#8b949e" >Stage</text>
+  <text x="192" y="162" fill="#8b949e" >:</text>
+  <text x="214" y="162" fill="#d29922" >RELEASE CANDIDATE</text>
+  <text x="42" y="188" fill="#8b949e" >Final 1.0?</text>
+  <text x="192" y="188" fill="#8b949e" >:</text>
+  <text x="214" y="188" fill="#c9d1da" >No</text>
+  <line x1="16" y1="224" x2="864" y2="224" stroke="#30363d" stroke-width="1"/>
+  <rect x="24" y="215" width="96" height="17" fill="#0d1117"/>
+  <text x="30" y="228" fill="#58a6ff" font-size="12" font-weight="600" letter-spacing="2">ASSESSMENT</text>
+  <text x="42" y="254" fill="#3fb950" font-weight="600">✓</text>
+  <text x="66" y="254" fill="#c9d1da" >Multiple external AI reviews incorporated structurally</text>
+  <text x="42" y="280" fill="#d29922" font-weight="600">○</text>
+  <text x="66" y="280" fill="#c9d1da" >Independent human cryptographic audit — pending</text>
+  <text x="42" y="306" fill="#3fb950" font-weight="600">✓</text>
+  <text x="66" y="306" fill="#c9d1da" >Suitable for evaluation and integration testing</text>
+  <line x1="16" y1="342" x2="864" y2="342" stroke="#30363d" stroke-width="1"/>
+  <rect x="24" y="333" width="120.6" height="17" fill="#0d1117"/>
+  <text x="30" y="346" fill="#58a6ff" font-size="12" font-weight="600" letter-spacing="2">COMPATIBILITY</text>
+  <text x="42" y="372" fill="#8b949e" >Wire format</text>
+  <text x="192" y="372" fill="#8b949e" >:</text>
+  <text x="214" y="372" fill="#79c0ff" >ust: "1.0"</text>
+  <text x="42" y="398" fill="#8b949e" >Stability</text>
+  <text x="192" y="398" fill="#8b949e" >:</text>
+  <text x="214" y="398" fill="#c9d1da" >stable across all 1.0 release candidates</text>
+  <line x1="16" y1="434" x2="864" y2="434" stroke="#30363d" stroke-width="1"/>
+  <rect x="24" y="425" width="128.79999999999998" height="17" fill="#0d1117"/>
+  <text x="30" y="438" fill="#58a6ff" font-size="12" font-weight="600" letter-spacing="2">RECOMMENDATION</text>
+  <text x="42" y="464" fill="#8b949e" >•</text>
+  <text x="66" y="464" fill="#c9d1da" >Pin exact dependency versions.</text>
+  <text x="42" y="490" fill="#8b949e" >•</text>
+  <text x="66" y="490" fill="#c9d1da" >Do not treat RC builds as production-final.</text>
+</g>
+</svg>

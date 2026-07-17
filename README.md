@@ -8,11 +8,7 @@
 [![@ust-protocol/mcp](https://img.shields.io/npm/v/@ust-protocol/mcp?label=@ust-protocol/mcp)](https://www.npmjs.com/package/@ust-protocol/mcp) [![pulls](https://img.shields.io/npm/dt/@ust-protocol/mcp?label=pulls&color=informational)](https://www.npmjs.com/package/@ust-protocol/mcp)
 [![@ust-protocol/cli](https://img.shields.io/npm/v/@ust-protocol/cli?label=@ust-protocol/cli)](https://www.npmjs.com/package/@ust-protocol/cli) [![pulls](https://img.shields.io/npm/dt/@ust-protocol/cli?label=pulls&color=informational)](https://www.npmjs.com/package/@ust-protocol/cli)
 
-**Verify machine-readable state without trusting whoever handed it to you.**
-
-> **Status: `1.0.0-rc.36` — a RELEASE CANDIDATE, not a final 1.0.** Multiple external AI reviews are folded in
-> structurally; an independent human cryptographic audit is pending. Suitable for evaluation and integration
-> testing. Pin exact versions. The wire format `ust: "1.0"` is stable across rc's.
+![UST status: `1.0.0-rc.36` — a release candidate, not a final 1.0. Verify machine-readable state without trusting whoever handed it to you. Multiple external AI reviews incorporated structurally; an independent human cryptographic audit is pending; suitable for evaluation and integration testing. The wire format ust:"1.0" is stable across rc's; pin exact versions.](.github/status.svg)
 
 ## What this is
 

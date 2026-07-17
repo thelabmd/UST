@@ -8,17 +8,18 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { VERSION } from '../packages/ust-protocol/index.mjs';
 
-// 1) README Status line — replace only the version token in the FIRST backticks after `**Status:`, preserving the prose.
+// 1) README status — the Status prose moved into the TUI SVG panel (gen-status-svg.mjs, .github/status.svg); the markdown
+// carries it as the image ALT text (searchable + screen-reader text). Replace only the version token in that alt's backticks.
 const readmePath = new URL('../README.md', import.meta.url);
 const readme = readFileSync(readmePath, 'utf8');
-const reReadme = /(\*\*Status:\s*`)[^`]+(`)/;
+const reReadme = /(!\[UST status:\s*`)[^`]+(`)/;
 if (!reReadme.test(readme)) {
-  console.error('  ✗ README Status line not found (expected a "**Status: `<version>`**" line) — update the anchor if the README format changed');
+  console.error('  ✗ README status image not found (expected an "![UST status: `<version>` — …](.github/status.svg)" line) — update the anchor if the README format changed');
   process.exit(1);
 }
 const readmeBefore = (readme.match(reReadme) || [])[0];
 writeFileSync(readmePath, readme.replace(reReadme, `$1${VERSION.spec}$2`));
-console.log(`  ✓ README Status → ${VERSION.spec} (canonical VERSION.spec)` + (readmeBefore.includes(VERSION.spec) ? '  [already in sync]' : `  [was: ${readmeBefore.replace(/\*\*Status:\s*`|`/g, '')}]`));
+console.log(`  ✓ README status alt → ${VERSION.spec} (canonical VERSION.spec)` + (readmeBefore.includes(VERSION.spec) ? '  [already in sync]' : `  [was: ${readmeBefore.replace(/!\[UST status:\s*`|`/g, '')}]`));
 
 // 2) root package.json version — the FIRST `"version": "..."` in the file is the root package's own (deps never use that
 // key). Replace only that token, so JSON formatting is byte-preserved (no reformat, minimal diff).
