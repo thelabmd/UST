@@ -12,6 +12,10 @@
 
 ## What this is
 
+![Anatomy of a UST transcript — a self-contained signed JSON document: id (who + when), time frame, data partitions, domain-separated hashes, provenance links, Ed25519 signature. Seal at creation, store anywhere, verify offline.](.github/ust-anatomy.svg)
+
+![What is a real truth in an agent world? — the verdict ladder: VALID:LIGHT (key + canonical form + signature), VALID:HIGH (+ name provably bound to the key), VALID:TOP (+ existed by a real point in time). INVALID is a definite failure; INDETERMINATE is never conflated with forged; a tier is earned, no header claims it.](.github/ust-tiers.svg)
+
 UST is a small open protocol for **tamper-evident records of state** — some data about the world, at a moment,
 signed by whoever observed it. A transcript is a self-contained JSON object: canonical form, domain-separated
 hashes, an Ed25519 signature, an explicit time frame, and (optionally) provenance links, privacy commitments and
@@ -26,11 +30,7 @@ key, and were not changed since?"* Seal at creation → store anywhere → verif
 offline, with one library call. No blockchain required, no consensus, no per-record fees: the LIGHT tier is a
 key, a canonical form and a signature.
 
-![Anatomy of a UST transcript — a self-contained signed JSON document: id (who + when), time frame, data partitions, domain-separated hashes, provenance links, Ed25519 signature. Seal at creation, store anywhere, verify offline.](.github/ust-anatomy.svg)
-
 Trust is **graduated, and the verdict carries its tier** — a conforming verifier never says a bare `VALID`:
-
-![The verdict ladder — VALID:LIGHT (key + canonical form + signature), VALID:HIGH (+ name provably bound to the key), VALID:TOP (+ existed by a real point in time). INVALID is a definite failure; INDETERMINATE is never conflated with forged.](.github/ust-tiers.svg)
 
 | verdict | what is proven |
 |---|---|
@@ -141,6 +141,8 @@ console.log(verify(doc, { context: 'data' }).result);          // → VALID:LIGH
 ```
 
 ## The `ust` CLI
+
+![The ust CLI — the full command surface parsed from the real binary's help: verify, canon, genesis, rotate, discovery, publish, mirror, stream, forkchoice, witness. Exit 0 = VALID with the tier in the verdict, 1 = not.](.github/ust-cli.svg)
 
 ```bash
 npm i -g @ust-protocol/cli    # installs the `ust` command

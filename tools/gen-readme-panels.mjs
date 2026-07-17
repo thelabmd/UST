@@ -5,6 +5,8 @@
 // (no dates, no randomness) gated by `git diff --exit-code` in test:spec-sync, exactly like the status panel — the
 // prose stays in the README; these panels replace only the ASCII diagrams that wrap and tear on mobile.
 import { writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const W = 880;
 const BG = '#0d1117', BORDER = '#3d444d', SEP = '#30363d';
@@ -89,7 +91,7 @@ panel('ust-anatomy', 'A TRANSCRIPT — SELF-CONTAINED, VERIFIES ANYWHERE', (P) =
 });
 
 // ── 2. TIERS — the verdict ladder (each rung EARNED, the verdict carries its tier) ──
-panel('ust-tiers', 'TRUST IS GRADUATED — THE VERDICT CARRIES ITS TIER', (P) => {
+panel('ust-tiers', 'WHAT IS A REAL TRUTH IN AN AGENT WORLD?', (P) => {
   const cols = [
     { x: 24, top: 150, chip: 'VALID:LIGHT', c: TEXT, name: 'the floor — a key, canonical form, a signature', rows: ['exact bytes · signing key', 'claimed time frame', 'no infra · no fees'] },
     { x: 312, top: 110, chip: 'VALID:HIGH', c: VALUE, name: '+ the NAME is provably bound to the key', rows: ['genesis + key log ceremony', 'rotation / revocation', 'corroborated|authoritative'] },
@@ -185,4 +187,41 @@ panel('ust-map', 'REPOSITORY MAP', (P) => {
   }
   P.row(10);
 });
-console.log('  (5 README panels regenerated — deterministic)');
+// ── 6. CLI — the command surface, derived from the REAL binary (`$ ust` help), never hand-copied ──
+// Run the CLI with no args: it prints its own command table to stderr and exits 0. Parse `  ust <cmd> …  <desc>` rows.
+// If a command is added/renamed in the dispatcher, this panel regenerates differently → the spec-sync git-diff gate fails.
+{
+  const cli = fileURLToPath(new URL('../packages/ust-cli/index.mjs', import.meta.url));
+  const out = spawnSync(process.execPath, [cli], { encoding: 'utf8' });
+  if (out.status !== 0) throw new Error('ust CLI no-arg help exited ' + out.status);
+  const rows = out.stderr.split('\n').filter((l) => /^\s+ust /.test(l)).map((l) => {
+    // the help aligns columns with 2+ spaces — including INSIDE a usage ("ust canon  <file|->"), so split on runs
+    // and absorb leading arg-shaped parts (<…> / --…) into the usage; the first prose part starts the description.
+    const parts = l.trim().split(/\s{2,}/);
+    let usage = parts[0], i = 1;
+    while (i < parts.length && /^(<|--)/.test(parts[i])) usage += ' ' + parts[i++];
+    return { usage, desc: parts.slice(i).join(' ') };
+  });
+  if (rows.length < 8) throw new Error('parsed only ' + rows.length + ' CLI commands — help format changed, update the parser');
+  panel('ust-cli', 'THE ust CLI — ONE ENTRYPOINT, THE WHOLE SURFACE', (P) => {
+    let y = P.row(28);
+    P.t(36, y, '$', OK, 'font-weight="600"'); P.t(54, y, 'npm i -g @ust-protocol/cli', TEXT, 'font-weight="600"');
+    P.t(300, y, '# installs the ust command', LABEL, 'font-size="13"');
+    y = P.row(24);
+    P.t(36, y, '$', OK, 'font-weight="600"'); P.t(54, y, 'ust', TEXT, 'font-weight="600"');
+    P.t(300, y, `# ${rows.length} subcommands — this table is parsed from the real help`, LABEL, 'font-size="13"');
+    P.row(8);
+    for (const r of rows) {
+      y = P.row(24);
+      const sub = r.usage.split(' ')[1];                                     // `verify` from `ust verify <file|->`
+      P.t(48, y, 'ust', LABEL, 'font-size="13"');
+      P.t(48 + 4 * 7.83, y, sub, GREEN, 'font-size="13" font-weight="600"');
+      P.t(48 + (4 + sub.length + 1) * 7.83, y, r.usage.split(' ').slice(2).join(' '), VALUE, 'font-size="13"');
+      y = P.row(19);
+      P.t(76, y, r.desc, LABEL, 'font-size="12.5"');
+    }
+    P.row(12); P.line(16, P.y, W - 16, P.y); P.row(26);
+    P.t(36, P.y, 'exit 0 = VALID (tier in the verdict) · 1 = not · the ceremony self-verifies its outputs — fail-closed', TEXT, 'font-size="13"');
+  });
+}
+console.log('  (6 README panels regenerated — deterministic; the CLI panel is parsed from the real `$ ust` help)');
