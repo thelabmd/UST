@@ -4,7 +4,7 @@
 // shards / graduated visibility), time (the shared ust:ID axis), map (the repository). Deterministic pure functions
 // (no dates, no randomness) gated by `git diff --exit-code` in test:spec-sync, exactly like the status panel — the
 // prose stays in the README; these panels replace only the ASCII diagrams that wrap and tear on mobile.
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -15,17 +15,20 @@ const OK = '#3fb950', WARN = '#d29922', PURPLE = '#bc8cff', GREEN = '#7ee787';
 const MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace";
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+const PANELS = [];                                               // { name, alt } — collected so the README image ALT text is regenerated FROM the panel content
 function panel(name, title, build, titleStyle) {                 // shared frame: rounded border + panel title row; titleStyle overrides the default for long titles
   const parts = [];
+  const texts = [];                                              // every glyph the panel draws, in reading order — this BECOMES the alt text (agents read the alt, not the SVG)
+  const push = (s) => { const v = String(s ?? '').trim(); if (v && !/^[·:{}(),.[\]←▶▲─→|+$]+$/.test(v)) texts.push(v); };   // keep words/values, drop stand-alone visual punctuation glyphs (·, :, {, ←, ▶ …)
   const P = {
     y: 46,
-    t: (x, y, s, fill, extra = '') => parts.push(`  <text x="${x}" y="${y}" fill="${fill}" ${extra}>${esc(s)}</text>`),
+    t: (x, y, s, fill, extra = '') => { parts.push(`  <text x="${x}" y="${y}" fill="${fill}" ${extra}>${esc(s)}</text>`); push(s); },
     line: (x1, y1, x2, y2, stroke = SEP, wd = 1) => parts.push(`  <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="${wd}"/>`),
     rect: (x, y, w, h, opts = '') => parts.push(`  <rect x="${x}" y="${y}" width="${w}" height="${h}" ${opts}/>`),
     chip: (x, y, s, color) => {                                  // small rounded status chip, returns its width
       const w = Math.round(s.length * 7.3 + 18);
       parts.push(`  <rect x="${x}" y="${y - 13}" width="${w}" height="19" rx="9.5" fill="none" stroke="${color}" stroke-width="1"/>`);
-      parts.push(`  <text x="${x + w / 2}" y="${y + 1}" fill="${color}" font-size="12" text-anchor="middle">${esc(s)}</text>`);
+      parts.push(`  <text x="${x + w / 2}" y="${y + 1}" fill="${color}" font-size="12" text-anchor="middle">${esc(s)}</text>`); push(s);
       return w;
     },
     row: (dy) => (P.y += dy, P.y),
@@ -33,8 +36,10 @@ function panel(name, title, build, titleStyle) {                 // shared frame
   P.t(28, 34, title, TITLE, titleStyle || 'font-size="13" font-weight="600" letter-spacing="2"');
   build(P);
   const H = P.y + 26;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)}">
-<title>${esc(title)}</title>
+  // the alt IS the panel's textual content (meaning, not formatting): join in reading order; []→() keeps the markdown alt well-formed.
+  const alt = texts.join(' · ').replace(/\s+/g, ' ').replace(/\[/g, '(').replace(/\]/g, ')');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(alt)}">
+<title>${esc(alt)}</title>
 <g font-family="${MONO}" font-size="15" xml:space="preserve">
   <rect x="1.5" y="1.5" width="${W - 3}" height="${H - 3}" rx="10" fill="${BG}" stroke="${BORDER}" stroke-width="1.5"/>
   <line x1="16" y1="46" x2="${W - 16}" y2="46" stroke="${SEP}" stroke-width="1"/>
@@ -43,6 +48,7 @@ ${parts.join('\n')}
 </svg>
 `;
   writeFileSync(new URL(`../.github/${name}.svg`, import.meta.url), svg);
+  PANELS.push({ name, alt });
   console.log(`  ✓ .github/${name}.svg`);
 }
 
@@ -224,4 +230,16 @@ panel('ust-map', 'REPOSITORY MAP', (P) => {
     P.t(36, P.y, 'exit 0 = VALID (tier in the verdict) · 1 = not · the ceremony self-verifies its outputs — fail-closed', TEXT, 'font-size="13"');
   });
 }
-console.log('  (6 README panels regenerated — deterministic; the CLI panel is parsed from the real `$ ust` help)');
+// ── sync the README image ALT text to the generated panel content ──────────────────────────────────────────────────
+// Agents (a primary UST audience) read the markdown ALT text, NOT the SVG — so the alt must carry each panel's MEANING
+// and never drift from it. The alt is now the panel's own text content (composed above), written back into the README
+// image tag; the spec-sync git-diff gate then fails if a panel changes without its alt being regenerated.
+const readmePath = new URL('../README.md', import.meta.url);
+let readme = readFileSync(readmePath, 'utf8');
+for (const { name, alt } of PANELS) {
+  const re = new RegExp('!\\[[^\\]]*\\]\\(\\.github/' + name.replace(/[-.]/g, '\\$&') + '\\.svg\\)');
+  if (!re.test(readme)) { console.error('  ✗ README has no image tag for .github/' + name + '.svg — add one or fix the panel name'); process.exit(1); }
+  readme = readme.replace(re, '![' + alt + '](.github/' + name + '.svg)');
+}
+writeFileSync(readmePath, readme);
+console.log('  (6 README panels regenerated + README alt text synced from panel content — deterministic; the CLI panel is parsed from the real `$ ust` help)');

@@ -5,7 +5,7 @@
 // same way the spec registry is gated. Dark terminal palette by design: a terminal panel is dark on BOTH GitHub
 // themes — no prefers-color-scheme forks, one artifact. Borders are VECTOR lines (crisp at any scale), not box-drawing
 // glyphs, so the panel survives mobile widths where an ASCII box in a code block wraps and tears.
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { VERSION } from '../packages/ust-protocol/index.mjs';
 
 const W = 880;
@@ -18,9 +18,11 @@ const MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monos
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const parts = [];
+const texts = [];                                                // drawn glyphs in reading order → BECOMES the README alt (agents read the alt, not the SVG)
+const push = (s) => { const v = String(s ?? '').trim(); if (v && !/^[·:{}(),.[\]•✓○—-]+$/.test(v)) texts.push(v); };
 let y = 0;
 const row = (dy) => (y += dy, y);
-const text = (x, yy, s, fill, extra = '') => parts.push(`  <text x="${x}" y="${yy}" fill="${fill}" ${extra}>${esc(s)}</text>`);
+const text = (x, yy, s, fill, extra = '') => { parts.push(`  <text x="${x}" y="${yy}" fill="${fill}" ${extra}>${esc(s)}</text>`); push(s); };
 const section = (label) => {                                     // ── LABEL ──────── separator with the title cut into it
   const yy = row(34);
   parts.push(`  <line x1="${PAD - 12}" y1="${yy - 4}" x2="${W - 16}" y2="${yy - 4}" stroke="${SEP}" stroke-width="1"/>`);
@@ -63,8 +65,11 @@ bullet('Pin exact dependency versions.');
 bullet('Do not treat RC builds as production-final.');
 const H = y + 26;
 
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="UST ${VERSION.spec} — release candidate status panel">
-<title>UST ${VERSION.spec} — a release candidate, not a final 1.0</title>
+// the alt IS the panel's content (meaning, not formatting) — the version stays the FIRST backtick token so the machine
+// status-line remains greppable; agents that only see the alt still get the whole panel.
+const alt = 'UST status: `' + VERSION.spec + '` — ' + texts.filter((t) => t !== 'UST Protocol' && t !== VERSION.spec).join(' · ');
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(alt.replace(/`/g, ''))}">
+<title>${esc(alt.replace(/`/g, ''))}</title>
 <g font-family="${MONO}" font-size="15">
   <rect x="1.5" y="1.5" width="${W - 3}" height="${H - 3}" rx="10" fill="${BG}" stroke="${BORDER}" stroke-width="1.5"/>
 ${parts.join('\n')}
@@ -72,4 +77,10 @@ ${parts.join('\n')}
 </svg>
 `;
 writeFileSync(new URL('../.github/status.svg', import.meta.url), svg);
-console.log(`  ✓ .github/status.svg → ${VERSION.spec} (TUI status panel, deterministic from VERSION.spec)`);
+// sync the README status image ALT to this content (agents read the alt); the version token is preserved for the machine grep.
+const readmePath = new URL('../README.md', import.meta.url);
+let readme = readFileSync(readmePath, 'utf8');
+const re = /!\[UST status:[^\]]*\]\(\.github\/status\.svg\)/;
+if (!re.test(readme)) { console.error('  ✗ README has no "![UST status: …](.github/status.svg)" image tag'); process.exit(1); }
+writeFileSync(readmePath, readme.replace(re, '![' + alt.replace(/\]/g, ')') + '](.github/status.svg)'));
+console.log(`  ✓ .github/status.svg + README alt → ${VERSION.spec} (TUI status panel, deterministic from VERSION.spec)`);
