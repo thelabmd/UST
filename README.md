@@ -2,13 +2,11 @@
 # Universal State Transcript (UST)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/thelabmd/UST-Protocol/ci.yml?branch=main&label=CI)](https://github.com/thelabmd/UST-Protocol/actions)
-[![stars](https://img.shields.io/github/stars/thelabmd/UST-Protocol?label=stars)](https://github.com/thelabmd/UST-Protocol/stargazers)
 [![code license](https://img.shields.io/badge/code-Apache--2.0-blue)](./LICENSE)
 [![docs license](https://img.shields.io/badge/docs-CC--BY--4.0-blue)](./LICENSE-SPEC)
-
-`ust-protocol` [![v](https://img.shields.io/npm/v/ust-protocol?label=v)](https://www.npmjs.com/package/ust-protocol) [![pulls](https://img.shields.io/npm/dt/ust-protocol?label=pulls&color=informational)](https://www.npmjs.com/package/ust-protocol) ·
-`@ust-protocol/mcp` [![v](https://img.shields.io/npm/v/@ust-protocol/mcp?label=v)](https://www.npmjs.com/package/@ust-protocol/mcp) [![pulls](https://img.shields.io/npm/dt/@ust-protocol/mcp?label=pulls&color=informational)](https://www.npmjs.com/package/@ust-protocol/mcp) ·
-`@ust-protocol/cli` [![v](https://img.shields.io/npm/v/@ust-protocol/cli?label=v)](https://www.npmjs.com/package/@ust-protocol/cli) [![pulls](https://img.shields.io/npm/dt/@ust-protocol/cli?label=pulls&color=informational)](https://www.npmjs.com/package/@ust-protocol/cli)
+[![ust-protocol](https://img.shields.io/npm/v/ust-protocol?label=ust-protocol)](https://www.npmjs.com/package/ust-protocol) [![pulls](https://img.shields.io/npm/dt/ust-protocol?label=pulls&color=informational)](https://www.npmjs.com/package/ust-protocol)
+[![@ust-protocol/mcp](https://img.shields.io/npm/v/@ust-protocol/mcp?label=@ust-protocol/mcp)](https://www.npmjs.com/package/@ust-protocol/mcp) [![pulls](https://img.shields.io/npm/dt/@ust-protocol/mcp?label=pulls&color=informational)](https://www.npmjs.com/package/@ust-protocol/mcp)
+[![@ust-protocol/cli](https://img.shields.io/npm/v/@ust-protocol/cli?label=@ust-protocol/cli)](https://www.npmjs.com/package/@ust-protocol/cli) [![pulls](https://img.shields.io/npm/dt/@ust-protocol/cli?label=pulls&color=informational)](https://www.npmjs.com/package/@ust-protocol/cli)
 
 **Verify machine-readable state without trusting whoever handed it to you.**
 
