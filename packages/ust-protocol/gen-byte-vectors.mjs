@@ -247,6 +247,15 @@ V.push({ id: 'config.oversize', note: 'a config over the 1 MiB ceiling → rejec
 // P2-01 a ~15k-deep nested array must not overflow the recursive pre-scan — iterative scan, then a STRUCTURED reject.
 add('package.deep-arrays', 'a ~15k-deep nested-array term — the surrogate pre-scan must be iterative, then structured reject (round-14 P2-01)', b64u('{"term":' + '['.repeat(15000) + ']'.repeat(15000) + ',"witnesses":{}}'), CFG, { result: 'INVALID', code: 'E-PACKAGE-SHAPE' });
 
+// ── rev12 round-15 — identity relevance (P0-01) ──
+// ProjectAssurance's AssuranceState A(d) is a PRODUCT of coordinates of ONE document d (F.5.0). A minimal NameBound
+// proves KEY-binding but not that the key produced subject q, so stitching its Identity onto a Freshness/Time about q is
+// a cross-document product (IdentityStrength(d′), Freshness(d), Time(d)) that is NOT in 𝓐 → INDETERMINATE, not VALID:HIGH.
+const πNB = N('NameBound', [πG], [put([])], { doc_key_id: G.key_id });                    // Identity: key bound in the genesis log, subject null
+const fScope = P.checkAuthorityProof(pkg(πCorr), CFG).judgment.s;                          // the freshness scope, so all three premises share one scope
+const πAnch = N('Anchored', [], [put({ anchor: 'a' })], { s: fScope, subject: 'ust:target' });   // Time about the same subject the Freshness speaks of
+add('assurance.identity-detached', 'ProjectAssurance whose NameBound identity is not bound to the freshness/time subject — a cross-document product not in 𝓐 (round-15 P0-01, F.5.0/A(d))', b64u(canonPkg(N('ProjectAssurance', [πNB, πCorr, πAnch]))), CFG, { result: 'INDETERMINATE', code: 'identity not bound to the assured subject' });
+
 // ── security-condition coverage manifest (owner completion criterion 8) ──────────────────────────────────────────────
 const MANIFEST = {
   note: 'Every security side-condition maps to ≥1 negative byte-vector; the runner asserts each vector exists and holds. In round-7 this feeds a mutation harness (remove the condition → the listed vector must start failing).',
@@ -299,6 +308,7 @@ const MANIFEST = {
   { id: 'EPOCH-DESTINATION-AUTHORITY', rule: 'ActivateGenesis', negative_vectors: ['transition.dead-authority'] },
   { id: 'TRANSITION-CLAIM-TYPED', rule: 'FutureGenesisCommitment/closedTransition', negative_vectors: ['transition.claim-extra'] },
   { id: 'CONFIG-TOTAL-TYPED', rule: 'normalizeConfig', negative_vectors: ['config.connector-string', 'config.policy-array', 'config.apk-unsorted'] },
+  { id: 'IDENTITY-SUBJECT-BINDING', rule: 'ProjectAssurance', negative_vectors: ['assurance.identity-detached'] },
   ],
   note_positive_shape: 'Positive-shape / arg-dependent invariants (config_id set-order equality P1-07; limits-getter totality P1-01; Uint8Array-only P2-01; single-read reads===1; carrier separation; permutation invariance) are covered by JS property tests in reference-checker.test.mjs, not negative byte-vectors — the {result,code} byte form cannot express a positive equality or a non-bytes input.',
 };

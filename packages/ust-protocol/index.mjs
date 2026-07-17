@@ -627,7 +627,8 @@ export function resolveKeys(genesis, keylog = []) {
   if (genesis.sig.key_id !== genesis.state.id.key_id) return { error: 'E-GENESIS', detail: 'genesis not self-signed' };
   if (keylog.length > 256) return { error: 'E-BOUNDS', detail: 'key-log > 256 (§13)' };
   let prevHash = contentHash(genesis);
-  const gKid = genesis.state.id.key_id, gPub = genesis.sig.pub;
+  const gKid = genesis.state.id.key_id, gPub = genesis.sig.pub, gDomain = genesis.state.id.domain_shard;
+  const isRealRfc3339Z = (x) => { if (typeof x !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(x)) return false; const t = Date.parse(x); return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 19) + 'Z' === x; };   // round-15 P1-01: a REAL calendar instant (9999-99-99T99:99:99Z is shape-valid but not a time), not just a regex shape
   // §12.2 #75 ROOT 2 — the key-log is a TEMPORAL STATE MACHINE (reducer), not a growing set. Two sets that used to
   // be ONE (the bug behind P0-02): `all` = every key ever authorized (key_id→pub) for DOCUMENT BINDING (a retired
   // key's earlier doc still binds, then X1 judges it by time — continuity); `active` = the keys that may sign the
@@ -637,7 +638,7 @@ export function resolveKeys(genesis, keylog = []) {
   const active = new Map([[gKid, gPub]]);
   const revoked = new Map();                                                      // key_id → {reason, compromised_since?, at}
   const compromised = new Set();                                                  // MONOTONIC (round-14 P0-01): compromise is TERMINAL — a compromised key is never re-authorized, and its status can never be downgraded (compromised → retired) by a later revoke
-  const history = new Map([[gKid, { pub: gPub, from: 0, authorized_at: genesis.state.time.generated_at, retired_at: null, revoked_at: null }]]);  // authorized_at = K_n(t) lower bound (F.5e)
+  const history = new Map([[gKid, { pub: gPub, intervals: [{ from: genesis.state.time.generated_at, to: null, end: null }] }]]);  // round-15 P0-02: ORDERED authorization intervals (two-sided K_n(t), F.5e). A key's lifetime is a SET of active windows; re-add opens a NEW interval, so add→retire→re-add→retire keeps the retired GAP unauthorized. Scalar first/last collapsed disjoint windows into one → a doc in the gap escaped both bounds.
   const OP_FIELDS = Object.assign(Object.create(null), { add: ['op', 'pub', 'new_key_id'], rotate: ['op', 'pub', 'new_key_id'], revoke: ['op', 'pub', 'reason', 'compromised_since'] });   // null-proto (UST-Protocol round-13 P2-01): OP_FIELDS["toString"] must be undefined, not an inherited function
   const derive = (i, pub, label) => {                                            // strict pub + derived key_id
     if (strictB64url(pub, 32) === null) return { error: { error: 'E-KEY', detail: 'entry ' + i + ' ' + label + ' pub not a 32-byte base64url key' } };
@@ -647,6 +648,7 @@ export function resolveKeys(genesis, keylog = []) {
     const ev = verify(e, { context: 'key' });
     if (!isValid(ev)) return { error: 'E-KEY', detail: 'key-log entry ' + i + ' invalid: ' + ev.error };
     if (e.state.id.class !== 'key') return { error: 'E-KEY', detail: 'entry ' + i + ' not class:key' };
+    if (e.state.id.domain_shard !== gDomain) return { error: 'E-KEY', detail: 'entry ' + i + ' domain_shard ≠ genesis domain (round-15 P0-03: the single-domain key-log invariant lives IN the reducer, not only in the NameBound caller — the reducer is a TCB unit and must be sound in isolation, since resolveAuthority consumes it directly)' };
     if (e.state.provenance?.prev !== prevHash) return { error: 'E-PREV', detail: 'entry ' + i + ' prev not chained' };
     // #75 P0-02a/b — the signer MUST be ACTIVE at this point, not merely ever-seen: a revoked or rotated-out key
     // can no longer authorize a later entry.
@@ -661,26 +663,28 @@ export function resolveKeys(genesis, keylog = []) {
       if (op.new_key_id !== undefined && op.new_key_id !== d.kid) return { error: 'E-KEY', detail: 'entry ' + i + ' new_key_id != H(ust:keylog, pub)' };
       if (compromised.has(d.kid)) return { error: 'E-KEY', detail: 'entry ' + i + ' cannot re-authorize a COMPROMISED key (terminal, round-14 P0-01)' };
       all.set(d.kid, op.pub); active.set(d.kid, op.pub);
-      if (!history.has(d.kid)) history.set(d.kid, { pub: op.pub, from: i + 1, authorized_at: e.state.time.generated_at, retired_at: null, revoked_at: null });
+      { const h = history.get(d.kid), t = e.state.time.generated_at;                // round-15 P0-02: re-add after retirement OPENS A NEW interval (never reuses the old authorized_at)
+        if (!h) history.set(d.kid, { pub: op.pub, intervals: [{ from: t, to: null, end: null }] });
+        else if (h.intervals[h.intervals.length - 1].to !== null) h.intervals.push({ from: t, to: null, end: null }); }
       // #75 spec §12.2 "each rotation is authorized by the key it supersedes": on rotate the SIGNER is superseded —
       // it leaves active (cannot sign later entries) and is recorded retired (its EARLIER docs stay valid, X1).
       if (op.op === 'rotate' && sKid !== d.kid) {
         active.delete(sKid);
         revoked.set(sKid, { reason: 'retired', at: e.state.time.generated_at });
-        const h = history.get(sKid); if (h) h.retired_at = e.state.time.generated_at;
+        const h = history.get(sKid); if (h) { const iv = h.intervals[h.intervals.length - 1]; if (iv.to === null) { iv.to = e.state.time.generated_at; iv.end = 'retired'; } }   // round-15 P0-02: close the current active interval
       }
     } else {  // revoke
       const d = derive(i, op.pub, 'revoke'); if (d.error) return d.error;
       if (!all.has(d.kid)) return { error: 'E-KEY', detail: 'entry ' + i + ' revoke of a never-authorized key' };
       if (op.reason !== 'retired' && op.reason !== 'compromised') return { error: 'E-MALFORMED', detail: 'entry ' + i + ' revoke reason MUST be "retired" | "compromised"' };
       if (op.reason === 'compromised') {
-        if (typeof op.compromised_since !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(op.compromised_since)) return { error: 'E-MALFORMED', detail: 'entry ' + i + ' compromised requires strict RFC3339-Z compromised_since (§12.2)' };
+        if (!isRealRfc3339Z(op.compromised_since)) return { error: 'E-MALFORMED', detail: 'entry ' + i + ' compromised requires a REAL RFC3339-Z compromised_since (round-15 P1-01: shape ≠ time — 9999-99-99T99:99:99Z passes a regex but is not a calendar instant; the string-compare U ≥ C then always failed, silently downgrading E-KEY to suspect)' };
       } else if (op.compromised_since !== undefined) return { error: 'E-MALFORMED', detail: 'entry ' + i + ' retired MUST NOT carry compromised_since' };
       if (compromised.has(d.kid)) return { error: 'E-KEY', detail: 'entry ' + i + ' COMPROMISED is terminal — cannot re-revoke or downgrade (round-14 P0-01)' };
       active.delete(d.kid);
       if (op.reason === 'compromised') compromised.add(d.kid);                     // monotonic — never cleared
       revoked.set(d.kid, { reason: op.reason, compromised_since: op.compromised_since, at: e.state.time.generated_at });
-      const h = history.get(d.kid); if (h) h.revoked_at = e.state.time.generated_at;
+      const h = history.get(d.kid); if (h) { const iv = h.intervals[h.intervals.length - 1]; if (iv.to === null) { iv.to = e.state.time.generated_at; iv.end = op.reason; } }   // round-15 P0-02: close the current active interval with the end reason
     }
     prevHash = contentHash(e);
   }
@@ -896,23 +900,28 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
   // authority is granted ONLY if the doc's key_id maps to the doc's ACTUAL signing pub (binding, not membership).
   if (validKeys.get(doc.state.id.key_id) !== doc.sig.pub)
     return { strength: 'self-asserted', status: 'verified', detail: 'doc key not bound in this key-log' };
-  // §12.2/#75 ROOT 1 — K_n(t) LOWER bound: a document cannot be PROVEN-anchored BEFORE its signing key was
-  // authorized. With a proven upper bound U < the key's authorized_at, the key did not exist yet ⇒ premature
-  // (self-asserted, not authoritative). Only decidable WITH a proven anchor time (else no U to compare).
+  // §12.2/#75 ROOT 1 — K_n(t) is a TWO-SIDED window over ORDERED authorization intervals (round-15 P0-02). A document is
+  // key-active iff its proven anchor U lands INSIDE some active interval [from, to]; U before the FIRST authorization ⇒
+  // premature; U in a retired GAP between intervals (add→retire→re-add→retire) ⇒ expired. Only decidable WITH a proven U.
   const hk = history.get(doc.state.id.key_id);
-  if (anchorTime && hk?.authorized_at && anchorTime < hk.authorized_at)
+  const U = anchorTime;                                                            // proven "not later than" (§11.2)
+  if (U && hk && U < hk.intervals[0].from)
     return { strength: 'self-asserted', status: 'premature', detail: 'document anchored before its signing key was authorized (K_n(t) lower bound §12.2)' };
-  // §12.2 X1 — revocation window, decided against the anchor UPPER BOUND (U = anchorTime, from §11.2).
+  // §12.2 X1 — the UPPER bound, decided against the proven anchor U. Compromise is terminal; retirement leaves a GAP.
+  // Per-interval "active until": a COMPROMISED interval extends to compromised_since C (the X1 boundary, which the
+  // publisher may set AFTER the revoke entry's own timestamp), a retired/open interval uses its own close time. A doc
+  // must land inside SOME window; a doc in a retired GAP between intervals (add→retire→re-add→…) ⇒ expired.
   const rev = revoked.get(doc.state.id.key_id);
+  const inWindow = (U && hk) ? hk.intervals.some((v) => { const upper = v.end === 'compromised' ? rev.compromised_since : v.to; return U >= v.from && (upper === null || U <= upper); }) : false;
   let suspect = false;
   if (rev) {
-    const U = anchorTime;                                                         // proven "not later than"
     if (rev.reason === 'compromised') {
       if (!U) return { strength: 'self-asserted', status: 'revoked-untrusted', detail: 'compromised key + UNANCHORED doc → untrusted (X1)' };
       if (U >= rev.compromised_since) return { error: 'E-KEY', detail: 'signature not provably before compromise (U ≥ compromised_since, X1)' };
-      suspect = true;                                                             // provably pre-compromise, but C is a publisher estimate
-    } else if (rev.reason === 'retired' && U && U > rev.at)
-      return { strength: 'self-asserted', status: 'expired', detail: 'signed after hygienic retirement (X1)' };
+      if (!inWindow) return { strength: 'self-asserted', status: 'expired', detail: 'provably pre-compromise but signed in a retired GAP outside every active interval (K_n(t) two-sided §12.2)' };
+      suspect = true;                                                             // provably pre-compromise AND within an active window, but C is a publisher estimate
+    } else if (rev.reason === 'retired' && U && !inWindow)
+      return { strength: 'self-asserted', status: 'expired', detail: 'signed outside the key active interval — retired GAP / after retirement (K_n(t) two-sided §12.2 X1)' };
   }
   // §12.1a / formal model F.5a — the name is now KEY-BOUND (K_n: doc key ∈ resolved set). The no-fork STRENGTH
   // is a function of the BASIS of the non-membership evidence, and honesty forbids collapsing them:

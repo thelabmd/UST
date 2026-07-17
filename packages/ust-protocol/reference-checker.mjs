@@ -16,7 +16,7 @@ import { canon, H, keyId, edVerifyStrict, contentHash, verify, isValid, verifyKe
   verifyCheckpointMapUniqueness, evidenceCaps, compareEvidenceOrder, authorityScopeId, genesisEpoch,
   resolveKeys, buildKeylogCommitment, authorityCheckpointId, strictB64url, isPublicDnsShard } from './index.mjs';
 
-export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev11';
+export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev12';
 // RULE_CONTRACTS (§2b) — the STRUCTURAL source of truth: exactly one inference rule per name, one switch branch per
 // name, and a fixed (children arity, witness count, allowed params, conclusion kind). DecodeTerm enforces these on
 // decode; a term with an extra child / extra witness / free param / unknown field / stored conclusion is rejected
@@ -238,10 +238,11 @@ const TA_BUFFER = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Arr
 // SnapshotBytes: accept ONLY a native Uint8Array (Uint8Array only, no string; a Proxy is rejected because the intrinsic
 // getter throws), reject SharedArrayBuffer-backed views, and copy into a fresh immutable buffer. Once native is proven,
 // `.buffer`/`.set` are trap-free. The theorem begins here.
-function snapshotBytes(input) {
+function snapshotBytes(input, maxBytes, sizeErr) {
   if (!(input instanceof Uint8Array) || Object.getPrototypeOf(input) !== Uint8Array.prototype) return { error: 'E-BYTES-TYPE' };   // EXACT native Uint8Array — a subclass (its proto differs) or Proxy is rejected (round-9 P0-01)
   let len, buf; try { len = TA_BYTELENGTH.call(input); buf = TA_BUFFER.call(input); } catch { return { error: 'E-BYTES-TYPE' }; }   // intrinsic getters, never an overridden accessor
   if (typeof SharedArrayBuffer !== 'undefined' && buf instanceof SharedArrayBuffer) return { error: 'E-BYTES-SHARED' };
+  if (maxBytes !== undefined && len > maxBytes) return { error: sizeErr || 'E-BYTES-SIZE' };   // round-15 P1-02: reject the ceiling from the intrinsic byteLength BEFORE allocating the copy — no oversize (32 MiB) copy on a package/config that is rejected next line anyway
   const copy = new Uint8Array(len); copy.set(input); return { bytes: copy };
 }
 // DecodeTerm (§2b, M-DEC): build the closed Term ADT strictly to each RULE_CONTRACTS entry — exact children arity, exact
@@ -338,9 +339,8 @@ export function checkAuthorityProofBytes(packageBytes, configBytes) {
   const L = DEFAULT_LIMITS;   // fixed internal bounds — no caller `limits` object, so CheckBytes is a PURE function of (packageBytes, configBytes) (round-8 P1-01/M-DET)
   const INVALID = (reason) => ({ result: 'INVALID', reason });
   try {
-    const pb = snapshotBytes(packageBytes); if (pb.error) return INVALID('package bytes: ' + pb.error);
-    const cb = snapshotBytes(configBytes); if (cb.error) return INVALID('config bytes: ' + cb.error);
-    if (cb.bytes.byteLength > L.maxConfigBytes) return INVALID('config: E-CONFIG-SIZE');   // config has its OWN ceiling (round-14 P1-02) — reject right after the snapshot, before decode/parse/scan/recanon (no DoS via a giant config on a tiny package)
+    const pb = snapshotBytes(packageBytes, L.maxPackageBytes, 'E-PACKAGE-SIZE'); if (pb.error) return INVALID('package bytes: ' + pb.error);   // round-15 P1-02: ceiling checked from byteLength BEFORE the copy
+    const cb = snapshotBytes(configBytes, L.maxConfigBytes, 'E-CONFIG-SIZE'); if (cb.error) return INVALID('config bytes: ' + cb.error);   // config has its OWN ceiling (round-14 P1-02), now rejected before the copy too — no DoS via a giant config on a tiny package
     const nc = decodeConfig(cb.bytes); if (nc.err) return INVALID('config: ' + nc.err);
     const { C, config_id } = nc;
     const withCfg = (r) => (r && r.result !== 'VALID') ? { ...r, config_id } : r;   // config_id identifies the config USED, whatever the verdict (P1-02)
@@ -634,7 +634,7 @@ function checkTermInner(node, C, W, memo, km) {
       for (const e of kl.w) if (e?.state?.id?.domain_shard !== G.j.domain) return bad('key-log entry domain_shard ≠ genesis domain');
       const rk = resolveKeys(G.j.genesis, kl.w);
       if (rk.error || !rk.validKeys.has(p.doc_key_id)) return ind('document key not bound in the genesis key-log');
-      return { j: { kind: 'Identity', s: G.j.s, rung: 'corroborated', caps: [] } };
+      return { j: { kind: 'Identity', s: G.j.s, key: p.doc_key_id, subject: null, rung: 'corroborated', caps: [] } };   // round-15 P0-01 (M-REL/M-ERA): Identity now carries the KEY it binds (the erased index is restored). `subject: null` — the MINIMAL NameBound proves ONLY that doc_key_id is name-bound in the domain, NOT that it produced any subject document; the producer-binding premise (subject ≠ null) is the reserved TOP-tier realization (UST-48p).
     }
     case 'Anchored': {
       const a = wit(0); if (a.err) return bad(a.err);
@@ -649,9 +649,16 @@ function checkTermInner(node, C, W, memo, km) {
       if (!T.j || T.j.kind !== 'Time') return T.j ? bad('child 2 must be Time') : T;
       if (I.j.s !== F.j.s || F.j.s !== T.j.s) return bad('assurance premises span different scopes');
       if (F.j.q !== T.j.q) return bad('freshness and time speak about different subjects (subject unification, P1-03)');
+      // round-15 P0-01 (F.5.0 / A(d)): the AssuranceState A(d) is a PRODUCT of coordinates of ONE document d, and the tier
+      // projection Π is defined ONLY on that single-document tuple. Identity, Freshness and Time must therefore all speak
+      // about the SAME subject — sharing a domain scope is not enough. The minimal NameBound proves key-binding but not
+      // that its key PRODUCED subject q (I.subject stays null), so stitching it here would form a CROSS-DOCUMENT product
+      // (IdentityStrength(d′), FreshnessStrength(d), TimeStrength(d)) that is not in 𝓐. Fail closed until the TOP-tier
+      // realization (UST-48p) gives NameBound the producer premise to bind I.subject = the subject its key authored.
+      if (I.j.subject === null || I.j.subject !== F.j.q) return ind('identity not bound to the assured subject: A(d)/F.5.0 requires one document across Identity/Freshness/Time — NameBound proves key-binding, not that its key produced subject q (subject-production binding = TOP-tier realization, UST-48p)');
       const tier = (I.j.rung === 'authoritative' && T.j.rung === 'anchored') ? 'TOP' : (I.j.rung === 'authoritative' || I.j.rung === 'corroborated') ? 'HIGH' : 'LIGHT';
       const freshness = { base: F.j.base, anti_equivocation: { quorum: F.j.aeq.quorum || null, map: F.j.aeq.map || null } };
-      return { j: { kind: 'Assurance', scope_id: I.j.s, subject: F.j.q, tier, identity: I.j.rung, time: T.j.rung, freshness, support: [...new Set([...F.j.support, ...I.j.caps])].sort() } };
+      return { j: { kind: 'Assurance', scope_id: I.j.s, subject: F.j.q, identity_key: I.j.key, tier, identity: I.j.rung, time: T.j.rung, freshness, support: [...new Set([...F.j.support, ...I.j.caps])].sort() } };   // identity_key carried (M-REL: the bound key is an index of the Assurance, no longer erased)
     }
     default: return bad('unreachable');
   }

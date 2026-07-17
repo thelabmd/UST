@@ -173,6 +173,23 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   check('revocation U < C → pre-compromise accepted (suspect)', (r => r.strength === 'authoritative' && r.status === 'suspect')(P.resolveAuthority(docK, { genesis: gen, keylog: [add, rev], ...nfe(gen), anchorTime: '2026-06-28T14:59:59Z' })));
   const revBad = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1903', key_id: G.key_id }, T, { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: '2026-06-28T15:00:00.5Z' }, P.contentHash(add)));
   check('fractional compromised_since → E-MALFORMED (strict-Z, §12.2)', P.resolveAuthority(docK, { genesis: gen, keylog: [add, revBad], anchorTime: C }).error === 'E-MALFORMED');
+  // round-15 P1-01 — compromised_since must be a REAL calendar instant: "9999-99-99T99:99:99Z" matches the regex but is
+  // not a date; the string-compare U ≥ C then always failed, silently downgrading the E-KEY containment to suspect.
+  const revFake = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1905', key_id: G.key_id }, T, { op: 'revoke', pub: K.pubB64, reason: 'compromised', compromised_since: '9999-99-99T99:99:99Z' }, P.contentHash(add)));
+  check('P1-01 compromised_since "9999-99-99T99:99:99Z" (shape-valid, not a real time) → E-MALFORMED', P.resolveKeys(gen, [add, revFake]).error === 'E-MALFORMED');
+  // round-15 P0-03 — the single-domain key-log invariant lives IN the reducer (not only the NameBound caller): resolveAuthority
+  // consumes resolveKeys directly, so a foreign-domain class:key entry must be rejected by the reducer itself.
+  const foreignAdd = signG(P.buildKeyLogEntry({ domain_shard: 'evil.example', ust_id: 'ust:20260628.1904', key_id: G.key_id }, T, { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(gen)));
+  check('P0-03 resolveKeys rejects a foreign-domain key-log entry (reducer is a TCB unit, sound in isolation)', P.resolveKeys(gen, [foreignAdd]).error === 'E-KEY');
+  // round-15 P0-02 — a key's lifetime is a SET of authorization windows (two-sided K_n(t)). add→retire→re-add→retire: a doc
+  // anchored in the FIRST retired GAP must be EXPIRED. Scalar first/last collapsed the two windows → the gap doc wrongly passed.
+  const Tt = (g) => ({ generated_at: g, valid_from: g, valid_to: '2026-06-28T15:00:00Z' });
+  const kAdd1 = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1911', key_id: G.key_id }, Tt('2026-06-28T14:00:00Z'), { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(gen)));
+  const kRet1 = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1912', key_id: G.key_id }, Tt('2026-06-28T14:10:00Z'), { op: 'revoke', pub: K.pubB64, reason: 'retired' }, P.contentHash(kAdd1)));
+  const kAdd2 = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1913', key_id: G.key_id }, Tt('2026-06-28T14:20:00Z'), { op: 'add', pub: K.pubB64, new_key_id: K.key_id }, P.contentHash(kRet1)));
+  const kRet2 = signG(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260628.1914', key_id: G.key_id }, Tt('2026-06-28T14:30:00Z'), { op: 'revoke', pub: K.pubB64, reason: 'retired' }, P.contentHash(kAdd2)));
+  check('P0-02 doc anchored in a retired GAP (add→retire→re-add→retire) → expired, not authoritative (interval collapse closed)', (r => r.status === 'expired' && r.strength === 'self-asserted')(P.resolveAuthority(docK, { genesis: gen, keylog: [kAdd1, kRet1, kAdd2, kRet2], ...nfe(gen), anchorTime: '2026-06-28T14:15:00Z' })));
+  check('P0-02 doc anchored AFTER the re-add (second window) → still authoritative (the fix does not over-reject)', (r => r.strength === 'authoritative')(P.resolveAuthority(docK, { genesis: gen, keylog: [kAdd1, kRet1, kAdd2], ...nfe(gen), anchorTime: '2026-06-28T14:25:00Z' })));
   // ─── #45 F.5b DOWNGRADE RESISTANCE — requireAnchored is the symmetric floor to requireAuthoritative. Stripping
   //     the anchor can only LOWER the tier; a TOP-needing consumer REJECTS, never silently accepts a lower tier.
   const anchorSV = () => ({ final: true, time: '2027-01-01T00:00:00Z' });

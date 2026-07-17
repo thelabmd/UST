@@ -488,6 +488,16 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   const r = checkAuthorityProof({ term: node('Corroborated', [πChain, pc, πTarget, node('AfterOrder', [pc, πTarget])], [tW]), witnesses }, CFG);
   check('ORDER coordinate canonical (round-14 P1-01): pow position "00" (leading zero) → INVALID (facts not typed), not typed Evidence', r.result === 'INVALID' && /facts not typed|facts/.test(r.reason));
 }
+// round-15 P1-02 — an oversize package/config is rejected from the intrinsic byteLength BEFORE the snapshot copy (no
+// multi-MiB copy of bytes that are rejected on the very next line). In-memory, not a committed artifact.
+{
+  const oversizePkg = new Uint8Array((1 << 22) + 8);   // > 4 MiB maxPackageBytes
+  const oversizeCfg = new Uint8Array((1 << 20) + 8);   // > 1 MiB maxConfigBytes
+  const rp = checkAuthorityProofBytes(oversizePkg, new Uint8Array([123]));
+  const rc = checkAuthorityProofBytes(new Uint8Array([49]), oversizeCfg);
+  check('P1-02 oversize package → INVALID E-PACKAGE-SIZE (from byteLength, before the copy)', rp.result === 'INVALID' && /E-PACKAGE-SIZE/.test(rp.reason));
+  check('P1-02 oversize config → INVALID E-CONFIG-SIZE (from byteLength, before the copy)', rc.result === 'INVALID' && /E-CONFIG-SIZE/.test(rc.reason));
+}
 
 console.log('\n  reference-checker vectors (' + (typeof pass === 'number' ? '' : '') + 'L1)   PASS ' + pass + '   FAIL ' + fail);
 if (fails.length) { fails.forEach((f) => console.log('    ✗ ' + f)); process.exit(1); }

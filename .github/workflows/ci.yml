@@ -15,6 +15,8 @@ jobs:
       - run: npm install
       - name: protocol conformance + language-neutral arc contract (spec == package == vectors)
         run: npm test
+      - name: reference checker TCB — byte-vector corpus + coverage manifest (regenerate == committed) + JS asserts + robustness fuzz
+        run: npm run test:byte-vectors && npm run test:reference-checker && npm run test:reference-checker-fuzz
       - name: model <-> code guard (every formal theorem is a real conformance check)
         run: npm run test:model
       - name: language-neutral vectors in sync with the reference impl (regenerate == committed)
