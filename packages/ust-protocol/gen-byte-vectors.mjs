@@ -111,7 +111,7 @@ add('package.params-empty', 'an explicit params:{} node — a second wire form o
 add('term.missing-param', 'Anchored with required s/subject omitted', b64u(canonPkg(N('Anchored', [], [put(rc('ust:x', 1))]))), CFG, { result: 'INVALID', code: 'E-TERM-PARAM-MISSING' });
 // cluster I (M-CONFIG P0-03): a trust domain is a typed VALUE — object domains are not typed strings, so they do not
 // resolve and the quorum cannot be met (two structurally-identical objects never count as two distinct domains).
-add('quorum.domain-object', 'object-valued trust domains do not resolve (ControlDomain is a string)', b64u(canonPkg(πWit)), { ...CFG, domains: { [Wa.key_id]: { id: 'same' }, [Wb.key_id]: { id: 'same' } } }, { result: 'INDETERMINATE', code: 'quorum not met' });
+add('quorum.domain-object', 'object-valued trust domains are rejected at config decode (ControlDomain is a typed string)', b64u(canonPkg(πWit)), { ...CFG, domains: { [Wa.key_id]: { id: 'same' }, [Wb.key_id]: { id: 'same' } } }, { result: 'INVALID', code: 'E-CONFIG-DOMAIN' });
 
 // rev5 round-8 — leaf totality (alg envelope), closed config schema, typed witnesses.
 const algBad = (rcpt) => { const c = JSON.parse(JSON.stringify(rcpt)); c.sig.alg = 'NOT-ED25519'; return c; };
@@ -123,6 +123,17 @@ V.push({ id: 'config.threshold-string', note: 'policy.uniqueness_threshold as a 
 add('witness.namebound-object', 'NameBound key-log witness that is an object, not an array', b64u(canonPkg(N('NameBound', [πG], [put({ not: 'array' })], { doc_key_id: G.key_id }))), CFG, { result: 'INVALID', code: 'array' });
 const rcExtraW = put((() => { const c = JSON.parse(JSON.stringify(rc(head, 900))); c.__extra = 'x'; return c; })()), πCX = N('ConnectorEvidence', [πG], [rcExtraW], { subject: head });
 add('witness.receipt-extra-field', 'a receipt witness with an unknown outer field', b64u(canonPkg(N('Corroborated', [πChain, πCX, πT, N('AfterOrder', [πCX, πT])], [put(term)]))), CFG, { result: 'INVALID', code: 'unknown field' });
+
+// rev6 round-9 — typed witnesses for ALL kinds + a total/typed/closed config ADT.
+const c0x = (() => { const c = JSON.parse(JSON.stringify(C0)); c.__extra = 'x'; return c; })();
+add('witness.checkpoint-extra', 'a checkpoint witness with an unknown outer field', b64u(canonPkg(N('CheckpointZero', [πG], [put(c0x)]))), CFG, { result: 'INVALID', code: 'checkpoint witness must be exactly' });
+const termX = { headProof: kl.headProof, __extra: 'x' };
+add('witness.terminality-extra', 'a terminality witness with an unknown field', b64u(canonPkg(N('Corroborated', [πChain, πC, πT, πAfter], [put(termX)]))), CFG, { result: 'INVALID', code: 'terminality witness must be exactly' });
+const uaX = (W) => { const a = JSON.parse(JSON.stringify(ua(W))); a.claim.__x = 'x'; return a; };   // extra CLAIM field (would forge a distinct claim)
+add('witness.attestation-extra-claim', 'a uniqueness attestation whose claim has an extra field is not admitted', b64u(canonPkg(N('ReinforceQuorum', [πCorr, N('QuorumAgreement', [πChain], [put(uaX(Wa)), put(uaX(Wb))])]))), CFG, { result: 'INDETERMINATE', code: 'quorum not met' });
+V.push({ id: 'config.connector-string', note: 'a connector value that is a string, not an object', package_b64url: b64u(canonPkg(πCorr)), config_b64url: b64u(canonJSON({ ...CFG, connectors: { [KC.key_id]: 'not-an-object' } })), expected: { result: 'INVALID', code: 'E-CONFIG-CONNECTOR' } });
+V.push({ id: 'config.policy-array', note: 'policy is an array, not an object', package_b64url: b64u(canonPkg(πCorr)), config_b64url: b64u(canonJSON({ ...CFG, policy: ['x'] })), expected: { result: 'INVALID', code: 'E-CONFIG-POLICY' } });
+V.push({ id: 'config.apk-unsorted', note: 'allowed_proof_kinds not sorted/de-duplicated', package_b64url: b64u(canonPkg(πCorr)), config_b64url: b64u(canonJSON({ ...CFG, connectors: { [KC.key_id]: { pub: KC.pub, trust_domain: 'x', allowed_proof_kinds: ['rfc3161-tsa', 'pow-header-chain'] } } })), expected: { result: 'INVALID', code: 'E-CONFIG-APK' } });
 
 // ── security-condition coverage manifest (owner completion criterion 8) ──────────────────────────────────────────────
 const MANIFEST = {
@@ -147,6 +158,8 @@ const MANIFEST = {
     { id: 'SIG-ALG-ENVELOPE', rule: 'ConnectorEvidence/QuorumAgreement', negative_vectors: ['key.receipt-alg', 'key.vote-alg'] },
     { id: 'CONFIG-CLOSED-SCHEMA', rule: 'normalizeConfig', negative_vectors: ['config.unknown-field', 'config.threshold-string'] },
     { id: 'TYPED-WITNESS', rule: 'NameBound/ConnectorEvidence', negative_vectors: ['witness.namebound-object', 'witness.receipt-extra-field'] },
+    { id: 'TYPED-WITNESS-ALL-KINDS', rule: 'CheckpointZero/Corroborated/QuorumAgreement', negative_vectors: ['witness.checkpoint-extra', 'witness.terminality-extra', 'witness.attestation-extra-claim'] },
+    { id: 'CONFIG-TOTAL-TYPED', rule: 'normalizeConfig', negative_vectors: ['config.connector-string', 'config.policy-array', 'config.apk-unsorted'] },
   ],
   note_positive_shape: 'Positive-shape / arg-dependent invariants (config_id set-order equality P1-07; limits-getter totality P1-01; Uint8Array-only P2-01; single-read reads===1; carrier separation; permutation invariance) are covered by JS property tests in reference-checker.test.mjs, not negative byte-vectors — the {result,code} byte form cannot express a positive equality or a non-bytes input.',
 };

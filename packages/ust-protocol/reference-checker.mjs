@@ -16,7 +16,7 @@ import { canon, H, keyId, edVerifyStrict, contentHash, verify, isValid, verifyKe
   verifyCheckpointMapUniqueness, evidenceCaps, compareEvidenceOrder, authorityScopeId, genesisEpoch,
   resolveKeys, buildKeylogCommitment, authorityCheckpointId, strictB64url } from './index.mjs';
 
-export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev5';
+export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev6';
 // RULE_CONTRACTS (§2b) — the STRUCTURAL source of truth: exactly one inference rule per name, one switch branch per
 // name, and a fixed (children arity, witness count, allowed params, conclusion kind). DecodeTerm enforces these on
 // decode; a term with an extra child / extra witness / free param / unknown field / stored conclusion is rejected
@@ -52,6 +52,9 @@ const decodeSeq = (x) => (typeof x === 'string' && /^(0|[1-9][0-9]*)$/.test(x)) 
   : (typeof x === 'number' && Number.isInteger(x) && x >= 0 ? String(x) : null);
 const seqSucc = (s) => (BigInt(s) + 1n).toString();   // CanonicalSeq successor via BigInt — Number() is forbidden in the TCB (M-SEQ, P0-04)
 const strictPub = (p) => strictB64url(p, 32) !== null;   // Pub32: canonical unpadded base64url of exactly 32 bytes (P1-04)
+// typed witness envelope: EXACTLY these keys, no extras (round-9 P0-04) — a validly-signed inner claim/body cannot smuggle
+// an extra outer field the signature does not cover, and an attestation cannot forge a distinct claim at one coordinate.
+const exactKeys = (o, ...keys) => o !== null && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).length === keys.length && keys.every((k) => Object.prototype.hasOwnProperty.call(o, k));
 // §2 byte-semantics: read a caller value EXACTLY ONCE into an inert internal value. The counting replacer fires each
 // getter once and BOUNDS the read, so a cyclic or exponentially-shared object graph is rejected (not OOM); JSON.parse
 // then yields an own-data-only tree with no getters/prototype/proxy. After this the caller object is never read again.
@@ -64,29 +67,48 @@ function inertRead(v, bound) {
 }
 
 // ── config normalization (total; §8/§10) — C is a WORLD PARAMETER, never in the term ──────────────────────────────
+const isPlain = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);   // a JSON object, never an array/null (round-9 P0-05)
+const sortedSet = (a) => JSON.stringify([...new Set(a)].sort()) === JSON.stringify(a);   // already sorted + de-duplicated as supplied (round-9 P1-01)
+// DecodeConfig — a TOTAL, TYPED, CLOSED, CANONICAL config ADT. Never throws (every malformed input → a stable E-CONFIG,
+// round-9 P1-02); each sub-object must be a plain object of the exact typed shape (an array no longer passes `typeof
+// object`, P0-05); set-valued fields must be supplied sorted + de-duplicated (P1-01); unknown fields (top-level AND
+// nested) are rejected. config_id is over the validated canonical form (string leaves only → canon never throws).
 function normalizeConfig(rawLive) {
-  // §2/§8 byte-semantics: snapshot the consumer config ONCE into an inert first-order value, then read only that —
-  // kills a config that mutates or resolves via getters between reads (P1-05). config_id is computed over the snapshot.
   const ci = inertRead(rawLive, 1 << 16);
   if (ci.err) return { err: 'config is ' + ci.err };
   const raw = ci.v;
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { err: 'config must be an object' };
-  for (const k of Object.keys(raw)) if (k !== 'connectors' && k !== 'mapRoots' && k !== 'domains' && k !== 'witnesses' && k !== 'policy') return { err: 'E-CONFIG-FIELD:' + k };   // closed schema — an unknown field is rejected, not silently dropped (round-8 P0-03)
-  const connectors = raw.connectors && typeof raw.connectors === 'object' ? raw.connectors : {};
-  const mapRoots = Array.isArray(raw.mapRoots) ? raw.mapRoots.filter(isHash) : [];
-  const domains = Object.fromEntries(Object.entries(raw.domains && typeof raw.domains === 'object' ? raw.domains : {}).filter(([, v]) => typeof v === 'string'));   // ControlDomain is a typed STRING — quorum distinctness is by VALUE, not JS object reference (P0-03)
-  const witnesses = raw.witnesses && typeof raw.witnesses === 'object' ? raw.witnesses : {};
-  const policy = raw.policy && typeof raw.policy === 'object' ? raw.policy : {};
-  if (policy.uniqueness_threshold !== undefined && !(Number.isInteger(policy.uniqueness_threshold) && policy.uniqueness_threshold >= 1)) return { err: 'E-CONFIG-THRESHOLD' };   // integer only — a string "999" is rejected, not silently defaulted to 2 (round-8 P0-03)
+  if (!isPlain(raw)) return { err: 'E-CONFIG-SHAPE' };
+  for (const k of Object.keys(raw)) if (k !== 'connectors' && k !== 'mapRoots' && k !== 'domains' && k !== 'witnesses' && k !== 'policy') return { err: 'E-CONFIG-FIELD:' + k };
+  if (raw.$1 != null && !isPlain(raw.connectors)) return { err: 'E-CONFIG-CONNECTORS' };
+  const connectors = raw.connectors ?? {};
+  for (const k of Object.keys(connectors)) {
+    const v = connectors[k];
+    if (!isPlain(v)) return { err: 'E-CONFIG-CONNECTOR:' + k };
+    for (const ck of Object.keys(v)) if (ck !== 'pub' && ck !== 'allowed_proof_kinds' && ck !== 'trust_domain') return { err: 'E-CONFIG-CONNECTOR-FIELD:' + ck };
+    if (!strictPub(v.pub)) return { err: 'E-CONFIG-CONNECTOR-PUB:' + k };
+    if (!Array.isArray(v.allowed_proof_kinds) || !v.allowed_proof_kinds.every((x) => typeof x === 'string') || !sortedSet(v.allowed_proof_kinds)) return { err: 'E-CONFIG-APK:' + k };
+    if (v.trust_domain !== undefined && typeof v.trust_domain !== 'string') return { err: 'E-CONFIG-TRUST-DOMAIN:' + k };
+  }
+  if (raw.mapRoots != null && !Array.isArray(raw.mapRoots)) return { err: 'E-CONFIG-MAPROOTS' };
+  const mapRoots = raw.mapRoots ?? [];
+  if (!mapRoots.every(isHash) || !sortedSet(mapRoots)) return { err: 'E-CONFIG-MAPROOTS' };
+  if (raw.$1 != null && !isPlain(raw.domains)) return { err: 'E-CONFIG-DOMAINS' };
+  const domains = raw.domains ?? {};
+  for (const k of Object.keys(domains)) if (typeof domains[k] !== 'string') return { err: 'E-CONFIG-DOMAIN:' + k };   // ControlDomain is a typed STRING (P0-03)
+  if (raw.$1 != null && !isPlain(raw.witnesses)) return { err: 'E-CONFIG-WITNESSES' };
+  const witnesses = raw.witnesses ?? {};
+  for (const k of Object.keys(witnesses)) if (!strictPub(witnesses[k])) return { err: 'E-CONFIG-WITNESS:' + k };   // each witness value is a Pub32
+  if (raw.$1 != null && !isPlain(raw.policy)) return { err: 'E-CONFIG-POLICY' };   // an array/string policy is rejected, never silently defaulted (P0-05)
+  const policy = raw.policy ?? {};
+  for (const k of Object.keys(policy)) if (k !== 'uniqueness_threshold' && k !== 'allowExperimentalAttested') return { err: 'E-CONFIG-POLICY-FIELD:' + k };
+  if (policy.uniqueness_threshold !== undefined && !(Number.isInteger(policy.uniqueness_threshold) && policy.uniqueness_threshold >= 1)) return { err: 'E-CONFIG-THRESHOLD' };
+  if (policy.allowExperimentalAttested !== undefined && typeof policy.allowExperimentalAttested !== 'boolean') return { err: 'E-CONFIG-POLICY-FLAG' };
   const uniqueness_threshold = policy.uniqueness_threshold ?? 2;
   const C = Object.freeze({ connectors, mapRoots, domains, witnesses,
     policy: Object.freeze({ uniqueness_threshold, allowExperimentalAttested: policy.allowExperimentalAttested === true }) });
-  // config_id is EXTENSIONAL over every trust-sensitive VALUE (M-CONFIG, P1-02): connector public keys, allowed proof
-  // kinds, trust domains, the full witness key→pub map (VALUES, not just names), domain map, map roots, thresholds.
-  // Changing any witness pub at the same key_id changes config_id. canon canonicalizes (sorted keys, string leaves).
   const config_id = H('ust:consumer-config', canon({
-    connectors: Object.fromEntries(Object.entries(connectors).map(([k, v]) => [k, { pub: v.pub, allowed_proof_kinds: [...new Set(Array.isArray(v.allowed_proof_kinds) ? v.allowed_proof_kinds : [])].sort(), ...(v.trust_domain !== undefined ? { trust_domain: v.trust_domain } : {}) }])),   // allowed_proof_kinds set-normalized (P1-07)
-    mapRoots: [...new Set(mapRoots)].sort(), domains, witnesses,   // map roots de-duplicated as a SET (round-8 P1-02)
+    connectors: Object.fromEntries(Object.entries(connectors).map(([k, v]) => [k, { pub: v.pub, allowed_proof_kinds: v.allowed_proof_kinds, ...(v.trust_domain !== undefined ? { trust_domain: v.trust_domain } : {}) }])),
+    mapRoots, domains, witnesses,
     policy: { uniqueness_threshold: String(uniqueness_threshold), allowExperimentalAttested: C.policy.allowExperimentalAttested ? '1' : '0' } }));
   return { C, config_id };
 }
@@ -98,13 +120,14 @@ const TEXT_DEC = new TextDecoder('utf-8', { fatal: true });   // invalid UTF-8 t
 // it on a Proxy (which has no such slot) THROWS. That distinguishes a NATIVE Uint8Array from a Proxy/subclass that only
 // passes `instanceof` (round-8 P0-01).
 const TA_BYTELENGTH = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteLength').get;
+const TA_BUFFER = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'buffer').get;   // intrinsic buffer getter — bypasses any overridden accessor (round-9 P0-01)
 // SnapshotBytes: accept ONLY a native Uint8Array (Uint8Array only, no string; a Proxy is rejected because the intrinsic
 // getter throws), reject SharedArrayBuffer-backed views, and copy into a fresh immutable buffer. Once native is proven,
 // `.buffer`/`.set` are trap-free. The theorem begins here.
 function snapshotBytes(input) {
-  if (!(input instanceof Uint8Array)) return { error: 'E-BYTES-TYPE' };
-  let len; try { len = TA_BYTELENGTH.call(input); } catch { return { error: 'E-BYTES-TYPE' }; }   // native-only: a Proxy has no internal slot → throws
-  if (typeof SharedArrayBuffer !== 'undefined' && input.buffer instanceof SharedArrayBuffer) return { error: 'E-BYTES-SHARED' };
+  if (!(input instanceof Uint8Array) || Object.getPrototypeOf(input) !== Uint8Array.prototype) return { error: 'E-BYTES-TYPE' };   // EXACT native Uint8Array — a subclass (its proto differs) or Proxy is rejected (round-9 P0-01)
+  let len, buf; try { len = TA_BYTELENGTH.call(input); buf = TA_BUFFER.call(input); } catch { return { error: 'E-BYTES-TYPE' }; }   // intrinsic getters, never an overridden accessor
+  if (typeof SharedArrayBuffer !== 'undefined' && buf instanceof SharedArrayBuffer) return { error: 'E-BYTES-SHARED' };
   const copy = new Uint8Array(len); copy.set(input); return { bytes: copy };
 }
 // DecodeTerm (§2b, M-DEC): build the closed Term ADT strictly to each RULE_CONTRACTS entry — exact children arity, exact
@@ -251,6 +274,7 @@ function checkTermInner(node, C, W, memo) {
     case 'CheckpointZero': {
       const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
       const c = wit(0); if (c.err) return bad(c.err);
+      if (!exactKeys(c.w, 'body', 'sig')) return bad('checkpoint witness must be exactly { body, sig } (typed witness, round-9 P0-04)');
       const b = c.w.body;
       if (!b || b.purpose !== 'ust:authority-checkpoint' || decodeSeq(b.sequence) !== '0' || b.previous_checkpoint !== undefined || b.previous_epoch_final_checkpoint !== undefined) return bad('C0 must be a seq-0 checkpoint with no previous links');
       const sc = scopeOk(b, G.j); if (sc) return bad(sc);
@@ -264,6 +288,7 @@ function checkTermInner(node, C, W, memo) {
     case 'CheckpointStep': {
       const CH = sub(0); if (!CH.j || CH.j.kind !== 'Chain') return CH.j ? bad('child 0 must be Chain') : CH;
       const c = wit(0); if (c.err) return bad(c.err);
+      if (!exactKeys(c.w, 'body', 'sig')) return bad('checkpoint witness must be exactly { body, sig } (typed witness, round-9 P0-04)');
       const b = c.w.body, prev = CH.j;
       if (!b || b.purpose !== 'ust:authority-checkpoint') return bad('not an authority checkpoint');
       if (decodeSeq(b.sequence) !== seqSucc(prev.n)) return bad('sequence ≠ prev+1');
@@ -317,6 +342,7 @@ function checkTermInner(node, C, W, memo) {
       if (!TG.j || TG.j.kind !== 'Evidence') return TG.j ? bad('child 2 must be Evidence (target anchor)') : TG;
       if (!AF.j || AF.j.kind !== 'After') return AF.j ? bad('child 3 must be After') : AF;
       const tm = wit(0); if (tm.err) return bad(tm.err);                                 // terminality of the HEAD key-log
+      if (!exactKeys(tm.w, 'headProof')) return bad('terminality witness must be exactly { headProof } (typed witness, round-9 P0-04)');
       if (!verifyKeylogTerminality(CH.j.keylog, tm.w).terminal) return ind('key-log head terminality not proven');
       const s = CH.j.s;
       if (CM.j.s !== s || TG.j.s !== s || AF.j.s !== s) return bad('scope mismatch across freshness premises (cross-scope)');
@@ -331,6 +357,7 @@ function checkTermInner(node, C, W, memo) {
       // free checkpoint coordinate a term could pick, so P0-02 is closed STRUCTURALLY (not "non-canonical → caught").
       const CH = sub(0); if (!CH.j || CH.j.kind !== 'Chain') return CH.j ? bad('child 0 must be Chain (coordinate provenance)') : CH;
       const m = wit(0); if (m.err) return bad(m.err);
+      if (!exactKeys(m.w, 'proof', 'mapRoot')) return bad('map-uniqueness witness must be exactly { proof, mapRoot } (typed witness, round-9 P0-04)');
       const { proof, mapRoot } = m.w;
       if (!C.mapRoots.includes(mapRoot)) return ind('map root is not consumer-admitted (ρ ∉ C.mapRoots)');
       const u = verifyCheckpointMapUniqueness(proof, { domain_shard: CH.j.domain, genesis_epoch: CH.j.genesis_epoch, sequence: String(CH.j.n), checkpoint: CH.j.head_id, mapRoot });
@@ -350,6 +377,8 @@ function checkTermInner(node, C, W, memo) {
       for (const wid of wt) {
         const a = W(wid); if (a.err) continue;
         const { claim, issuer_id, sig } = a.w || {};
+        if (!exactKeys(a.w, 'claim', 'issuer_id', 'sig')) continue;                    // typed attestation envelope (round-9 P0-04)
+        if (!exactKeys(claim, 'purpose', 'domain_shard', 'genesis_epoch', 'sequence', 'checkpoint')) continue;   // typed claim — no extra field can forge a DISTINCT claim at one coordinate (round-9 P0-02)
         if (!claim || !sig || claim.purpose !== 'ust:checkpoint-uniqueness-attestation') continue;
         if ('trust_domain' in claim || 'issuer_id' in claim) continue;               // no self-declared independence
         if (claim.domain_shard !== CH.j.domain) continue;                            // attested checkpoint must be in the chain domain (§2.y, P0-03)
@@ -374,7 +403,9 @@ function checkTermInner(node, C, W, memo) {
       if (!F.j || F.j.kind !== 'Freshness') return F.j ? bad('child 0 must be Freshness') : F;
       if (!M.j || M.j.kind !== 'MapUnique') return M.j ? bad('child 1 must be MapUnique') : M;
       if (F.j.s !== M.j.s || F.j.n !== M.j.n || F.j.h !== M.j.h) return bad('MapUnique does not unify with the freshness (s,n,h)');
-      return { j: { ...F.j, aeq: { ...F.j.aeq, map: { root: M.j.rho } } } };   // aeq ONLY; EvidenceSupport unchanged — carriers are disjoint (M-SEP, P0-05)
+      const priorM = F.j.aeq.map;   // conservation (M-SEP, round-9 P0-03): union map roots across reinforcements, never overwrite
+      const roots = priorM ? [...new Set([...(priorM.roots || []), M.j.rho])].sort() : [M.j.rho];
+      return { j: { ...F.j, aeq: { ...F.j.aeq, map: { roots } } } };   // aeq ONLY; EvidenceSupport unchanged (M-SEP)
     }
     case 'ReinforceQuorum': {
       const F = sub(0), Q = sub(1);
@@ -390,6 +421,7 @@ function checkTermInner(node, C, W, memo) {
     case 'FutureGenesisCommitment': {
       const CH = sub(0); if (!CH.j || CH.j.kind !== 'Chain') return CH.j ? bad('child 0 must be Chain (epoch A)') : CH;
       const cm = wit(0); if (cm.err) return bad(cm.err);
+      if (!exactKeys(cm.w, 'claim', 'sig')) return bad('epoch-transition witness must be exactly { claim, sig } (typed witness, round-9 P0-04)');
       const { claim, sig } = cm.w;
       if (!claim || claim.purpose !== 'ust:genesis-epoch-transition') return bad('not an epoch-transition commitment');
       if (!isHash(claim.to_active_genesis)) return bad('commitment lacks a target genesis hash');
@@ -411,6 +443,7 @@ function checkTermInner(node, C, W, memo) {
       // EpochActivated cannot come from signer+hash equality alone — the epoch-B INITIAL checkpoint C0_B must be verified
       // under the epoch-B genesis authority and bound to the epoch-A final checkpoint at the committed sequence (P0-04).
       const c = wit(0); if (c.err) return bad('epoch-B initial checkpoint (C0_B) witness required: ' + c.err);
+      if (!exactKeys(c.w, 'body', 'sig')) return bad('checkpoint witness must be exactly { body, sig } (typed witness, round-9 P0-04)');
       const b = c.w.body;
       if (!b || b.purpose !== 'ust:authority-checkpoint') return bad('C0_B is not an authority checkpoint');
       if (b.previous_checkpoint !== undefined) return bad('C0_B must not carry a same-epoch previous_checkpoint');

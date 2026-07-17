@@ -334,9 +334,9 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
 // P1-07 config_id extensional over the SET: reversing allowed_proof_kinds leaves the effective config, and config_id, unchanged.
 {
   const mk = (kinds) => ({ connectors: { [KC.key_id]: { pub: KC.pub, trust_domain: 'btc-watch', allowed_proof_kinds: kinds } }, policy: { uniqueness_threshold: 2 } });
-  const r1 = checkAuthorityProof({ term: πCorr, witnesses }, mk(['pow-header-chain', 'transparency-log', 'rfc3161-tsa']));
-  const r2 = checkAuthorityProof({ term: πCorr, witnesses }, mk(['rfc3161-tsa', 'transparency-log', 'pow-header-chain']));
-  check('CONFIG set-order (P1-07): reversing allowed_proof_kinds → SAME config_id (extensional over the set)', r1.result === 'VALID' && r2.result === 'VALID' && r1.config_id === r2.config_id);
+  const r1 = checkAuthorityProof({ term: πCorr, witnesses }, mk(['pow-header-chain', 'rfc3161-tsa', 'transparency-log']));   // canonical (sorted)
+  const r2 = checkAuthorityProof({ term: πCorr, witnesses }, mk(['rfc3161-tsa', 'transparency-log', 'pow-header-chain']));   // non-canonical (unsorted)
+  check('CONFIG canonical set (P1-07/round-9): the sorted allowed_proof_kinds is accepted; a reversed (non-canonical) set is rejected', r1.result === 'VALID' && r2.result === 'INVALID' && /E-CONFIG-APK/.test(r2.reason));
 }
 // P1-01 limits totality: a Proxy/getter `limits` is read (numeric fields, after the byte snapshots, inside try) → never
 // throws uncaught, never mutates a buffer pre-snapshot. P2-01: the bytes API takes Uint8Array only (a string → E-BYTES-TYPE).
@@ -373,7 +373,7 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   const rho = 'sha256:' + 'cd'.repeat(32);
   const r1 = checkAuthorityProof({ term: πCorr, witnesses }, { ...CFG, mapRoots: [rho] });
   const r2 = checkAuthorityProof({ term: πCorr, witnesses }, { ...CFG, mapRoots: [rho, rho] });
-  check('MAPROOTS set (P1-02): [rho] and [rho,rho] → SAME config_id', r1.result === 'VALID' && r1.config_id === r2.config_id);
+  check('MAPROOTS canonical (P1-02/round-9): [rho] accepted; [rho,rho] (duplicate) rejected', r1.result === 'VALID' && r2.result === 'INVALID' && /E-CONFIG-MAPROOTS/.test(r2.reason));
 }
 // P1-03 UTF-8 byte cap: a witness over the cap in BYTES (under it in UTF-16 code units) is rejected.
 {
@@ -381,6 +381,14 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   const wid = witnessId(big);
   const rr = checkAuthorityProofBytes(U8(P.canon({ term: { rule: 'Genesis', children: [], witnesses: [wid] }, witnesses: { [wid]: big } })), U8(canonJSON({ connectors: {} })));
   check('UTF-8 byte cap (P1-03): a witness over the cap in bytes (under in code units) → INVALID(E-WITNESS-SIZE)', rr.result === 'INVALID' && /E-WITNESS-SIZE/.test(rr.reason));
+}
+// ── rev6 round-9 — native EXACT Uint8Array (JS property test; a subclass passes instanceof but is rejected) ──
+{
+  class Sub extends Uint8Array { get buffer() { return super.buffer; } }
+  const real = U8(P.canon({ term: πCorr, witnesses }));
+  const sub = new Sub(real.length); sub.set(real);
+  const rr = checkAuthorityProofBytes(sub, U8(canonJSON(CFG)));
+  check('NATIVE exact (P0-01): a Uint8Array SUBCLASS (instanceof passes) → INVALID(E-BYTES-TYPE)', sub instanceof Uint8Array && rr.result === 'INVALID' && /E-BYTES-TYPE/.test(rr.reason));
 }
 
 console.log('\n  reference-checker vectors (' + (typeof pass === 'number' ? '' : '') + 'L1)   PASS ' + pass + '   FAIL ' + fail);
