@@ -28,9 +28,11 @@ key, a canonical form and a signature.
 
 ![Anatomy of a UST transcript — a self-contained signed JSON document: id (who + when), time frame, data partitions, domain-separated hashes, provenance links, Ed25519 signature. Seal at creation, store anywhere, verify offline.](.github/ust-anatomy.svg)
 
+## WHAT IS A REAL TRUTH IN AN AGENT WORLD?
+
 Trust is **graduated, and the verdict carries its tier** — a conforming verifier never says a bare `VALID`:
 
-![What is a real truth in an agent world? — the verdict ladder: VALID:LIGHT (key + canonical form + signature), VALID:HIGH (+ name provably bound to the key), VALID:TOP (+ existed by a real point in time). INVALID is a definite failure; INDETERMINATE is never conflated with forged; a tier is earned, no header claims it.](.github/ust-tiers.svg)
+![The verdict ladder — VALID:LIGHT (key + canonical form + signature), VALID:HIGH (+ name provably bound to the key), VALID:TOP (+ existed by a real point in time). INVALID is a definite failure; INDETERMINATE is never conflated with forged; a tier is earned, no header claims it.](.github/ust-tiers.svg)
 
 | verdict | what is proven |
 |---|---|

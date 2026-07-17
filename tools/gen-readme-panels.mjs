@@ -91,7 +91,7 @@ panel('ust-anatomy', 'A TRANSCRIPT — SELF-CONTAINED, VERIFIES ANYWHERE', (P) =
 });
 
 // ── 2. TIERS — the verdict ladder (each rung EARNED, the verdict carries its tier) ──
-panel('ust-tiers', 'WHAT IS A REAL TRUTH IN AN AGENT WORLD?', (P) => {
+panel('ust-tiers', 'TRUST IS GRADUATED — THE VERDICT CARRIES ITS TIER', (P) => {
   const cols = [
     { x: 24, top: 150, chip: 'VALID:LIGHT', c: TEXT, name: 'the floor — a key, canonical form, a signature', rows: ['exact bytes · signing key', 'claimed time frame', 'no infra · no fees'] },
     { x: 312, top: 110, chip: 'VALID:HIGH', c: VALUE, name: '+ the NAME is provably bound to the key', rows: ['genesis + key log ceremony', 'rotation / revocation', 'corroborated|authoritative'] },
