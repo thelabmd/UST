@@ -3,7 +3,7 @@
 
 **Verify machine-readable state without trusting whoever handed it to you.**
 
-> **Status: `1.0.0-rc.17` — a RELEASE CANDIDATE, not a final 1.0.** Multiple external AI reviews are folded in
+> **Status: `1.0.0-rc.36` — a RELEASE CANDIDATE, not a final 1.0.** Multiple external AI reviews are folded in
 > structurally; an independent human cryptographic audit is pending. Suitable for evaluation and integration
 > testing. Pin exact versions. The wire format `ust: "1.0"` is stable across rc's.
 
