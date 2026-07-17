@@ -350,6 +350,39 @@ const CFG = { ...CONN, witnesses: { [Wa.key_id]: Wa.pub, [Wb.key_id]: Wb.pub }, 
   check('LIMITS/BYTES totality (P1-01/P2-01): an ownKeys-trap limits never escapes (VALID); a string input → INVALID(E-BYTES-TYPE)', !threw && r.result === 'VALID' && rStr.result === 'INVALID' && /E-BYTES-TYPE/.test(rStr.reason));
 }
 
+// ── rev5 round-8 — total decode boundary + leaf totality (JS property tests) ──────────────────────────────────────────
+// P0-01 native bytes: a Proxy over Uint8Array passes instanceof but is rejected (the intrinsic byteLength getter throws).
+{
+  const real = U8(P.canon({ term: πCorr, witnesses }));
+  const proxy = new Proxy(real, { get(t, k, r) { return Reflect.get(t, k, r); } });
+  const rr = checkAuthorityProofBytes(proxy, U8(canonJSON(CFG)));
+  check('NATIVE bytes (P0-01): a Proxy over Uint8Array (instanceof passes) → INVALID(E-BYTES-TYPE)', proxy instanceof Uint8Array && rr.result === 'INVALID' && /E-BYTES-TYPE/.test(rr.reason));
+}
+// P0-05 conservation: two ReinforceQuorum UNION the basis — op-a is not erased by a later {op-b,op-c}.
+{
+  const Wc = kp('a3'.repeat(32));
+  const CFG3 = { ...CFG, witnesses: { ...CFG.witnesses, [Wc.key_id]: Wc.pub }, domains: { ...CFG.domains, [Wc.key_id]: 'op-c' } };
+  const q1 = node('QuorumAgreement', [πChain], [put(ua(Wa)), put(ua(Wb))]);
+  const q2 = node('QuorumAgreement', [πChain], [put(ua(Wb)), put(ua(Wc))]);
+  const rr = checkAuthorityProof({ term: node('ReinforceQuorum', [node('ReinforceQuorum', [πCorr, q1]), q2]), witnesses }, CFG3);
+  const d = rr.judgment && rr.judgment.aeq.quorum && rr.judgment.aeq.quorum.domains;
+  check('CONSERVATION (P0-05): double ReinforceQuorum unions the basis → {op-a,op-b,op-c}', rr.result === 'VALID' && JSON.stringify(d) === JSON.stringify(['op-a', 'op-b', 'op-c']));
+}
+// P1-02 mapRoots set: [rho] and [rho,rho] yield the SAME config_id (de-duplicated).
+{
+  const rho = 'sha256:' + 'cd'.repeat(32);
+  const r1 = checkAuthorityProof({ term: πCorr, witnesses }, { ...CFG, mapRoots: [rho] });
+  const r2 = checkAuthorityProof({ term: πCorr, witnesses }, { ...CFG, mapRoots: [rho, rho] });
+  check('MAPROOTS set (P1-02): [rho] and [rho,rho] → SAME config_id', r1.result === 'VALID' && r1.config_id === r2.config_id);
+}
+// P1-03 UTF-8 byte cap: a witness over the cap in BYTES (under it in UTF-16 code units) is rejected.
+{
+  const big = { p: '\u{1F600}'.repeat(300000) };   // ~0.6M code units, ~1.2MB UTF-8
+  const wid = witnessId(big);
+  const rr = checkAuthorityProofBytes(U8(P.canon({ term: { rule: 'Genesis', children: [], witnesses: [wid] }, witnesses: { [wid]: big } })), U8(canonJSON({ connectors: {} })));
+  check('UTF-8 byte cap (P1-03): a witness over the cap in bytes (under in code units) → INVALID(E-WITNESS-SIZE)', rr.result === 'INVALID' && /E-WITNESS-SIZE/.test(rr.reason));
+}
+
 console.log('\n  reference-checker vectors (' + (typeof pass === 'number' ? '' : '') + 'L1)   PASS ' + pass + '   FAIL ' + fail);
 if (fails.length) { fails.forEach((f) => console.log('    ✗ ' + f)); process.exit(1); }
 console.log('  ✓ check_C accepts a genuine corroborated proof; every past P0 is unbuildable or a structured reject');

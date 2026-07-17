@@ -113,6 +113,17 @@ add('term.missing-param', 'Anchored with required s/subject omitted', b64u(canon
 // resolve and the quorum cannot be met (two structurally-identical objects never count as two distinct domains).
 add('quorum.domain-object', 'object-valued trust domains do not resolve (ControlDomain is a string)', b64u(canonPkg(πWit)), { ...CFG, domains: { [Wa.key_id]: { id: 'same' }, [Wb.key_id]: { id: 'same' } } }, { result: 'INDETERMINATE', code: 'quorum not met' });
 
+// rev5 round-8 — leaf totality (alg envelope), closed config schema, typed witnesses.
+const algBad = (rcpt) => { const c = JSON.parse(JSON.stringify(rcpt)); c.sig.alg = 'NOT-ED25519'; return c; };
+const rcAlgW = put(algBad(rc(head, 900))), πCAlg = N('ConnectorEvidence', [πG], [rcAlgW], { subject: head });
+add('key.receipt-alg', 'a receipt whose sig.alg is not Ed25519 (valid sig bytes)', b64u(canonPkg(N('Corroborated', [πChain, πCAlg, πT, N('AfterOrder', [πCAlg, πT])], [put(term)]))), CFG, { result: 'INVALID', code: 'Ed25519' });
+add('key.vote-alg', 'a quorum vote with sig.alg not Ed25519 is not admitted', b64u(canonPkg(N('ReinforceQuorum', [πCorr, N('QuorumAgreement', [πChain], [put(algBad(ua(Wa))), put(ua(Wb))])]))), CFG, { result: 'INDETERMINATE', code: 'quorum not met' });
+V.push({ id: 'config.unknown-field', note: 'an unknown top-level config field', package_b64url: b64u(canonPkg(πCorr)), config_b64url: b64u(canonJSON({ ...CFG, __junk: 'x' })), expected: { result: 'INVALID', code: 'E-CONFIG-FIELD' } });
+V.push({ id: 'config.threshold-string', note: 'policy.uniqueness_threshold as a string is rejected, not silently defaulted', package_b64url: b64u(canonPkg(πCorr)), config_b64url: b64u(canonJSON({ ...CFG, policy: { uniqueness_threshold: '999' } })), expected: { result: 'INVALID', code: 'E-CONFIG-THRESHOLD' } });
+add('witness.namebound-object', 'NameBound key-log witness that is an object, not an array', b64u(canonPkg(N('NameBound', [πG], [put({ not: 'array' })], { doc_key_id: G.key_id }))), CFG, { result: 'INVALID', code: 'array' });
+const rcExtraW = put((() => { const c = JSON.parse(JSON.stringify(rc(head, 900))); c.__extra = 'x'; return c; })()), πCX = N('ConnectorEvidence', [πG], [rcExtraW], { subject: head });
+add('witness.receipt-extra-field', 'a receipt witness with an unknown outer field', b64u(canonPkg(N('Corroborated', [πChain, πCX, πT, N('AfterOrder', [πCX, πT])], [put(term)]))), CFG, { result: 'INVALID', code: 'unknown field' });
+
 // ── security-condition coverage manifest (owner completion criterion 8) ──────────────────────────────────────────────
 const MANIFEST = {
   note: 'Every security side-condition maps to ≥1 negative byte-vector; the runner asserts each vector exists and holds. In round-7 this feeds a mutation harness (remove the condition → the listed vector must start failing).',
@@ -133,6 +144,9 @@ const MANIFEST = {
     { id: 'PACKAGE-CLOSURE-DECODED-ADT', rule: 'decodePackage', negative_vectors: ['package.extra-field', 'package.params-empty'] },
     { id: 'TERM-REQUIRED-PARAMS', rule: 'decodeTerm', negative_vectors: ['term.missing-param'] },
     { id: 'QUORUM-DOMAIN-VALUE', rule: 'normalizeConfig/QuorumAgreement', negative_vectors: ['quorum.domain-object'] },
+    { id: 'SIG-ALG-ENVELOPE', rule: 'ConnectorEvidence/QuorumAgreement', negative_vectors: ['key.receipt-alg', 'key.vote-alg'] },
+    { id: 'CONFIG-CLOSED-SCHEMA', rule: 'normalizeConfig', negative_vectors: ['config.unknown-field', 'config.threshold-string'] },
+    { id: 'TYPED-WITNESS', rule: 'NameBound/ConnectorEvidence', negative_vectors: ['witness.namebound-object', 'witness.receipt-extra-field'] },
   ],
   note_positive_shape: 'Positive-shape / arg-dependent invariants (config_id set-order equality P1-07; limits-getter totality P1-01; Uint8Array-only P2-01; single-read reads===1; carrier separation; permutation invariance) are covered by JS property tests in reference-checker.test.mjs, not negative byte-vectors — the {result,code} byte form cannot express a positive equality or a non-bytes input.',
 };

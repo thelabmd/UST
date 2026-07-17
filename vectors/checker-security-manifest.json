@@ -120,6 +120,30 @@
       "negative_vectors": [
         "quorum.domain-object"
       ]
+    },
+    {
+      "id": "SIG-ALG-ENVELOPE",
+      "rule": "ConnectorEvidence/QuorumAgreement",
+      "negative_vectors": [
+        "key.receipt-alg",
+        "key.vote-alg"
+      ]
+    },
+    {
+      "id": "CONFIG-CLOSED-SCHEMA",
+      "rule": "normalizeConfig",
+      "negative_vectors": [
+        "config.unknown-field",
+        "config.threshold-string"
+      ]
+    },
+    {
+      "id": "TYPED-WITNESS",
+      "rule": "NameBound/ConnectorEvidence",
+      "negative_vectors": [
+        "witness.namebound-object",
+        "witness.receipt-extra-field"
+      ]
     }
   ],
   "note_positive_shape": "Positive-shape / arg-dependent invariants (config_id set-order equality P1-07; limits-getter totality P1-01; Uint8Array-only P2-01; single-read reads===1; carrier separation; permutation invariance) are covered by JS property tests in reference-checker.test.mjs, not negative byte-vectors — the {result,code} byte form cannot express a positive equality or a non-bytes input."

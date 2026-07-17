@@ -16,7 +16,7 @@ import { canon, H, keyId, edVerifyStrict, contentHash, verify, isValid, verifyKe
   verifyCheckpointMapUniqueness, evidenceCaps, compareEvidenceOrder, authorityScopeId, genesisEpoch,
   resolveKeys, buildKeylogCommitment, authorityCheckpointId, strictB64url } from './index.mjs';
 
-export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev4';
+export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev5';
 // RULE_CONTRACTS (§2b) — the STRUCTURAL source of truth: exactly one inference rule per name, one switch branch per
 // name, and a fixed (children arity, witness count, allowed params, conclusion kind). DecodeTerm enforces these on
 // decode; a term with an extra child / extra witness / free param / unknown field / stored conclusion is rejected
@@ -70,13 +70,15 @@ function normalizeConfig(rawLive) {
   const ci = inertRead(rawLive, 1 << 16);
   if (ci.err) return { err: 'config is ' + ci.err };
   const raw = ci.v;
-  if (raw === null || typeof raw !== 'object') return { err: 'config must be an object' };
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { err: 'config must be an object' };
+  for (const k of Object.keys(raw)) if (k !== 'connectors' && k !== 'mapRoots' && k !== 'domains' && k !== 'witnesses' && k !== 'policy') return { err: 'E-CONFIG-FIELD:' + k };   // closed schema — an unknown field is rejected, not silently dropped (round-8 P0-03)
   const connectors = raw.connectors && typeof raw.connectors === 'object' ? raw.connectors : {};
   const mapRoots = Array.isArray(raw.mapRoots) ? raw.mapRoots.filter(isHash) : [];
   const domains = Object.fromEntries(Object.entries(raw.domains && typeof raw.domains === 'object' ? raw.domains : {}).filter(([, v]) => typeof v === 'string'));   // ControlDomain is a typed STRING — quorum distinctness is by VALUE, not JS object reference (P0-03)
   const witnesses = raw.witnesses && typeof raw.witnesses === 'object' ? raw.witnesses : {};
   const policy = raw.policy && typeof raw.policy === 'object' ? raw.policy : {};
-  const uniqueness_threshold = Number.isInteger(policy.uniqueness_threshold) && policy.uniqueness_threshold >= 1 ? policy.uniqueness_threshold : 2;
+  if (policy.uniqueness_threshold !== undefined && !(Number.isInteger(policy.uniqueness_threshold) && policy.uniqueness_threshold >= 1)) return { err: 'E-CONFIG-THRESHOLD' };   // integer only — a string "999" is rejected, not silently defaulted to 2 (round-8 P0-03)
+  const uniqueness_threshold = policy.uniqueness_threshold ?? 2;
   const C = Object.freeze({ connectors, mapRoots, domains, witnesses,
     policy: Object.freeze({ uniqueness_threshold, allowExperimentalAttested: policy.allowExperimentalAttested === true }) });
   // config_id is EXTENSIONAL over every trust-sensitive VALUE (M-CONFIG, P1-02): connector public keys, allowed proof
@@ -84,7 +86,7 @@ function normalizeConfig(rawLive) {
   // Changing any witness pub at the same key_id changes config_id. canon canonicalizes (sorted keys, string leaves).
   const config_id = H('ust:consumer-config', canon({
     connectors: Object.fromEntries(Object.entries(connectors).map(([k, v]) => [k, { pub: v.pub, allowed_proof_kinds: [...new Set(Array.isArray(v.allowed_proof_kinds) ? v.allowed_proof_kinds : [])].sort(), ...(v.trust_domain !== undefined ? { trust_domain: v.trust_domain } : {}) }])),   // allowed_proof_kinds set-normalized (P1-07)
-    mapRoots: [...mapRoots].sort(), domains, witnesses,
+    mapRoots: [...new Set(mapRoots)].sort(), domains, witnesses,   // map roots de-duplicated as a SET (round-8 P1-02)
     policy: { uniqueness_threshold: String(uniqueness_threshold), allowExperimentalAttested: C.policy.allowExperimentalAttested ? '1' : '0' } }));
   return { C, config_id };
 }
@@ -92,19 +94,18 @@ function normalizeConfig(rawLive) {
 // ── the byte boundary (§2, M-BYTE/M-DEC) — the TCB is over immutable octets ───────────────────────────────────────
 const TEXT_ENC = new TextEncoder();
 const TEXT_DEC = new TextDecoder('utf-8', { fatal: true });   // invalid UTF-8 throws → E-UTF8
-// SnapshotBytes: copy the live view into a fresh immutable buffer; reject non-Uint8Array (Uint8Array ONLY — no string
-// convenience, P2-01) and SharedArrayBuffer-backed views (another thread could mutate mid-check). The theorem begins here.
+// the intrinsic %TypedArray%.prototype.byteLength getter — it reads the [[ViewedArrayBuffer]] internal slot, so calling
+// it on a Proxy (which has no such slot) THROWS. That distinguishes a NATIVE Uint8Array from a Proxy/subclass that only
+// passes `instanceof` (round-8 P0-01).
+const TA_BYTELENGTH = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteLength').get;
+// SnapshotBytes: accept ONLY a native Uint8Array (Uint8Array only, no string; a Proxy is rejected because the intrinsic
+// getter throws), reject SharedArrayBuffer-backed views, and copy into a fresh immutable buffer. Once native is proven,
+// `.buffer`/`.set` are trap-free. The theorem begins here.
 function snapshotBytes(input) {
   if (!(input instanceof Uint8Array)) return { error: 'E-BYTES-TYPE' };
+  let len; try { len = TA_BYTELENGTH.call(input); } catch { return { error: 'E-BYTES-TYPE' }; }   // native-only: a Proxy has no internal slot → throws
   if (typeof SharedArrayBuffer !== 'undefined' && input.buffer instanceof SharedArrayBuffer) return { error: 'E-BYTES-SHARED' };
-  const copy = new Uint8Array(input.byteLength); copy.set(input); return { bytes: copy };
-}
-// readLimits: read specific NUMERIC fields from the caller `limits` (never a live spread), each validated to a positive
-// integer or the default — called INSIDE the try and AFTER the byte snapshots, so a getter/Proxy on `limits` cannot
-// mutate a buffer before its snapshot or escape as an uncaught throw (M-BYTE domain includes limits, P1-01).
-function readLimits(lim) {
-  const num = (k) => { const v = (lim === null || typeof lim !== 'object') ? undefined : lim[k]; return (typeof v === 'number' && Number.isInteger(v) && v > 0) ? v : DEFAULT_LIMITS[k]; };
-  return { maxNodes: num('maxNodes'), maxDepth: num('maxDepth'), maxWitnesses: num('maxWitnesses'), maxWitnessBytes: num('maxWitnessBytes'), maxPackageBytes: num('maxPackageBytes') };
+  const copy = new Uint8Array(len); copy.set(input); return { bytes: copy };
 }
 // DecodeTerm (§2b, M-DEC): build the closed Term ADT strictly to each RULE_CONTRACTS entry — exact children arity, exact
 // witness count, allowed params only, NO unknown fields / stored conclusion / extra children/witnesses/free params. A
@@ -162,7 +163,7 @@ function decodePackage(bytes, L) {
   for (const k of wkeys) {                                 // EVERY witness content-addressed + byte-bounded, even if unreferenced (M-DEC domain, P1-03)
     const w = parsed.witnesses[k];
     let wb; try { wb = canon(w); } catch { return { err: 'E-WITNESS-NONCANONICAL' }; }
-    if (wb.length > L.maxWitnessBytes) return { err: 'E-WITNESS-SIZE' };
+    if (Buffer.byteLength(wb, 'utf8') > L.maxWitnessBytes) return { err: 'E-WITNESS-SIZE' };   // over UTF-8 BYTES, not UTF-16 code units (round-8 P1-03)
     if (witnessId(w) !== k) return { err: 'E-WITNESS-ADDRESS' };
     store[k] = w;
   }
@@ -184,12 +185,12 @@ function decodeConfig(bytes) {
 
 // checkAuthorityProofBytes — THE NORMATIVE TCB. Immutable bytes in; VALID/INVALID/INDETERMINATE out. A live object never
 // enters (M-BYTE): the package/config are decoded ONCE from bytes into inert typed values, then rules run over those.
-export function checkAuthorityProofBytes(packageBytes, configBytes, limits = {}) {
+export function checkAuthorityProofBytes(packageBytes, configBytes) {
+  const L = DEFAULT_LIMITS;   // fixed internal bounds — no caller `limits` object, so CheckBytes is a PURE function of (packageBytes, configBytes) (round-8 P1-01/M-DET)
   const INVALID = (reason) => ({ result: 'INVALID', reason });
   try {
     const pb = snapshotBytes(packageBytes); if (pb.error) return INVALID('package bytes: ' + pb.error);
     const cb = snapshotBytes(configBytes); if (cb.error) return INVALID('config bytes: ' + cb.error);
-    const L = readLimits(limits);   // AFTER the byte snapshots, INSIDE the try — a limits getter/Proxy cannot affect a buffer or escape uncaught (P1-01)
     const nc = decodeConfig(cb.bytes); if (nc.err) return INVALID('config: ' + nc.err);
     const { C, config_id } = nc;
     const withCfg = (r) => (r && r.result !== 'VALID') ? { ...r, config_id } : r;   // config_id identifies the config USED, whatever the verdict (P1-02)
@@ -212,10 +213,10 @@ export function checkAuthorityProofBytes(packageBytes, configBytes, limits = {})
 // (a caller could hand any bytes directly), never produces a proof. Package uses canonical string-leaf bytes (`canon`),
 // config uses JSON. checkAuthorityProof(obj,cfg) := checkAuthorityProofBytes(EncodeLive(pkg), EncodeLive(cfg)).
 const encodeLive = (x, kind) => { try { return { bytes: TEXT_ENC.encode(kind === 'package' ? canon(x) : canonJSON(x ?? null)) }; } catch { return { error: 'E-ENCODE' }; } };
-export function checkAuthorityProof(obj, config, limits = {}) {
+export function checkAuthorityProof(obj, config) {
   const p = encodeLive(obj, 'package'); if (p.error) return { result: 'INVALID', reason: 'package: ' + p.error };
   const c = encodeLive(config, 'config'); if (c.error) return { result: 'INVALID', reason: 'config: ' + c.error };
-  return checkAuthorityProofBytes(p.bytes, c.bytes, limits);
+  return checkAuthorityProofBytes(p.bytes, c.bytes);
 }
 
 const stripExpected = (n) => ({ rule: n.rule, ...(n.params !== undefined ? { params: n.params } : {}), ...(n.witnesses ? { witnesses: n.witnesses } : {}), children: (n.children || []).map(stripExpected) });
@@ -281,8 +282,9 @@ function checkTermInner(node, C, W, memo) {
       const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
       const r = wit(0); if (r.err) return bad(r.err);
       const cl = r.w.claim, sig = r.w.sig;
+      for (const k of Object.keys(r.w)) if (k !== 'claim' && k !== 'issuer_id' && k !== 'sig') return bad('receipt has an unknown field "' + k + '" (typed witness schema, round-8 P0-04)');
       if (!cl || !sig || cl.purpose !== 'ust:evidence-receipt') return bad('not an evidence receipt');
-      if (!strictPub(sig.pub) || keyId(sig.pub) !== sig.key_id || r.w.issuer_id !== sig.key_id) return bad('issuer_id ≠ keyId(pub) (or non-canonical pub)');   // P1-04
+      if (sig.alg !== 'Ed25519' || !strictPub(sig.pub) || keyId(sig.pub) !== sig.key_id || r.w.issuer_id !== sig.key_id) return bad('receipt signature not Ed25519 / issuer mismatch / non-canonical pub');   // P0-02 alg envelope + P1-04
       if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, canon({ purpose: 'ust:evidence-receipt-signature', claim: cl }), sig.sig)) return bad('receipt signature invalid');
       for (const k of ['assurance', 'strength', 'trust_domain', 'independent', 'capability', 'attested', 'threshold']) if (k in (cl.facts || {})) return bad('receipt facts must not self-declare ' + k);
       if (cl.active_genesis !== G.j.active_genesis || cl.genesis_epoch !== genesisEpoch(cl.active_genesis)) return bad('receipt scope ≠ genesis scope');
@@ -353,7 +355,7 @@ function checkTermInner(node, C, W, memo) {
         if (claim.domain_shard !== CH.j.domain) continue;                            // attested checkpoint must be in the chain domain (§2.y, P0-03)
         if (claim.genesis_epoch !== CH.j.genesis_epoch || String(claim.sequence) !== n || claim.checkpoint !== h) continue;   // coordinate FROM the chain
         const pub = C.witnesses[issuer_id];                                            // trust roots FROM C, never the term
-        if (!pub || !strictPub(sig.pub) || pub !== sig.pub || keyId(sig.pub) !== issuer_id) continue;   // P1-04 strict pub
+        if (!pub || sig.alg !== 'Ed25519' || !strictPub(sig.pub) || pub !== sig.pub || keyId(sig.pub) !== issuer_id) continue;   // P0-02 alg envelope + P1-04 strict pub
         const cc = canon(claim);
         if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, cc, sig.sig)) continue;   // ADMIT (verify) before grouping
         const dom = C.domains[issuer_id]; if (dom === undefined) continue;              // consumer-resolved domain
@@ -379,7 +381,11 @@ function checkTermInner(node, C, W, memo) {
       if (!F.j || F.j.kind !== 'Freshness') return F.j ? bad('child 0 must be Freshness') : F;
       if (!Q.j || Q.j.kind !== 'QuorumAgreement') return Q.j ? bad('child 1 must be QuorumAgreement') : Q;
       if (F.j.s !== Q.j.s || F.j.n !== Q.j.n || F.j.h !== Q.j.h) return bad('QuorumAgreement does not unify with the freshness (s,n,h)');
-      return { j: { ...F.j, aeq: { ...F.j.aeq, quorum: { domains: Q.j.D, threshold: String(Q.j.t) } } } };   // aeq ONLY; EvidenceSupport unchanged (M-SEP, P0-05)
+      // conservation (M-SEP): the anti-equivocation basis is UNIONed across reinforcements, never overwritten — a second
+      // ReinforceQuorum accumulates its domains, it does not erase the first (round-8 P0-05).
+      const priorQ = F.j.aeq.quorum;
+      const domains = priorQ ? [...new Set([...priorQ.domains, ...Q.j.D])].sort() : Q.j.D;
+      return { j: { ...F.j, aeq: { ...F.j.aeq, quorum: { domains, threshold: String(Q.j.t) } } } };   // aeq ONLY; EvidenceSupport unchanged
     }
     case 'FutureGenesisCommitment': {
       const CH = sub(0); if (!CH.j || CH.j.kind !== 'Chain') return CH.j ? bad('child 0 must be Chain (epoch A)') : CH;
@@ -421,7 +427,9 @@ function checkTermInner(node, C, W, memo) {
     case 'NameBound': {
       const G = sub(0); if (!G.j || G.j.kind !== 'Genesis') return G.j ? bad('child 0 must be Genesis') : G;
       const kl = wt.length ? W(wt[0]) : { w: [] };
-      const rk = resolveKeys(G.j.genesis, Array.isArray(kl.w) ? kl.w : []);
+      if (kl.err) return bad(kl.err);
+      if (!Array.isArray(kl.w)) return bad('key-log witness must be an array (typed witness, round-8 P0-04)');   // no silent empty-keylog for a wrong-typed witness
+      const rk = resolveKeys(G.j.genesis, kl.w);
       if (rk.error || !rk.validKeys.has(p.doc_key_id)) return ind('document key not bound in the genesis key-log');
       return { j: { kind: 'Identity', s: G.j.s, rung: 'corroborated', caps: [] } };
     }
