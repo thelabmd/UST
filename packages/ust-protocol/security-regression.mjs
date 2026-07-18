@@ -263,6 +263,14 @@ sec('r3-P0-4', 'UST-znh', 'deriveAssurance rejects a caller-shaped verdict objec
   return forged.error === 'E-ASSURANCE' && P.isVerifiedHandle('predicate-graph', { atoms: {}, support: [] }) === false;
 });
 
+// round-25 (K3/P0-01) — the deeper cut: the EXPORTED provePredicates itself minted the branded PredicateGraph from
+// caller-shaped labels, so `deriveAssurance(provePredicates({authoritative…}))` blessed TOP with zero verified evidence.
+// Post-fix provePredicates is the UNBRANDED pure mapper; only verify() (module-private sealPredicateGraph) mints the brand.
+sec('r25-P0-1', 'UST-znh', 'provePredicates is not a public brand-minting oracle — a caller cannot lift a tier from labels', () => {
+  const graph = P.provePredicates({ identity: { status: 'verified', strength: 'authoritative' }, freshness: { result: 'VALID', keylog_freshness: 'attested' }, anchor: { inclusion: true, time: 'anchored' } });
+  return P.isVerifiedHandle('predicate-graph', graph) === false && P.deriveAssurance(graph).error === 'E-ASSURANCE';
+});
+
 // rc.36 round-3 (K5) — scope-free pinnedPrior: a bare {checkpoint_id, authority, sequence} pin let a continuation
 // jump into a NEW domain/genesis without an epoch transition (round-3 P0-2). Post-K5 a pin MUST be a full scoped
 // PinnedCheckpointState (or a branded chain handle), and the continuation must live in the pin's scope.

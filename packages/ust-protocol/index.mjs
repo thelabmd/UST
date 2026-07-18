@@ -276,7 +276,10 @@ const HANDLE_BRAND = new WeakSet(), HANDLE_KIND = new WeakMap();
 // branded handle could mutate a NESTED authority field (checkpoint_authority / recoveryKeys / authority_for_next) AFTER
 // verification and have the same brand authorize attacker-signed checkpoints. The brand must prove the CONSUMED values are
 // the verified values — freeze the whole tree (the isFrozen guard makes it terminating + cycle-safe).
-const deepFreeze = (o) => { if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); for (const k of Object.keys(o)) deepFreeze(o[k]); } return o; };
+// round-25 P0-03 — visited-set by WeakSet, NOT `Object.isFrozen`: a container that was ALREADY shallow-frozen (e.g.
+// verifyEvidenceReceipt's `Object.freeze({...facts})`) must NOT stop the recursion, or its nested values stay mutable and
+// a caller mutates a genuine EvidenceHandle after verification. Traverse every own value regardless; WeakSet is cycle-safe.
+const deepFreeze = (o, seen = new WeakSet()) => { if (!o || typeof o !== 'object' || seen.has(o)) return o; seen.add(o); for (const k of Object.keys(o)) deepFreeze(o[k], seen); return Object.freeze(o); };
 const mintHandle = (kind, obj) => { const h = deepFreeze(obj); HANDLE_BRAND.add(h); HANDLE_KIND.set(h, kind); return h; };
 const isHandle = (kind, x) => x !== null && typeof x === 'object' && HANDLE_BRAND.has(x) && HANDLE_KIND.get(x) === kind;
 export const isVerifiedHandle = (kind, x) => isHandle(kind, x);   // consumers may TEST provenance; they can never MINT it
@@ -635,7 +638,7 @@ export function verify(doc, opts = {}) {
     // axiom, applied BEFORE assembly — never a hidden boolean inside it) and hands the SEAM VERDICTS to
     // deriveAssurance; the lattice IS the machine (no second inline tier formula).
     const idVerdict = (identity.strength === 'consumer-override' && nameAuthoritative) ? { ...identity, strength: 'authoritative' } : identity;
-    const report = deriveAssurance(provePredicates({ identity: idVerdict, anchor: doc.proof !== undefined ? { inclusion: timeField.inclusion === true, time: timeField.strength } : undefined }));
+    const report = deriveAssurance(sealPredicateGraph(provePredicates({ identity: idVerdict, anchor: doc.proof !== undefined ? { inclusion: timeField.inclusion === true, time: timeField.strength } : undefined })));   // round-25 P0-01: verify() is the ONLY seat that seals the graph — over REAL seam verdicts, never caller labels
     const assurance = report.strength;
     const tier = report.tier;
     // §3.1/F.5b DOWNGRADE RESISTANCE — the symmetric floor to requireAuthoritative. A consumer requiring TOP
@@ -836,7 +839,8 @@ export function verifyNoForkEvidence(evidence, config) {
   const rootPub = typeof root === 'string' ? root : root.pub;
   if (rootPub !== sig.pub || keyId(sig.pub) !== issuer_id) return { ok: false, detail: 'issuer_id/pub not the configured trust root' };
   if (strictB64url(sig.sig, 64) === null) return { ok: false, detail: 'sig not canonical b64url of a 64-byte Ed25519 signature' };
-  if (!edVerifyStrict(sig.pub, canon(claim), sig.sig)) return { ok: false, detail: 'Ed25519 verify failed' };
+  let msg; try { msg = canon(claim); } catch { return { ok: false, detail: 'claim not canonicalizable (round-25 P1-02 — a malformed non-null claim returns structured, never a thrown E-CANON)' }; }   // the leaf canon boundary is inside the result algebra (mirrors verifyCheckpointUniqueness)
+  if (!edVerifyStrict(sig.pub, msg, sig.sig)) return { ok: false, detail: 'Ed25519 verify failed' };
   return { ok: true, witness_id: issuer_id, ...(typeof root === 'object' && root.trust_domain ? { trust_domain: root.trust_domain } : {}) };
 }
 
@@ -868,13 +872,13 @@ export function evidenceClass(proof_kind) {
 // UST-0ol Phase 2 — evidence CAPABILITY as a SET (P2-02: capabilities are not a scalar rank). A predicate is
 // satisfiable ONLY by an admissible capability; strong derivation checks this before trusting a piece of evidence,
 // so a connector can never exceed its declared power (content-addressed is not temporal; unknown ⇒ no capability).
-const EVIDENCE_CAPS = Object.assign(Object.create(null), {   // null-proto (UST-Protocol round-12 P0-01): EVIDENCE_CAPS["toString"] must be undefined, not an inherited function
+const EVIDENCE_CAPS = deepFreeze(Object.assign(Object.create(null), {   // round-25 P0-04 — DEEP-frozen registry (null-proto per round-12 P0-01): no in-process mutation of the capability vocabulary
   'pow-header-chain':  ['order', 'time'],
   'transparency-log':  ['inclusion', 'consistency', 'order'],
   'authenticated-map': ['membership', 'non-membership'],
   'content-addressed': ['content-equality', 'availability'],
   'rfc3161-tsa':       ['time'],
-});
+}));
 export const evidenceCaps = (proof_kind) => Object.freeze((Object.hasOwn(EVIDENCE_CAPS, proof_kind) ? EVIDENCE_CAPS[proof_kind] : []).slice());   // round-24 P1-03 — a FROZEN COPY: a caller can never mutate the internal capability array to make check_C history-dependent
 
 // ─── M3 (UST-6vj C2) — THE EVIDENCE SEAM. Provenance is a THEOREM, not an assumption: a strong rung consumes
@@ -1388,7 +1392,7 @@ export function verifyCheckpointRecovery(statements, config) {
     if (!claim || !issuer_id || !sig || !sig.sig || !sig.pub) return null;
     if (claim.purpose !== 'ust:checkpoint-authority-recovery') return null;
     if (claim.domain_shard !== domain_shard || claim.genesis_epoch !== genesis_epoch || claim.last_accepted_checkpoint !== last_accepted_checkpoint) return null;
-    if (String(claim.effective_sequence) !== String(effective_sequence)) return null;   // authorizes ONLY the next checkpoint
+    if (!isSeq(claim.effective_sequence) || claim.effective_sequence !== String(effective_sequence)) return null;   // authorizes ONLY the next checkpoint — round-25 P1-01: CanonicalSeq, a coercible `["1"]` no longer authorizes a recovery
     const ra = claim.replacement_authority;
     if (!ra || !ra.key_id || !ra.pub || keyId(ra.pub) !== ra.key_id) return null;       // replacement well-formed (key_id = keyId(pub))
     const cc = canon(claim);                                                            // may throw on a malformed leaf → the core skips it (total)
@@ -1432,8 +1436,14 @@ export function verifyEpochTransition(statement, config) {
   // round-24 P1-02 — the signed `from_sequence` MUST equal epoch A's verified FINAL sequence (the reference checker
   // requires it; the public verifier skipped the coordinate). Require it present + canonical; when the caller supplies the
   // verified prior sequence, require equality — a transition cannot claim it bridges from a sequence epoch A never reached.
-  if (typeof claim.from_sequence !== 'string' || canonUint(claim.from_sequence) === undefined) return { ok: false, detail: 'transition from_sequence missing or non-canonical (round-24 P1-02)' };
-  if (from_sequence !== undefined && String(from_sequence) !== claim.from_sequence) return { ok: false, detail: `transition from_sequence ${claim.from_sequence} ≠ epoch A final sequence ${from_sequence} (round-24 P1-02)` };
+  // round-25 P1-01 — ONE CanonicalSeq decoder (isSeq: canonical decimal string, no leading zero, no `String([...])`
+  // coercion) at EVERY signed sequence coordinate. The signed from_sequence must be canonical, AND the caller MUST
+  // supply the verified prior-chain FINAL sequence as a canonical coordinate: an omitted comparison coordinate can no
+  // longer yield ok:true trusting an attacker's signed from_sequence (a full transition-verification API is not partial).
+  if (!isSeq(claim.from_sequence)) return { ok: false, detail: 'transition from_sequence missing or non-canonical (round-24 P1-02)' };
+  if (!isSeq(from_sequence)) return { ok: false, detail: 'epoch transition requires the verified prior-chain FINAL sequence as a canonical from_sequence coordinate (round-25 P1-01 — no partial verification)' };
+  if (from_sequence !== claim.from_sequence) return { ok: false, detail: `transition from_sequence ${claim.from_sequence} ≠ epoch A final sequence ${from_sequence} (round-24 P1-02)` };
+  if (!isSeq(claim.to_initial_sequence)) return { ok: false, detail: 'transition to_initial_sequence non-canonical (round-25 P1-01 — a coercible `["0"]` no longer seeds the next epoch)' };
   // M4.4 — the destination is a VERIFIED genesis, never a free epoch label: the transition MUST bind
   // to_active_genesis, and to_genesis_epoch MUST be canonical to it (the M2 hygiene, uniform).
   if (!isHashStr(claim.to_active_genesis) || claim.to_genesis_epoch !== genesisEpoch(claim.to_active_genesis)) return { ok: false, detail: 'transition does not bind a verified destination genesis (to_active_genesis missing or to_genesis_epoch non-canonical, M4.4)' };
@@ -1465,7 +1475,13 @@ export function verifyAuthorityCheckpointChain(chain, config) {
   if (context !== undefined) {
     if (!isHandle('genesis', context)) return { result: 'INVALID', error: 'E-AUTHORITY', detail: 'context is not a verified GenesisHandle (K3 — a caller-shaped context cannot root a chain; use verifiedGenesisContext)' };
     genesisAuthority = context.checkpoint_authority; ctxGenesis = context.active_genesis; authority_root = 'verified-context';
-    if (context.recoveryKeys && recoveryKeys === undefined) { recoveryKeys = context.recoveryKeys; recoveryThreshold = recoveryThreshold ?? context.recoveryThreshold; }
+    // round-25 P0-02 — a verified context FIXES the recovery roots + threshold (model: "Genesis fixes a recovery key set
+    // RK, immutable within the epoch"). Raw caller recovery config CANNOT override it — a conflicting override is E-AUTHORITY,
+    // not a silent takeover. (Raw recovery roots stay available only WITHOUT a context, in the consumer-pin mode.)
+    if (context.recoveryKeys) {
+      if (recoveryKeys !== undefined || recoveryThreshold !== undefined) return { result: 'INVALID', error: 'E-AUTHORITY', detail: 'raw recoveryKeys/recoveryThreshold cannot override a verified-context recovery set (round-25 P0-02)' };
+      recoveryKeys = context.recoveryKeys; recoveryThreshold = context.recoveryThreshold;
+    }
   } else if (genesis) { const gr = resolveCheckpointRoots(genesis); if (gr?.genesisAuthority) { genesisAuthority = gr.genesisAuthority; authority_root = 'genesis'; } if (gr?.recoveryKeys && recoveryKeys === undefined) { recoveryKeys = gr.recoveryKeys; recoveryThreshold = recoveryThreshold ?? gr.recoveryThreshold; } }
   if (!genesisAuthority && !pinnedPrior) return { result: 'INDETERMINATE', reason: 'authority_unresolved', detail: 'no genesis-rooted or pinned-prior checkpoint authority to resolve the first signer' };
   // K5 (round-3 P0-2) — a mid-chain cold start roots ONLY in a full PinnedCheckpointState (a SCOPED snapshot), never a
@@ -1525,7 +1541,7 @@ export function verifyAuthorityCheckpointChain(chain, config) {
       // (epoch match ⇒ genesis match); the explicit check is the hash-collision belt, kept for defense-in-depth.
       if (b.active_genesis !== et.to_active_genesis) return { result: 'INVALID', error: 'E-GENESIS', detail: 'epoch-initial active_genesis ≠ the transition to_active_genesis (M4.4 — the destination genesis is bound, not a label)' };
       if (b.previous_epoch_final_checkpoint !== prev.id) return { result: 'INVALID', error: 'E-PREV', detail: 'epoch-initial checkpoint does not bind the prior-epoch final checkpoint' };
-      if (b.sequence !== String(et.to_initial_sequence)) return { result: 'INVALID', error: 'E-SEQ', detail: 'epoch-initial sequence ≠ the transition to_initial_sequence' };
+      if (b.sequence !== et.to_initial_sequence) return { result: 'INVALID', error: 'E-SEQ', detail: 'epoch-initial sequence ≠ the transition to_initial_sequence' };   // round-25 P1-01: both canonical (isSeq), no String() coercion
       expected = { key_id: et.to_checkpoint_authority.key_id, pub: et.to_checkpoint_authority.pub };
     } else {
       const pca = prev.body ? prev.body.checkpoint_authority : null;                    // the authority Cₙ₋₁ committed for THIS sequence, else unchanged
@@ -1643,7 +1659,7 @@ export function verifyCheckpointUniqueness(attestations, config) {
     if (!claim || !issuer_id || !sig || !sig.sig || !sig.pub) return null;
     if (claim.purpose !== 'ust:checkpoint-uniqueness-attestation') return null;         // uniqueness, not bare observation
     if ('trust_domain' in claim || 'issuer_id' in claim) return null;                   // self-declared independence rejected (P0-2)
-    if (claim.domain_shard !== domain_shard || claim.genesis_epoch !== genesis_epoch || String(claim.sequence) !== String(sequence) || claim.checkpoint !== checkpoint) return null;
+    if (claim.domain_shard !== domain_shard || claim.genesis_epoch !== genesis_epoch || !isSeq(claim.sequence) || claim.sequence !== String(sequence) || claim.checkpoint !== checkpoint) return null;   // round-25 P1-01: CanonicalSeq on the signed sequence — a coercible `["0"]` no longer attests uniqueness
     const cc = canon(claim);                                                            // may throw on a malformed leaf → the core skips it (total)
     const root = trustRoots[issuer_id]; const pub = typeof root === 'string' ? root : root?.pub;
     if (!pub || pub !== sig.pub || keyId(sig.pub) !== issuer_id) return null;           // consumer-accepted issuer only
@@ -1702,7 +1718,7 @@ export const nameMapLeaf = ({ domain_shard, active_genesis }) => ({ key: H('ust:
 export function verifyCheckpointMapUniqueness(proof, config) {
   const c = admitOpts(config); if (c === null) return { attested: false, detail: 'config must be an inert record (round-24 P1-01 totality)' };   // round-24 P1-01 — total for null/hostile config
   const { domain_shard, genesis_epoch, sequence, checkpoint, mapRoot } = c;
-  if (typeof domain_shard !== 'string' || typeof genesis_epoch !== 'string' || typeof checkpoint !== 'string' || typeof mapRoot !== 'string' || sequence === undefined || sequence === null) return { attested: false, detail: 'missing/invalid uniqueness fields (round-24 P1-01) — canon over undefined would throw' };   // round-24 P1-01 — guard the leaf inputs so a null/empty config returns structured, never a thrown E-CANON
+  if (typeof domain_shard !== 'string' || typeof genesis_epoch !== 'string' || typeof checkpoint !== 'string' || typeof mapRoot !== 'string' || !isSeq(sequence)) return { attested: false, detail: 'missing/invalid uniqueness fields (round-24 P1-01 + round-25 P1-01: sequence must be a CanonicalSeq) — canon over undefined/coercible would throw or ambiguate the leaf' };   // guard the leaf inputs so a null/empty/non-canonical config returns structured, never a thrown E-CANON or a coerced `["0"]` leaf
   const { key, value } = checkpointMapLeaf({ domain_shard, genesis_epoch, sequence, checkpoint });
   if (smtVerify(mapRoot, key, value, proof)) return { attested: true, basis: 'authenticated-map-uniqueness', map_root: mapRoot };
   if (smtVerify(mapRoot, key, null, proof)) return { attested: false, absent: true, detail: 'no checkpoint bound at (domain, genesis_epoch, sequence) under mapRoot (proven non-membership)' };
@@ -1748,7 +1764,8 @@ export function verifyKeylogTerminality(head_, proof = {}) {
   const { root, length, head } = h;
   let L; try { L = BigInt(length); } catch { return { terminal: false, detail: 'length is not an integer' }; }
   if (L < 1n) return { terminal: false, detail: 'empty key-log' };
-  const hp = proof.headProof || proof;
+  const p = (proof && typeof proof === 'object') ? proof : {};   // round-25 P1-02 — null-total: `verifyKeylogTerminality(head, null)` no longer dereferences `null.headProof` (default `= {}` only catches undefined)
+  const hp = p.headProof || p;
   if (!hp || !Array.isArray(hp.siblings) || String(hp.index) !== String(L - 1n)) return { terminal: false, detail: 'head proof missing or index ≠ length-1' };
   // P0-5 (rc.35 audit) — the proof depth MUST be EXACTLY ceil(log2(width)), width = next-pow2(L). An UNDER-DEPTH proof
   // (fewer siblings than the tree has levels) recomputes the root over a SMALLER tree; with an attacker-chosen `root`
@@ -1850,12 +1867,12 @@ export { verifyAuthorityBundle, buildAuthorityProof, checkAuthorityProof, checkA
 //     4-chain; the rc.35 five-axis product (256) was self-contradictory ("a SET" yet "every axis is a total order").
 //     STRENGTH (what is proven, per coordinate) is separate from SUPPORT (which capabilities the admitted evidence
 //     supplies — EVIDENCE_CAPS_UNIVERSE below); support DERIVES strength, it is not a fifth coordinate.
-export const ASSURANCE_AXES = {
+export const ASSURANCE_AXES = deepFreeze({   // round-25 P0-04 — DEEP-frozen: mutating a nested axis array (e.g. reordering `identity`) would change projectTier's ranks and the exported REGISTRY alias → history-dependent TCB
   integrity: ['invalid', 'valid'],                                            // the §14 floor (canon/hash/sig) — the Integrity axis
   identity:  ['self-asserted', 'pinned', 'corroborated', 'authoritative'],    // A_id: name-binding + active-genesis uniqueness (§12.1a)
   freshness: ['unverified', 'fresh', 'corroborated', 'attested'],             // A_fresh: terminality + order + checkpoint uniqueness (§12.2a / §12.3.5)
   time:      ['unproven', 'anchored'],                                        // Fₜ: the anchor filtration (§11.2)
-};
+});
 // M1.1 — the capability-support UNIVERSE (single-sourced from EVIDENCE_CAPS): |Caps| = 8, support ∈ (P(Caps), ⊆).
 // A predicate is discharged only by an admissible capability (B4); no composition step manufactures one (B3).
 export const EVIDENCE_CAPS_UNIVERSE = Object.freeze([...new Set(Object.values(EVIDENCE_CAPS).flat())].sort());
@@ -1926,7 +1943,8 @@ const hornClosure = (atomSet) => {                                              
   while (grew) { grew = false; for (const r of HORN_RULES) if (!closed.has(r.concl) && r.premises.every((p) => closed.has(p))) { closed.add(r.concl); trace.push({ rule: r.concl, premises: r.premises.slice() }); grew = true; } }
   return { closed, trace };
 };
-export function provePredicates({ identity, freshness, anchor, evidence = [] } = {}) {
+export function provePredicates(seams = {}) {
+  const { identity, freshness, anchor, evidence = [] } = (seams && typeof seams === 'object') ? seams : {};   // round-25 P1-02 — null-total: `provePredicates(null)` no longer throws on destructuring (a malformed non-null arg floors to LIGHT)
   const verified = identity?.status === 'verified';                                  // 'suspect' (pre-compromise window) never name-binds — mirrors §14 exactly
   const idStr = !verified ? 'self-asserted'
     : identity.strength === 'authoritative' ? 'authoritative'
@@ -1947,9 +1965,17 @@ export function provePredicates({ identity, freshness, anchor, evidence = [] } =
   if (frStr === 'attested') atomSet.push('checkpoint-unique');
   if (tmStr === 'anchored') atomSet.push('time-anchored');
   const { trace } = hornClosure(atomSet);
-  return mintHandle('predicate-graph', { atoms: Object.freeze({ integrity: 'valid', identity: idStr, freshness: frStr, time: tmStr }),
+  // round-25 P0-01 — provePredicates is the PURE seam→atom MAPPER and returns an UNBRANDED graph. It does NOT mint the
+  // predicate-graph brand: minting from caller-shaped labels was a public forgery oracle (deriveAssurance blessed it → TOP
+  // with zero verified evidence). The brand is minted ONLY by sealPredicateGraph, called ONLY inside verify() (the TCB),
+  // which passes REAL seam verdicts. A consumer can still inspect this projection, but deriveAssurance rejects an
+  // unbranded graph — so caller labels earn no authoritative verdict. (isHandle('predicate-graph', provePredicates(x)) === false.)
+  return Object.freeze({ atoms: Object.freeze({ integrity: 'valid', identity: idStr, freshness: frStr, time: tmStr }),
     support: Object.freeze(support), provenAtoms: Object.freeze(atomSet.slice()), derivation: Object.freeze(trace.map((t) => Object.freeze({ ...t, premises: Object.freeze(t.premises) }))) });
 }
+// MODULE-PRIVATE (never exported — not in package `exports`, so no consumer path reaches it): the sole minter of the
+// predicate-graph brand. Only verify() calls it, and only over seam verdicts produced by the real verification seams.
+const sealPredicateGraph = (graph) => mintHandle('predicate-graph', graph);
 // The assembler. Takes ONLY a branded PredicateGraph (K3 — a caller-shaped {identity:'authoritative'} is NOT a graph,
 // so no coordinate lifts: round-3 P0-4 closed at the type level). Emits the frozen assurance report + the K7 trace.
 export function deriveAssurance(graph) {
@@ -1963,7 +1989,7 @@ export function deriveAssurance(graph) {
 //     asserts the code's ACTUAL literal usage (H/Hbytes domains, `purpose:` strings, thrown `E-` codes) equals these
 //     sets — so spec prose, this registry, and code usage cannot silently diverge (the spec↔code drift seam). Enums
 //     that already exist as code (ASSURANCE_AXES, TIER_RANK) are REFERENCED, never re-declared.
-export const REGISTRY = {
+export const REGISTRY = deepFreeze({   // round-25 P0-04 — DEEP-frozen: the canonical string sets are TCB truth; no in-process mutation
   // hash domain tags (§7/§17) — the tag passed to H()/Hbytes(). MEASURED against actual usage by spec-code-sync.
   hashDomains: ['ust:state', 'ust:shard', 'ust:seed', 'ust:keylog', 'ust:leaf', 'ust:node',
     'ust:authority-checkpoint', 'ust:checkpoint-map-key', 'ust:checkpoint-map-value', 'ust:name-map-key', 'ust:name-map-value',
@@ -1985,7 +2011,7 @@ export const REGISTRY = {
   verifiedEvidenceFields: { required: ['proof_kind', 'subject', 'source_id', 'facts'], optional: ['verifier_id', 'verifier_version'] },
   // M3 — the SIGNED connector-receipt claim (§12.3.5): facts only; a capability/assurance/independence field is E-EVIDENCE.
   evidenceReceiptClaimFields: { required: ['version', 'purpose', 'domain_shard', 'active_genesis', 'genesis_epoch', 'subject', 'proof_kind', 'facts', 'issued_at'], optional: ['payload_digest'] },
-};
+});
 
 // ─── TOP §11.3 completeness: a sequenced stream is prev-chained; first frame's prev = genesis content_hash
 //     (M4); per-frame validity is verified too (X2 — completeness ≠ validity); duplicate ust_id / shared prev
@@ -2134,6 +2160,11 @@ export function verifyJson(rawBytes, opts = {}) {
   // The default input budget equals the protocol ABS; raw whitespace/base64 padding never flips a
   // verdict because the NORMATIVE size is measured on the canonical signed content inside verify.
   const isStr = typeof rawBytes === 'string';
+  // round-25 P1-02 — TYPED input admission BEFORE any measurement: verifyJson accepts a UTF-8 string or a byte container
+  // (ArrayBuffer / TypedArray / Buffer). A plain object or other non-binary reached `Buffer.from(rawBytes)` and threw a
+  // host TypeError (ERR_INVALID_ARG_TYPE) instead of a structured verdict — I4 totality demands a structured result.
+  if (!isStr && !(rawBytes instanceof ArrayBuffer || ArrayBuffer.isView(rawBytes)))
+    return bad('E-MALFORMED', 'raw input must be a UTF-8 string or a byte buffer (ArrayBuffer/TypedArray/Buffer) — a non-binary argument returns structured, never a host TypeError (round-25 P1-02)');
   const byteLen = isStr ? Buffer.byteLength(rawBytes, 'utf8') : (rawBytes.byteLength ?? Buffer.from(rawBytes).length);
   const inputBudget = Number(opts.maxInputBytes ?? BOUNDS.sizeBytes);
   if (byteLen > inputBudget)
@@ -2235,7 +2266,7 @@ const readBounded = async (r, cap = DISCOVERY_MAX_BYTES) => {
   if (Buffer.byteLength(body, 'utf8') > cap) throw new Error(`discovery body exceeds the ${cap} B ceiling (§13)`);
   return body;
 };
-export async function witnessNoFork(shard, genesisHash, { fetchImpl = fetch, substrateVerify } = {}) {
+export async function witnessNoFork(shard, genesisHash, { fetchImpl = fetch, substrateVerify, maxWitnessOpMs } = {}) {
   let log;
   try {
     const r = await fetchImpl(`https://${shard}/.well-known/ust-witness`, { signal: AbortSignal.timeout(10000), redirect: 'error' });
@@ -2279,10 +2310,13 @@ export async function witnessNoFork(shard, genesisHash, { fetchImpl = fetch, sub
   if (active.length > BOUNDS.witnessActive) return OVER(`witness has ${active.length} distinct active roots > ${BOUNDS.witnessActive} (§F.9 — refused, never truncated; round-21 P0-02)`);
   for (const a of active) if (a.proofs.length > BOUNDS.anchorsPerGenesis) return OVER(`active genesis ${a.content_hash.slice(0, 20)}… carries ${a.proofs.length} UNIQUE anchors > ${BOUNDS.anchorsPerGenesis} (§F.9 — refused, never truncated; round-21 P0-02)`);
   const anchoredActive = [];
-  const opDeadline = Date.now() + WITNESS_OP_DEADLINE_MS;   // round-24 P1-04 — bound the WHOLE witness resolution, not just each leaf
+  // round-25 Div2 (F.9 — ρ_v belongs to the VERIFIER): the reference 30 s is a DEFAULT ceiling, never a universal
+  // protocol constant. A consumer with a tighter deadline caps the operation → effective budget = min(reference, consumer).
+  const opBudget = (Number.isFinite(maxWitnessOpMs) && maxWitnessOpMs > 0) ? Math.min(WITNESS_OP_DEADLINE_MS, maxWitnessOpMs) : WITNESS_OP_DEADLINE_MS;
+  const opDeadline = Date.now() + opBudget;   // round-24 P1-04 — bound the WHOLE witness resolution, not just each leaf
   for (const a of active) {
     const r = await anchoredByProofs(a.content_hash, a.proofs, substrateVerify, opDeadline);
-    if (r === 'resource_limit') return OVER(`witness anchor verification exceeded the ${WITNESS_OP_DEADLINE_MS} ms whole-operation budget (§F.9 — a legal fan-out cannot monopolize a verification; round-24 P1-04)`);
+    if (r === 'resource_limit') return OVER(`witness anchor verification exceeded the ${opBudget} ms whole-operation budget (§F.9 — a legal fan-out cannot monopolize a verification; the verifier's ρ_v is min(reference ${WITNESS_OP_DEADLINE_MS} ms, consumer deadline); round-24 P1-04 / round-25 Div2)`);
     if (r) anchoredActive.push({ content_hash: a.content_hash });
   }
   if (anchoredActive.length >= 2) return { status: 'fork', detail: `${anchoredActive.length} anchored active genesis roots for ${shard} — a rival name-binding root exists` };

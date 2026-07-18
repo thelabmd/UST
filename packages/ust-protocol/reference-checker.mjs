@@ -17,7 +17,7 @@ import { canon, H, keyId, edVerifyStrict, contentHash, verify, isValid, verifyKe
   resolveKeys, buildKeylogCommitment, authorityCheckpointId, strictB64url, isPublicDnsShard,
   admitUtf8, anyLoneSurrogate } from './index.mjs';   // round-19 P1-01 — ONE Unicode byte-admission, shared with the discovery resolver (no drift)
 
-export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev22';
+export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev23';
 // RULE_CONTRACTS (§2b) — the STRUCTURAL source of truth: exactly one inference rule per name, one switch branch per
 // name, and a fixed (children arity, witness count, allowed params, conclusion kind). DecodeTerm enforces these on
 // decode; a term with an extra child / extra witness / free param / unknown field / stored conclusion is rejected
@@ -25,7 +25,10 @@ export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev22';
 // stay in the rule interpreter, so the registry never becomes a second clever TCB. Grammar↔RULES parity derives from it.
 const wc = (min, max = min) => ({ min, max });
 const rp = { req: true, type: 'string' };   // a REQUIRED string param (M-ADT: params are a typed schema, not an allowed-name list)
-export const RULE_CONTRACTS = Object.freeze(Object.assign(Object.create(null), {   // null-proto (round-12 P0-01): RULE_CONTRACTS["constructor"] must be undefined, not the Object constructor
+// round-25 P0-04 — DEEP-freeze the structural registry: Object.freeze froze only the OUTER map, so a caller could mutate
+// RULE_CONTRACTS.Corroborated.children after export and weaken the decoder → the SAME bytes flip VALID. Freeze the whole tree.
+const deepFreeze = (o, seen = new WeakSet()) => { if (!o || typeof o !== 'object' || seen.has(o)) return o; seen.add(o); for (const k of Object.keys(o)) deepFreeze(o[k], seen); return Object.freeze(o); };
+export const RULE_CONTRACTS = deepFreeze(Object.assign(Object.create(null), {   // null-proto (round-12 P0-01): RULE_CONTRACTS["constructor"] must be undefined, not the Object constructor
   Genesis:                 { children: 0, witnesses: wc(1),        params: {},                conclusion: 'Genesis' },
   CheckpointZero:          { children: 1, witnesses: wc(1),        params: {},                conclusion: 'Chain' },
   CheckpointStep:          { children: 1, witnesses: wc(1, 2),     params: {},                conclusion: 'Chain' },       // consistency witness optional

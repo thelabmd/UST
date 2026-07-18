@@ -949,9 +949,11 @@ console.log('\n═════════════════════�
   check('K4/P0-02 attacker attestations (∉ config witnesses) → no quorum basis (self-supplied trust rejected)', (r => r.result === 'INDETERMINATE' || (r.result === 'VALID' && !r.anti_equivocation.quorum))(P.verifyAuthorityBundle({ ...bundleIn, uniqueness: uniqK }, cfg)));
 
   // K7 — the assembler is a Horn least-fixed-point: rungs derive from atoms, with a premise trace (calculus §7).
-  check('K7 provePredicates → Horn closure: IdentityAuthoritative ← name-bound ∧ active-genesis-unique (with trace)', (g => { const r = P.deriveAssurance(g); return r.derivation.some((t) => t.rule === 'IdentityAuthoritative' && t.premises.includes('active-genesis-unique')) && r.provenAtoms.includes('name-bound'); })(P.provePredicates({ identity: { status: 'verified', strength: 'authoritative' } })));
-  check('K7 no-upward-forge: without checkpoint-unique, FreshnessAttested is NOT in the closure', (g => !P.deriveAssurance(g).derivation.some((t) => t.rule === 'FreshnessAttested'))(P.provePredicates({ identity: { status: 'verified', strength: 'corroborated' }, freshness: { result: 'VALID', keylog_freshness: 'corroborated' } })));
-  check('K7 TierTOP ← integrity-valid ∧ IdentityAuthoritative ∧ time-anchored (composite rule fires)', (g => P.deriveAssurance(g).derivation.some((t) => t.rule === 'TierTOP'))(P.provePredicates({ identity: { status: 'verified', strength: 'authoritative' }, anchor: { inclusion: true, time: 'anchored' } })));
+  //    round-25 P0-01: provePredicates returns the UNBRANDED graph (the pure mapper), so read its derivation/provenAtoms
+  //    directly — deriveAssurance now blesses ONLY a TCB-sealed graph and would reject this synthetic one (that is the fix).
+  check('K7 provePredicates → Horn closure: IdentityAuthoritative ← name-bound ∧ active-genesis-unique (with trace)', (g => g.derivation.some((t) => t.rule === 'IdentityAuthoritative' && t.premises.includes('active-genesis-unique')) && g.provenAtoms.includes('name-bound'))(P.provePredicates({ identity: { status: 'verified', strength: 'authoritative' } })));
+  check('K7 no-upward-forge: without checkpoint-unique, FreshnessAttested is NOT in the closure', (g => !g.derivation.some((t) => t.rule === 'FreshnessAttested'))(P.provePredicates({ identity: { status: 'verified', strength: 'corroborated' }, freshness: { result: 'VALID', keylog_freshness: 'corroborated' } })));
+  check('K7 TierTOP ← integrity-valid ∧ IdentityAuthoritative ∧ time-anchored (composite rule fires)', (g => g.derivation.some((t) => t.rule === 'TierTOP'))(P.provePredicates({ identity: { status: 'verified', strength: 'authoritative' }, anchor: { inclusion: true, time: 'anchored' } })));
 }
 
 // ─── #76 Phase B — publisher-checkpoint CORROBORATED freshness (authorized chain × head∈root × proven-after target).
@@ -1056,8 +1058,22 @@ console.log('\n═════════════════════�
   // ─── round-24 (rev22) — the recurring classes on the surfaces they had never reached ────────────────────────────────
   // P0-03 — a lone UTF-16 surrogate trust-domain is OUTSIDE the §6 scalar domain and must not count as an independent domain.
   check('round-24 P0-03 lone-surrogate trust-domains → NOT two independent voters → attested:false', P.verifyCheckpointUniqueness([ua(Wa), ua(Wb)], { domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, trustRoots, domains: { [Wa.key_id]: '\uD800', [Wb.key_id]: '\uD801' }, threshold: 2 }).attested === false);
+  // round-25 P1-01 — CanonicalSeq: a coercible array `["0"]` signed sequence (String(["0"])==="0" fools JS ==) is NOT a
+  //    canonical sequence; isSeq runs BEFORE the signature, so the claim is dropped and cannot join the uniqueness quorum.
+  check('round-25 P1-01 a coercible array sequence `["0"]` is dropped (not admitted to the uniqueness quorum)', VU([{ claim: { purpose: 'ust:checkpoint-uniqueness-attestation', domain_shard: D, genesis_epoch: EP, sequence: ['0'], checkpoint: headId }, issuer_id: Wa.key_id, sig: { alg: 'Ed25519', key_id: Wa.key_id, pub: Wa.pubB64, sig: 'AA' } }, ua(Wb)]).attested === false);
   // P1-01 — null-total across ALL the public proof surfaces (the round-23 quorum fix + this sweep + the self-audit pair).
   check('round-24 P1-01 nine public proof surfaces total for null config (no host throw)', (() => { try { P.verifyNoForkEvidence({}, null); P.verifyEvidenceReceipt({}, null); P.verifyEpochTransition({}, null); P.verifyAuthorityCheckpointChain([], null); P.verifyCheckpointMapUniqueness({}, null); P.verifyActiveGenesisUniqueness({}, null); P.verifyKeylogTerminality(null, {}); P.deriveCheckpointFreshness([], null); P.verifyStream([{}], null); return true; } catch { return false; } })());
+  // round-25 P1-02 — MALFORMED NON-NULL totality (I4): the null matrix was closed in round-24; round-25 sweeps ordinary
+  //    non-null junk that still reached a host operation. A numeric-extra claim (canon throws), a null proof deref, a null
+  //    seam arg, and a non-binary verifyJson input all now return STRUCTURED verdicts, never a host TypeError/E-CANON.
+  check('round-25 P1-02 malformed non-null across verify*/prove* surfaces returns structured, never a host throw', (() => { try {
+    P.verifyNoForkEvidence({ claim: { purpose: 'ust:name-no-fork', domain_shard: 'noosphere.md', active_genesis: 'sha256:' + '00'.repeat(32), x: 1 }, issuer_id: 'z', sig: { sig: 'y', pub: 'p' } }, { domain_shard: 'noosphere.md', active_genesis: 'sha256:' + '00'.repeat(32), trustRoots: { z: 'p' } });
+    P.verifyKeylogTerminality({ root: 'sha256:' + 'ab'.repeat(32), length: '1', head: 'x' }, null);
+    P.provePredicates(null); P.provePredicates(42); P.verifyJson([1, 2, 3]); return true; } catch { return false; } })());
+  check('round-25 P1-02 verifyJson(non-binary) → structured E-MALFORMED (not a host ERR_INVALID_ARG_TYPE)', P.verifyJson({ a: 'b' }).error === 'E-MALFORMED' && P.verifyJson(123).error === 'E-MALFORMED');
+  // round-25 P0-04 — the TCB structural registries are DEEP-frozen: a nested axis/domain array cannot be mutated to change
+  //    projectTier ranks or the canonical string sets in-process (history-independent verdict).
+  check('round-25 P0-04 exported TCB registries are deep-frozen (nested arrays immutable)', Object.isFrozen(P.ASSURANCE_AXES) && Object.isFrozen(P.ASSURANCE_AXES.identity) && Object.isFrozen(P.REGISTRY) && Object.isFrozen(P.REGISTRY.hashDomains) && P.REGISTRY.assuranceAxes === P.ASSURANCE_AXES);
   // P1-03 — evidenceCaps returns a FROZEN copy: a caller cannot mutate the checker's capability vocabulary.
   check('round-24 P1-03 evidenceCaps is a frozen copy (mutation cannot make check_C history-dependent)', (() => { const a = P.evidenceCaps('pow-header-chain'); try { a.push('forged'); } catch {} return Object.isFrozen(a) && !P.evidenceCaps('pow-header-chain').includes('forged'); })());
   check('PhC uniqueness for a DIFFERENT checkpoint → not admitted (binding)', VU([P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: 'sha256:' + '00'.repeat(32) }, Wa.priv, Wa.pubB64), ua(Wb)]).attested === false);
@@ -1139,6 +1155,9 @@ console.log('\n═════════════════════�
   check('RECOVERY signer NOT in the genesis recovery set → not counted', VR([stmt(rf(KR), R1), stmt(rf(KR), RX)]).recovered === false);
   check('RECOVERY replacement key_id ≠ keyId(pub) → not recovered', VR([{ claim: { ...P.checkpointRecoveryClaim(rf(KR)), replacement_authority: { key_id: K1.key_id, pub: KR.pubB64 } }, issuer_id: R1.key_id, sig: stmt(rf(KR), R1).sig }, stmt(rf(KR), R2)]).recovered === false);
   check('RECOVERY effective_sequence ≠ last+1 → not recovered (only the next checkpoint)', VR([stmt(rf(KR, '2'), R1), stmt(rf(KR, '2'), R2)]).recovered === false);
+  // round-25 P1-01 — CanonicalSeq on the recovery coordinate: a coercible array `["1"]` (String(["1"])==="1") is not a
+  //    canonical sequence; isSeq drops it before the signature, so it cannot authorize a recovery.
+  check('round-25 P1-01 a coercible array effective_sequence `["1"]` is dropped (cannot authorize a recovery)', VR([{ claim: { ...P.checkpointRecoveryClaim(rf(KR)), effective_sequence: ['1'] }, issuer_id: R1.key_id, sig: stmt(rf(KR), R1).sig }, stmt(rf(KR), R2)]).recovered === false);
   check('RECOVERY stale last_accepted_checkpoint → not recovered (bound to the prior)', VR([stmt(rf(KR, '1', 'sha256:' + 'ee'.repeat(32)), R1), stmt(rf(KR, '1', 'sha256:' + 'ee'.repeat(32)), R2)]).recovered === false);
   check('RECOVERY valid 2-of-3 → replacement_authority + threshold + 2 signers', (r => r.recovered === true && r.replacement_authority.key_id === KR.key_id && r.threshold === '2' && r.signers.length === 2)(VR([stmt(rf(KR), R1), stmt(rf(KR), R2)])));
   // recovery re-authorizes the SIGNER only — it does NOT bypass the rest of checkpoint validation
@@ -1159,7 +1178,7 @@ console.log('\n═════════════════════�
   const c0b = (over = {}) => P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: EPB, sequence: '0', previous_epoch_final_checkpoint: idA, active_genesis: AGB, current_key_id: KB0.key_id, keylog: KL, ...over }), (over._signer || KB0).priv, (over._signer || KB0).pubB64);
   const C0b = c0b();
   const chain = (c1, ets) => P.verifyAuthorityCheckpointChain([C0a, c1], { genesisAuthority: gA, epochTransitions: ets });
-  const VE = (stmt, over = {}) => P.verifyEpochTransition(stmt, { domain_shard: D, from_genesis_epoch: EPA, from_final_checkpoint: idA, fromAuthority: gA, ...over });
+  const VE = (stmt, over = {}) => P.verifyEpochTransition(stmt, { domain_shard: D, from_genesis_epoch: EPA, from_final_checkpoint: idA, from_sequence: '0', fromAuthority: gA, ...over });   // round-25 P1-01: the verified prior-chain FINAL sequence is now a required canonical coordinate
 
   check('EPOCH A→B with authenticated transition → chain VALID (initial seq 0)', (r => r.result === 'VALID' && r.sequence === '0')(chain(C0b, { [EPB]: et })));
   // round-24 P1-02 — the public verifier now checks the signed from_sequence against epoch A's verified final sequence.
@@ -1180,6 +1199,10 @@ console.log('\n═════════════════════�
     const etC = P.buildEpochTransition(etf({ to_active_genesis: AGC, to_genesis_epoch: P.genesisEpoch(AGC) }), KA0.priv, KA0.pubB64);
     return P.verifyAuthorityCheckpointChain([C0a, C0b], { genesisAuthority: gA, epochTransitions: { [EPB]: etC, [P.genesisEpoch(AGC)]: etC } });
   })()));                                                                              // M2 (canonical epoch both sides) makes b.active_genesis === et.to_active_genesis derivable; the explicit E-GENESIS check in the chain verifier remains as the hash-collision belt
+  // round-25 P1-01 — a full transition-verification API cannot be PARTIAL: with the verified prior-chain FINAL sequence
+  // coordinate OMITTED, the verifier no longer trusts the attacker's signed from_sequence and returns not-ok.
+  check('round-25 P1-01 verifyEpochTransition with an OMITTED prior-chain from_sequence coordinate → not ok (no partial verification)', VE(et, { from_sequence: undefined }).ok === false);
+  check('round-25 P1-01 verifyEpochTransition with a NON-canonical prior-chain from_sequence coordinate ("0x0") → not ok', VE(et, { from_sequence: '0x0' }).ok === false);
 }
 
 // ─── M4.2 (UST-6vj) CHAIN-CONSISTENT KEY LOG — append-only ACROSS same-epoch checkpoints. Closes keylog-rewind: a
@@ -1280,11 +1303,14 @@ console.log('\n═════════════════════�
 
   // ── C3/K3 — deriveAssurance: THE one assembler, takes ONLY a branded PredicateGraph. provePredicates maps seam
   //    verdicts → atoms; deriveAssurance projects. Strength from SEAM VERDICTS, support from image(VerifyEvidence_C).
-  const DA = (v) => P.deriveAssurance(P.provePredicates(v));
+  // round-25 P0-01 — provePredicates is the PURE UNBRANDED mapper; only verify() seals a graph (module-private). The
+  //    mapping projection is exercised here via the SAME public lattice math deriveAssurance uses over the graph's atoms.
+  const DA = (v) => { const g = P.provePredicates(v); const strength = P.assuranceState({ integrity: 'valid', ...g.atoms }); return { strength, support: g.support, tier: P.projectTier(strength), provenAtoms: g.provenAtoms, derivation: g.derivation }; };
   check('K3 deriveAssurance REJECTS a caller-shaped object (not a PredicateGraph) → E-ASSURANCE (round-3 P0-4 closed)',
     (r => r.error === 'E-ASSURANCE')(P.deriveAssurance({ identity: { status: 'verified', strength: 'authoritative' }, freshness: { result: 'VALID', keylog_freshness: 'attested' }, anchor: { inclusion: true, time: 'anchored' } })));
-  check('K3 provePredicates output is a branded handle a caller cannot forge (isVerifiedHandle true; a look-alike false)',
-    P.isVerifiedHandle('predicate-graph', P.provePredicates({})) === true && P.isVerifiedHandle('predicate-graph', { atoms: {}, support: [] }) === false);
+  check('K3 provePredicates is UNBRANDED — a caller cannot mint a graph the assembler will bless (round-25 P0-01: the forgery oracle is closed)',
+    P.isVerifiedHandle('predicate-graph', P.provePredicates({ identity: { status: 'verified', strength: 'authoritative' }, anchor: { inclusion: true, time: 'anchored' } })) === false
+    && P.deriveAssurance(P.provePredicates({ identity: { status: 'verified', strength: 'authoritative' }, anchor: { inclusion: true, time: 'anchored' } })).error === 'E-ASSURANCE');
   check('C3 a bare strength LABEL without a verified status earns nothing (no caller labels)',
     (r => r.strength.identity === 'self-asserted' && r.tier === 'LIGHT')(DA({ identity: { strength: 'authoritative' } })));
   check('C3 the identity seam verdict maps by fixed rules (authoritative/verified → authoritative)',
@@ -1301,8 +1327,8 @@ console.log('\n═════════════════════�
       return no.strength.time === 'unproven' && no.tier === 'HIGH' && yes.strength.time === 'anchored' && yes.tier === 'TOP'; })());
   check('C3 support: only image(VerifyEvidence_C) contributes capabilities — a minted look-alike contributes none (B3)',
     (r => r.support.length === 0)(DA({ identity: { strength: 'self-asserted', status: 'verified' }, evidence: [{ proof_kind: 'pow-header-chain', verified_facts: {}, basis: 'admitted-connector-receipt' }] })));
-  check('C3 deriveAssurance output is frozen (pure value, no post-hoc mutation)',
-    (() => { const r = DA({}); try { r.tier = 'TOP'; } catch {} try { r.strength.identity = 'authoritative'; } catch {} return r.tier !== 'TOP' && Object.isFrozen(r) && r.strength.identity === 'self-asserted'; })());
+  check('C3 provePredicates graph is a deep-frozen pure value (atoms/support immutable, no post-hoc mutation — round-25 P0-01)',
+    (() => { const g = P.provePredicates({}); try { g.atoms.identity = 'authoritative'; } catch {} try { g.support.push('x'); } catch {} return Object.isFrozen(g) && Object.isFrozen(g.atoms) && g.atoms.identity === 'self-asserted' && g.support.length === 0; })());
 
   // ── V1 (UST-sul, M1.2) — Reach_C CONFINEMENT: over the FULL verdict grid, the assembler emits ONLY tuples whose
   //    every coordinate is earned by ITS OWN seam predicate — and each coordinate is a function of ITS verdict alone
@@ -1323,13 +1349,13 @@ console.log('\n═════════════════════�
     const expTm = (an) => an?.inclusion === true && an?.time === 'anchored' ? 'anchored' : 'unproven';
     let confined = true, coordinateLocal = true;
     for (const id of ids) for (const fr of frs) for (const an of ans) {
-      const r = P.deriveAssurance(P.provePredicates({ identity: id, freshness: fr, anchor: an }));
+      const r = DA({ identity: id, freshness: fr, anchor: an });                        // DA = the pure projection over the UNBRANDED mapper (round-25 P0-01)
       if (r.strength.identity !== expId(id) || r.strength.freshness !== expFr(fr, id) || r.strength.time !== expTm(an) || r.strength.integrity !== 'valid') confined = false;
       if (r.tier !== P.projectTier(r.strength)) confined = false;                       // the report never carries a tier its own strength does not project
     }
     for (const id of ids) {                                                             // identity is a function of the identity verdict ALONE
-      const base = P.deriveAssurance(P.provePredicates({ identity: id })).strength.identity;
-      for (const fr of frs) for (const an of ans) if (P.deriveAssurance(P.provePredicates({ identity: id, freshness: fr, anchor: an })).strength.identity !== base) coordinateLocal = false;
+      const base = DA({ identity: id }).strength.identity;
+      for (const fr of frs) for (const an of ans) if (DA({ identity: id, freshness: fr, anchor: an }).strength.identity !== base) coordinateLocal = false;
     }
     check('V1 Reach_C confinement: 264-combination verdict grid — every coordinate earned by its own predicate, tier = projection', confined);
     check('V1 Reach_C per-coordinate locality: a coordinate is a function of ITS verdict alone (no cross-coordinate lift)', coordinateLocal);
