@@ -919,6 +919,13 @@ console.log('\n═════════════════════�
     const Cx = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: D, genesis_epoch: P.genesisEpoch(AGx), sequence: '0', active_genesis: AGx, current_key_id: K0.key_id, keylog: { root: kl.root, length: kl.length, head: kl.head } }), K0.priv, K0.pubB64);
     return P.verifyAuthorityCheckpointChain([Cx], { context: ctx });
   })()));
+  // round-26 P0-01/P0-02 (rev25, L1/L2) — the ADVERSARIAL closure of M2 "never raw fields" / F.5l "recovery immutable":
+  //   under a branded context, a raw authority-root field ALONGSIDE it is rejected (it cannot substitute the root the
+  //   context fixes) — never accepted while still reporting verified-context. This is what the positive C1 never tested.
+  check('C1/L1 a raw pinnedPrior alongside a branded context → INVALID(E-AUTHORITY) — the context is the SOLE root (never raw fields, M2; round-26 P0-01)',
+    (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C0], { context: ctx, pinnedPrior: { scope_id: 'sha256:' + '44'.repeat(32), checkpoint_id: 'sha256:' + '44'.repeat(32), sequence: '9', authority_for_next: { key_id: K0.key_id, pub: K0.pubB64 }, keylog_size: '1', keylog_root: 'sha256:' + '44'.repeat(32), keylog_head: 'sha256:' + '44'.repeat(32) } })));
+  check('C1/L2 raw recoveryKeys/recoveryThreshold alongside a branded context → INVALID(E-AUTHORITY) — recovery is genesis-fixed, never injected from a call argument (F.5l; round-26 P0-02)',
+    (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C0], { context: ctx, recoveryKeys: { [K0.key_id]: K0.pubB64 }, recoveryThreshold: '1' })));
   // K3 — the context MUST be a branded GenesisHandle. A caller-shaped look-alike (round-3 P0-1 forge) is rejected.
   check('K3 forged context (caller-shaped {scope_id, checkpoint_authority}) → INVALID(E-AUTHORITY), not verified-context', (r => r.result === 'INVALID' && r.error === 'E-AUTHORITY')(P.verifyAuthorityCheckpointChain([C0], { context: { scope_id: ctx.scope_id, active_genesis: ctx.active_genesis, domain: D, genesis_epoch: ctx.genesis_epoch, checkpoint_authority: { key_id: K0.key_id, pub: K0.pubB64 } } })));
   check('K3 the genuine context IS a branded handle (isVerifiedHandle true); the look-alike is not', P.isVerifiedHandle('genesis', ctx) === true && P.isVerifiedHandle('genesis', { ...ctx }) === false);

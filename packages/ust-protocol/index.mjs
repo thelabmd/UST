@@ -1522,14 +1522,16 @@ export function verifyAuthorityCheckpointChain(chain, config) {
   // is closed at the type level, not by comparing extra fields. A non-handle object passed as `context` is rejected.
   if (context !== undefined) {
     if (!isHandle('genesis', context)) return { result: 'INVALID', error: 'E-AUTHORITY', detail: 'context is not a verified GenesisHandle (K3 — a caller-shaped context cannot root a chain; use verifiedGenesisContext)' };
+    // round-26 P0-01/P0-02 (rev25, model M2 L642 "never raw fields" + F.5l "recovery immutable within the epoch") — a
+    // branded context is the SOLE authority root: EVERY scope/authority/recovery parameter is a function of contentHash(g)
+    // via the ONE derivation. A raw authority-root field ALONGSIDE the context is a mixed configuration that substitutes
+    // the root the context fixes — a foreign `pinnedPrior` seized the chain scope/authority (P0-01) and raw recovery was
+    // INJECTED when the context carried none (P0-02), both while still reporting authority_root:"verified-context". Reject
+    // the whole raw family; recovery comes ONLY from the context. (The raw family stays live WITHOUT a context — consumer-pin.)
+    if (pinnedPrior !== undefined || genesis !== undefined || genesisAuthority !== undefined || recoveryKeys !== undefined || recoveryThreshold !== undefined)
+      return { result: 'INVALID', error: 'E-AUTHORITY', detail: 'a verified GenesisHandle context is the SOLE authority root — no raw pinnedPrior / genesis / genesisAuthority / recoveryKeys / recoveryThreshold may accompany it (round-26 P0-01/P0-02: never raw fields, M2/F.5l)' };
     genesisAuthority = context.checkpoint_authority; ctxGenesis = context.active_genesis; authority_root = 'verified-context';
-    // round-25 P0-02 — a verified context FIXES the recovery roots + threshold (model: "Genesis fixes a recovery key set
-    // RK, immutable within the epoch"). Raw caller recovery config CANNOT override it — a conflicting override is E-AUTHORITY,
-    // not a silent takeover. (Raw recovery roots stay available only WITHOUT a context, in the consumer-pin mode.)
-    if (context.recoveryKeys) {
-      if (recoveryKeys !== undefined || recoveryThreshold !== undefined) return { result: 'INVALID', error: 'E-AUTHORITY', detail: 'raw recoveryKeys/recoveryThreshold cannot override a verified-context recovery set (round-25 P0-02)' };
-      recoveryKeys = context.recoveryKeys; recoveryThreshold = context.recoveryThreshold;
-    }
+    if (context.recoveryKeys) { recoveryKeys = context.recoveryKeys; recoveryThreshold = context.recoveryThreshold; }   // recovery is FIXED by the genesis, never a call argument
   } else if (genesis) { const gr = resolveCheckpointRoots(genesis); if (gr?.genesisAuthority) { genesisAuthority = gr.genesisAuthority; authority_root = 'genesis'; } if (gr?.recoveryKeys && recoveryKeys === undefined) { recoveryKeys = gr.recoveryKeys; recoveryThreshold = recoveryThreshold ?? gr.recoveryThreshold; } }
   if (!genesisAuthority && !pinnedPrior) return { result: 'INDETERMINATE', reason: 'authority_unresolved', detail: 'no genesis-rooted or pinned-prior checkpoint authority to resolve the first signer' };
   // K5 (round-3 P0-2) — a mid-chain cold start roots ONLY in a full PinnedCheckpointState (a SCOPED snapshot), never a

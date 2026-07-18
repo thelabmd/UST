@@ -643,6 +643,11 @@ Every theorem from F.5g on binds objects to an AUTHORITY SCOPE. The rc.35 round-
 were read from the very objects being verified — the publisher chose the terms of its own audit (epoch-split,
 cross-domain, re-root). M2 fixes the root: ONE seam derives the scope from a VERIFIED genesis, and every downstream
 layer takes the derived context, never raw fields.
+**Realization (rev25 — one authority root).** When a branded `context` (a `GenesisHandle`) is supplied to
+`verifyAuthorityCheckpointChain` / `deriveCheckpointFreshness`, it is the SOLE root: the entire raw authority-root
+family (`pinnedPrior`, `genesis`, `genesisAuthority`, `recoveryKeys`, `recoveryThreshold`) alongside it is rejected
+`E-AUTHORITY` — a foreign `pinnedPrior` cannot seize the chain scope/authority and raw recovery cannot be injected,
+neither while reporting `verified-context` (*"C1/L1 a raw pinnedPrior alongside a branded context → INVALID(E-AUTHORITY) — the context is the SOLE root (never raw fields, M2; round-26 P0-01)"*, *"C1/L2 raw recoveryKeys/recoveryThreshold alongside a branded context → INVALID(E-AUTHORITY) — recovery is genesis-fixed, never injected from a call argument (F.5l; round-26 P0-02)"*).
 
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):
