@@ -389,7 +389,10 @@ export async function wranglerDeploy({ domain, genesisText, keylogText = null, w
   for (const [name, content] of Object.entries(files)) write(join(dir, name), content);
   const exec = execImpl ?? (async (cwd) => {
     const { spawnSync } = await import('node:child_process');
-    const r = spawnSync('npx', ['wrangler', 'deploy'], { cwd, stdio: 'inherit' });
+    // No `npx` — that would DOWNLOAD-and-run wrangler ad-hoc (a silent external fetch + arbitrary-code risk). Call the
+    // LOCAL wrangler the operator installed (declared as an OPTIONAL PEER). ENOENT → tell them to install it, never fetch.
+    const r = spawnSync('wrangler', ['deploy'], { cwd, stdio: 'inherit' });
+    if (r.error && r.error.code === 'ENOENT') { console.error('`wrangler` not found. Install it first (npm i -g wrangler, or add it to your project) — UST never fetches it for you. Then re-run `ust publish cf`.'); return 127; }
     return r.status ?? 1;
   });
   const code = await exec(dir);

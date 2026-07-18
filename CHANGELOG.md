@@ -46,6 +46,18 @@ fixes **structurally, not point-wise**. The conformance vectors + byte corpus + 
 
 See [milestones](https://github.com/thelabmd/UST-Protocol/milestones) for the live status.
 
+### Supply chain
+
+- **Zero third-party dependencies by default.** `ust-protocol`, `ust-rekor-verify`, `ust-web-signer` and `ust-lite`
+  are dependency-free. `ust-ots-verify` (`rc.9`) moved `opentimestamps` from `optionalDependencies` (which npm
+  auto-installs, pulling the deprecated `request`/`bitcore-lib` tree, ~87 packages with CVEs) to an **optional peer**
+  — it is lazily loaded only if the operator installs it, so a default install is dependency-free.
+- **`@ust-protocol/cli` (`rc.41`) no longer shells out via `npx`.** The `ust publish cf` ceremony calls a locally
+  installed `wrangler` (declared as an optional peer) rather than `npx wrangler`, which would download-and-run it
+  ad-hoc. `gh` remains a documented external system tool. No package has install scripts.
+- `@ust-protocol/mcp` requires the official `@modelcontextprotocol/sdk` — that (and only that) surface carries a
+  third-party tree, by necessity.
+
 ## Earlier (rc.6 → rc.36)
 
 - **Assurance product-lattice** — the measure-theoretic model; the tier as one monotone policy projection (#76, #78).
