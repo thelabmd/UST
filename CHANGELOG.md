@@ -15,6 +15,7 @@ fixes **structurally, not point-wise**. The conformance vectors + byte corpus + 
 
 | rev | round | what closed |
 |-----|-------|-------------|
+| **rev19** | 21 (self-catch) | the rev18 P1-02 `forkChoice` content-hash dedupe was itself *lossy* — `content_hash` covers state, not `proof`, so a candidate with a valid anchor proof was dropped behind a same-state one with an invalid proof, hiding an equivocation; dedupe removed (the candidate budget alone caps the fan-out) |
 | **rev18** | 21 | the rev17 witness fan-out fix was *lossy* — first-wins dedupe + `slice()` truncation discarded a rival's anchor then minted HIGH; now the served list is UNIONed (no `anchor`/`anchors` shadow) and an over-budget input is REFUSED (`resource_limit`), never truncated; witness connector throws are caught (unavailable, not a host exception); `forkChoice` candidate budget + content-hash dedupe |
 | **rev17** | 20 | witness crosses the same raw-byte dup-member boundary as genesis/key-log; null-proto `admitOpts` (`__proto__` injection); F.9 structural fan-out budget; `forkChoice` admits opts |
 | **rev16** | 19 | `forkChoice` snapshot-before-every-read (no live fallback); substrate closed-ADT own-data; ONE Unicode byte-admission shared with the byte checker |

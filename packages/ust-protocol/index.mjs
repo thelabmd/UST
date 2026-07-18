@@ -1179,13 +1179,11 @@ export async function forkChoice(candidates, opts = {}) {
   const vopts = { ...opts, requireAnchored: false, requireAuthoritative: false };
   // the object returned as canonical MUST be the exact snapshot dᵢ whose content_hash is in F_t (F.5c) — verify the
   // SAME frozen dᵢ that is grouped and returned, so classification, content_hash, and returned value cannot diverge.
-  // round-21 P1-02 — dedupe by content_hash BEFORE verifying: identical bytes yield an identical verdict, so N copies of
-  // one doc are ONE verification, not N substrate calls. Safe (unlike the witness fan-out): canonical is a FUNCTION of the
-  // DISTINCT content_hashes, so dropping an exact byte-duplicate cannot change which content_hash wins. A snapshot whose
-  // canon throws is not deduped (a unique key) — it flows on to verifyAsync and is rejected there.
-  const bySnap = new Map();
-  for (const d of snaps) { let h; try { h = contentHash(d); } catch { h = {}; } if (!bySnap.has(h)) bySnap.set(h, d); }
-  const verds = await Promise.all([...bySnap.values()].map(async (d) => ({ doc: d, v: await verifyAsync(d, vopts) })));
+  // round-21 P1-02 — the candidate BUDGET above bounds the fan-out; there is NO dedupe. rev18 dedup'd by content_hash,
+  // which was LOSSY (round-22 self-catch): content_hash covers the STATE, not the `proof`, so two candidates with one
+  // state but different anchor proofs collapsed — dropping a VALID proof behind an invalid one and HIDING an
+  // equivocation (the same lossy-projection class the witness fix closed). Verify EVERY snapshot; the budget caps the work.
+  const verds = await Promise.all(snaps.map(async (d) => ({ doc: d, v: await verifyAsync(d, vopts) })));
   const anchored = [], losers = [], invalid = [], unauthenticated = [];
   for (const { doc, v } of verds) {
     if (!/^VALID:/.test(v.result || '')) { invalid.push({ result: v.result, detail: v.detail }); continue; }

@@ -598,6 +598,15 @@ console.log('\n═════════════════════�
   const bigWit = wlog(Array.from({ length: 300 }, (_, i) => ({ content_hash: 'sha256:' + String(i).padStart(64, '0'), superseded_by: null, anchor: anchorOf('sha256:' + String(i).padStart(64, '0')) })), gHash);
   const r21p2 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(bigWit), substrateVerify: final });
   check('round-21 P2-01 over-budget witness → machine-readable resource_limit in the resolution', /resource_limit/.test(JSON.stringify(r21p2.resolution || {})));
+  // rev19 (round-22 self-catch) — the rev18 P1-02 forkChoice content_hash dedupe was itself LOSSY: content_hash covers
+  // the STATE, not the `proof`, so a snapshot with a valid proof behind one with an invalid proof (same content_hash) was
+  // dropped — hiding anchor-inclusion (the same lossy-projection class the witness fix closed). No dedupe now; the budget
+  // caps the work. A valid proof in a later same-state candidate must still be seen.
+  const badProof = { root: 'sha256:' + '00'.repeat(32), path: [], anchor: { substrate: 'bitcoin-ots' } };
+  const withBad = { ...gkDoc, proof: badProof };
+  const withGood = { ...gkDoc, proof: anchorOf(P.contentHash(gkDoc)) };
+  const rDedupe = await P.forkChoice([withBad, withGood], { genesis: gen, keylog: [], ...nfe(gen), substrateVerify: final });
+  check('rev19 forkChoice does NOT content_hash-dedupe away a valid proof (same state, later valid proof still seen) → CANONICAL', rDedupe.result === 'CANONICAL' && P.contentHash(rDedupe.canonical) === P.contentHash(gkDoc));
 
   const r4 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog), substrateVerify: () => ({ final: false }) });
   check('anchor not final (Bitcoin pending) = no HIGH, honest pending', r4.verdict.result === 'VALID:LIGHT' && r4.resolution.noFork.startsWith('HIGH pending'));
