@@ -1203,14 +1203,22 @@ export async function forkChoice(candidates, opts = {}) {
   const byAuth = new Map();
   for (const a of anchored) { if (!byAuth.has(a.authority)) byAuth.set(a.authority, new Set()); byAuth.get(a.authority).add(a.content_hash); }
   for (const [authority, hashes] of byAuth) if (hashes.size >= 2)
-    return { result: 'E-PREV', ust_id, authority, detail: `operator equivocation: authority ${authority} anchored ${hashes.size} distinct content_hashes for one ust_id`, content_hashes: [...hashes] };
+    return { result: 'E-PREV', ust_id, authority, detail: `operator equivocation: authority ${authority} anchored ${hashes.size} distinct content_hashes for one ust_id`, content_hashes: [...hashes].sort() };   // sorted — set-determined, not arrival-order
   if (byAuth.size > 1)                                                 // distinct NAMES sharing a ust_id string — not a fork; canonicity is per-authority
-    return { result: 'MULTI_AUTHORITY', ust_id, detail: 'distinct authorities anchored the same ust_id string — not a fork (canonicity is per-authority)', canonicals: anchored.map((a) => ({ authority: a.authority, content_hash: a.content_hash })) };
-  const winner = anchored[0];                                         // one authority, one distinct anchored content_hash → THE canonical
+    return { result: 'MULTI_AUTHORITY', ust_id, detail: 'distinct authorities anchored the same ust_id string — not a fork (canonicity is per-authority)', canonicals: anchored.map((a) => ({ authority: a.authority, content_hash: a.content_hash })).sort((x, y) => (x.authority + x.content_hash < y.authority + y.content_hash ? -1 : 1)) };
+  // round-22 P1-01 — the returned canonical must be a function of the candidate SET, not arrival order (F.5c: "two
+  // consumers with the same candidate set … emit the SAME canonical"). All `anchored` here share ONE content_hash (byAuth
+  // passed), but they may be equal-state / different-valid-proof variants; pick the one with the smallest canonical
+  // serialization so `forkChoice([A,B])` and `forkChoice([B,A])` return the identical document.
+  let winner = anchored[0], winnerKey; try { winnerKey = canon(winner.doc); } catch { winnerKey = '￿'; }
+  for (const a of anchored) { let k; try { k = canon(a.doc); } catch { continue; } if (k < winnerKey) { winner = a; winnerKey = k; } }
+  // round-22 P1-01 (self-audit) — the WHOLE return is a function of the candidate SET, not arrival order: sort every
+  // diagnostic array deterministically so two consumers with the same set emit byte-identical output, not just the same canonical.
+  const bh = (x, y) => (x.content_hash < y.content_hash ? -1 : x.content_hash > y.content_hash ? 1 : 0);
   return { result: 'CANONICAL', ust_id, authority: winner.authority, content_hash: winner.content_hash, tier: winner.tier, canonical: winner.doc,
-    losers: losers.map((l) => ({ content_hash: l.content_hash, tier: l.tier, reason: 'valid but not anchor-included for this slot (out-raced or unanchored)' })),
-    ...(unauthenticated.length ? { unauthenticated } : {}),           // key-unbound impostors under a claimed name — recorded, never canonical
-    ...(invalid.length ? { invalid } : {}) };
+    losers: losers.slice().sort(bh).map((l) => ({ content_hash: l.content_hash, tier: l.tier, reason: 'valid but not anchor-included for this slot (out-raced or unanchored)' })),
+    ...(unauthenticated.length ? { unauthenticated: unauthenticated.slice().sort(bh) } : {}),   // key-unbound impostors under a claimed name — recorded, never canonical
+    ...(invalid.length ? { invalid: invalid.slice().sort((x, y) => (JSON.stringify(x) < JSON.stringify(y) ? -1 : 1)) } : {}) };
 }
 
 // ─── #44 AGENT-SAFETY: throw-on-non-VALID. `isValid(r)` returns a bool an agent can IGNORE (catch the error,
@@ -2193,23 +2201,35 @@ export async function witnessNoFork(shard, genesisHash, { fetchImpl = fetch, sub
   // REFUSAL (INDETERMINATE resource_limit), NEVER a truncation that could delete the one rival proof.
   const OVER = (detail) => ({ status: 'indeterminate', reason: 'resource_limit', detail });   // round-21 P2-01 — machine-readable, not 'unreachable'
   if (log.genesis_log.length > BOUNDS.witnessEntries) return OVER(`witness genesis_log has ${log.genesis_log.length} entries > ${BOUNDS.witnessEntries} (§F.9 — structural fan-out refused, never truncated; round-21 P0-02)`);
-  const byHash = new Map();
+  // round-22 P0-01 — GROUP the full equivalence class by content_hash BEFORE any status projection. rev18/rev19 filtered
+  // `superseded_by` FIRST, so an active record + a superseded record for the SAME rival hash let the superseded record's
+  // valid anchor be dropped → false corroborated. Now: group ALL entries; record BOTH observed statuses; SET-union proofs
+  // (round-22 P2-01 — dedupe byte-identical proofs by canon, so duplicate serialization can't consume the structural cap).
+  const byHash = new Map();   // content_hash → { active, superseded, proofs: Map<canon, proof> }
   for (const g of log.genesis_log) {
-    if (!g || g.superseded_by || !/^sha256:[0-9a-f]{64}$/.test(g.content_hash || '')) continue;
-    const proofs = [...(Array.isArray(g.anchors) ? g.anchors : []), ...(g.anchor ? [g.anchor] : [])];   // UNION — never an anchor-vs-anchors first-wins shadow (round-21 P0-01)
-    if (!byHash.has(g.content_hash)) byHash.set(g.content_hash, []);
-    byHash.get(g.content_hash).push(...proofs);                                                          // MERGE evidence across repeated content_hash entries (no first-wins loss)
+    if (!g || typeof g !== 'object' || !/^sha256:[0-9a-f]{64}$/.test(g.content_hash || '')) continue;
+    let e = byHash.get(g.content_hash);
+    if (!e) { e = { active: false, superseded: false, proofs: new Map() }; byHash.set(g.content_hash, e); }
+    if (g.superseded_by) e.superseded = true; else e.active = true;                                      // record BOTH — a hash seen active AND superseded is a contradiction
+    for (const p of [...(Array.isArray(g.anchors) ? g.anchors : []), ...(g.anchor ? [g.anchor] : [])]) { let k; try { k = canon(p); } catch { k = JSON.stringify(p); } if (!e.proofs.has(k)) e.proofs.set(k, p); }
   }
-  if (byHash.size > BOUNDS.witnessActive) return OVER(`witness has ${byHash.size} distinct active roots > ${BOUNDS.witnessActive} (§F.9 — refused, never truncated; round-21 P0-02)`);
-  for (const [h, proofs] of byHash) if (proofs.length > BOUNDS.anchorsPerGenesis) return OVER(`active genesis ${h.slice(0, 20)}… carries ${proofs.length} anchors > ${BOUNDS.anchorsPerGenesis} (§F.9 — witness evaluation refused, never truncated; round-21 P0-02)`);
+  // round-22 P0-01 — reconcile status AFTER grouping: a content_hash listed BOTH active and superseded is a contradictory
+  // witness (a rival cannot be quietly 'superseded' on one record to erase its anchor from the active count) → fail closed.
+  const active = [];
+  for (const [content_hash, e] of byHash) {
+    if (e.active && e.superseded) return { status: 'unreachable', detail: `witness lists ${content_hash.slice(0, 20)}… as BOTH active and superseded — contradictory, fail closed (round-22 P0-01)` };
+    if (e.active) active.push({ content_hash, proofs: [...e.proofs.values()] });   // purely-superseded roots are not active
+  }
+  if (active.length > BOUNDS.witnessActive) return OVER(`witness has ${active.length} distinct active roots > ${BOUNDS.witnessActive} (§F.9 — refused, never truncated; round-21 P0-02)`);
+  for (const a of active) if (a.proofs.length > BOUNDS.anchorsPerGenesis) return OVER(`active genesis ${a.content_hash.slice(0, 20)}… carries ${a.proofs.length} UNIQUE anchors > ${BOUNDS.anchorsPerGenesis} (§F.9 — refused, never truncated; round-21 P0-02)`);
   const anchoredActive = [];
-  for (const [content_hash, proofs] of byHash) if (await anchoredByProofs(content_hash, proofs, substrateVerify)) anchoredActive.push({ content_hash });
+  for (const a of active) if (await anchoredByProofs(a.content_hash, a.proofs, substrateVerify)) anchoredActive.push({ content_hash: a.content_hash });
   if (anchoredActive.length >= 2) return { status: 'fork', detail: `${anchoredActive.length} anchored active genesis roots for ${shard} — a rival name-binding root exists` };
   if (anchoredActive.length === 1) {
     if (anchoredActive[0].content_hash !== genesisHash) return { status: 'fork', detail: `the anchored active genesis (${anchoredActive[0].content_hash.slice(0, 20)}…) differs from the one served at /.well-known/ust-genesis` };
     return { status: 'confirmed', detail: 'a single anchored active genesis, cross-checked against its substrate — no rival root' };
   }
-  return { status: 'pending', detail: byHash.size ? 'genesis present in the witness log but no anchor is final yet (substrate) — no-fork not yet evidence' : 'no active genesis in the witness log' };
+  return { status: 'pending', detail: active.length ? 'genesis present in the witness log but no anchor is final yet (substrate) — no-fork not yet evidence' : 'no active genesis in the witness log' };
 }
 
 // Multi-substrate router (#68): a verifier may understand SEVERAL anchor substrates (Bitcoin-OTS, Rekor,
@@ -2220,7 +2240,9 @@ export async function witnessNoFork(shard, genesisHash, { fetchImpl = fetch, sub
 export function combineSubstrates(verifiers) {
   const list = (Array.isArray(verifiers) ? verifiers : [verifiers]).filter(Boolean);
   return async (anchor, root) => {
-    for (const v of list) { const r = await v(anchor, root); if (r != null) return r; }
+    // round-22 P1-02 — ISOLATE each plugin: a throwing/unreachable connector must not shadow a later independent one
+    // that CAN verify this substrate. A rejected promise from one plugin is that plugin's unavailability, not the seam's.
+    for (const v of list) { let r; try { r = await v(anchor, root); } catch { continue; } if (r != null) return r; }
     return null;   // no plugin claimed this substrate → verifyAnchor reports 'unavailable' (honest, not INVALID)
   };
 }

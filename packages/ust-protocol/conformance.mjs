@@ -608,6 +608,33 @@ console.log('\n═════════════════════�
   const rDedupe = await P.forkChoice([withBad, withGood], { genesis: gen, keylog: [], ...nfe(gen), substrateVerify: final });
   check('rev19 forkChoice does NOT content_hash-dedupe away a valid proof (same state, later valid proof still seen) → CANONICAL', rDedupe.result === 'CANONICAL' && P.contentHash(rDedupe.canonical) === P.contentHash(gkDoc));
 
+  // ─── round-22 (rev20) — the rev18/rev19 witness UNION + forkChoice fix were STILL lossy/non-deterministic ─────────────
+  // P0-01 — status is reconciled AFTER grouping by content_hash: a hash listed BOTH active and superseded is contradictory
+  // (a rival cannot be quietly 'superseded' on one record to erase its anchor from the active count) → fail closed.
+  const conflictLog = wlog([
+    { content_hash: gHash, superseded_by: null, anchor: anchorOf(gHash) },
+    { content_hash: gHashB, superseded_by: null },                                       // rival, active, no anchor
+    { content_hash: gHashB, superseded_by: 'sha256:' + 'ff'.repeat(32), anchor: anchorOf(gHashB) },   // SAME rival, superseded, WITH a valid anchor
+  ], gHash);
+  const r22a = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(conflictLog), substrateVerify: final });
+  check('round-22 P0-01 rival listed active AND superseded (anchor on the superseded record) → fail closed, never false HIGH', r22a.verdict.result !== 'VALID:HIGH');
+  // P1-01 — forkChoice returns a DETERMINISTIC full document for equal-state / different-valid-proof candidates (F.5c).
+  const pA = anchorOf(P.contentHash(gkDoc)); const pB = { ...anchorOf(P.contentHash(gkDoc)), anchor: { substrate: 'test2' } };
+  const cA = { ...gkDoc, proof: pA }, cB = { ...gkDoc, proof: pB };
+  const svBoth = async (a, root) => root === pA.root ? { final: true, time: '2026-07-13T14:05:00Z' } : null;
+  const fAB = await P.forkChoice([cA, cB], { genesis: gen, keylog: [], ...nfe(gen), substrateVerify: svBoth });
+  const fBA = await P.forkChoice([cB, cA], { genesis: gen, keylog: [], ...nfe(gen), substrateVerify: svBoth });
+  check('round-22 P1-01 forkChoice same set, reversed order → byte-identical full output (F.5c: canonical is set-determined)', JSON.stringify(fAB) === JSON.stringify(fBA));
+  // P1-02 — combineSubstrates isolates a throwing plugin so a later valid plugin still verifies the anchor.
+  const combined = P.combineSubstrates([() => { throw new Error('plugin down'); }, async () => ({ final: true, time: '2026-07-13T14:05:00Z' })]);
+  const r22c = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog), substrateVerify: combined });
+  check('round-22 P1-02 combineSubstrates: a throwing plugin does not shadow a later valid one → HIGH still reachable', r22c.verdict.result === 'VALID:HIGH');
+  // P2-01 — byte-identical duplicate proofs are SET-UNIONed (deduped) before the structural cap, not counted against it.
+  const dupAnchor = anchorOf(gHash);
+  const dupProofsLog = wlog([{ content_hash: gHash, superseded_by: null, anchors: Array.from({ length: 9 }, () => dupAnchor) }], gHash);
+  const r22d = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(dupProofsLog), substrateVerify: final });
+  check('round-22 P2-01 nine byte-identical proofs → set-unioned to one, under the cap → HIGH (not a false resource_limit)', r22d.verdict.result === 'VALID:HIGH');
+
   const r4 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog), substrateVerify: () => ({ final: false }) });
   check('anchor not final (Bitcoin pending) = no HIGH, honest pending', r4.verdict.result === 'VALID:LIGHT' && r4.resolution.noFork.startsWith('HIGH pending'));
 
