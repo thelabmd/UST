@@ -468,8 +468,9 @@ console.log('\n═════════════════════�
   //   tight budget + a never-settling substrate resource-limits the witness (two canon-distinct anchors: the whole-op
   //   deadline trips on the 2nd leaf, deterministic), so the tier does NOT upgrade to a served-list HIGH after the budget.
   const leafRoot = P.Hbytes('ust:leaf', Buffer.from(gHash, 'utf8'));
-  const twoAnchorLog = wlog([{ content_hash: gHash, superseded_by: null, anchors: [{ root: leafRoot, path: [], anchor: { substrate: 'bitcoin-ots', block_height: 900001 } }, { root: leafRoot, path: [], anchor: { substrate: 'bitcoin-ots', block_height: 900002 } }] }], gHash);
-  const rBudget = await P.resolveByDiscovery(doc, { context: 'data', maxWitnessOpMs: 20 }, { fetchImpl: mk(twoAnchorLog), substrateVerify: () => new Promise(() => {}) });
+  const budgetAnchors = [900001, 900002, 900003, 900004].map((h) => ({ root: leafRoot, path: [], anchor: { substrate: 'bitcoin-ots', block_height: h } }));   // ≥3 canon-distinct anchors → the whole-op deadline trips deterministically under CI load
+  const budgetLog = wlog([{ content_hash: gHash, superseded_by: null, anchors: budgetAnchors }], gHash);
+  const rBudget = await P.resolveByDiscovery(doc, { context: 'data', maxWitnessOpMs: 50 }, { fetchImpl: mk(budgetLog), substrateVerify: () => new Promise(() => {}) });
   check('round-26 P1-03/L4 resolveByDiscovery THREADS the consumer witness budget (maxWitnessOpMs) through the PUBLIC entry → a tight budget resource-limits the witness, no false served-list HIGH (F.9 ρ_v)',
     rBudget.verdict.no_fork !== 'served-list');
   // round-18 P0-01 — forkChoice returns the IMMUTABLE snapshot: a live mutation during the substrate await cannot make the returned canonical object differ from its proven content_hash (F.5c: canonical = the dᵢ with content_hash(dᵢ) ∈ F_t). Genesis-key-signed doc ⇒ authoritative with no key-log.
@@ -1121,13 +1122,16 @@ console.log('\n═════════════════════�
     const AGW = 'sha256:' + 'ab'.repeat(32), shard = 'w.example';
     const wRoot = P.Hbytes('ust:leaf', Buffer.from(AGW, 'utf8'));                       // single-leaf inclusion so anchoredByProofs reaches the substrate call
     const wp = (n) => ({ root: wRoot, path: [], anchor: { substrate: 'test-anchor', n } });   // canon-distinct proofs → the op-deadline check runs between leaves
-    const log = JSON.stringify({ domain_shard: shard, genesis_log: [{ content_hash: AGW, anchors: [wp('1'), wp('2')] }] });
+    // ≥3 canon-distinct anchors + a comfortable budget make the whole-op deadline trip DETERMINISTICALLY under CI load:
+    // even if an early leaf's withDeadline timer fires slightly under the budget (jitter), a LATER leaf's op-deadline
+    // check reliably sees Date.now() ≥ opDeadline (2 anchors could just miss on a loaded runner → the round-27 CI flake).
+    const log = JSON.stringify({ domain_shard: shard, genesis_log: [{ content_hash: AGW, anchors: [wp('1'), wp('2'), wp('3'), wp('4')] }] });
     const fetchW = async () => ({ ok: true, headers: { get: () => undefined }, arrayBuffer: async () => new TextEncoder().encode(log).buffer });
-    const neverSV = () => new Promise(() => {});                                        // never settles — DETERMINISTIC: each leaf can only reach the deadline, never resolve early (no wall-clock race)
+    const neverSV = () => new Promise(() => {});                                        // never settles — a leaf can only reach the deadline, never resolve early (no false 'confirmed')
     const fastSV = () => ({ final: true, time: '2027-01-01T00:00:00Z' });
-    const capped = await P.witnessNoFork(shard, AGW, { fetchImpl: fetchW, substrateVerify: neverSV, maxWitnessOpMs: 20 });
+    const capped = await P.witnessNoFork(shard, AGW, { fetchImpl: fetchW, substrateVerify: neverSV, maxWitnessOpMs: 50 });
     check('F.9 T_v realization: the whole-operation witness budget is min(reference default, consumer deadline) — a tighter consumer deadline trips INDETERMINATE(resource_limit) naming the effective budget',
-      capped.status === 'indeterminate' && capped.reason === 'resource_limit' && capped.detail.includes('20 ms whole-operation budget'));
+      capped.status === 'indeterminate' && capped.reason === 'resource_limit' && capped.detail.includes('50 ms whole-operation budget'));
     check('F.9 T_v control: the same witness with no consumer cap verifies (confirmed) — the cap lowers decisibility, never flips a verdict',
       (await P.witnessNoFork(shard, AGW, { fetchImpl: fetchW, substrateVerify: fastSV })).status === 'confirmed');
   }
