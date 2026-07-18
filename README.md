@@ -10,6 +10,8 @@
 
 ![UST status: `1.0.0-rc.36` — a release candidate, not a final 1.0. Verify machine-readable state without trusting whoever handed it to you. Multiple external AI reviews incorporated structurally; an independent human cryptographic audit is pending; suitable for evaluation and integration testing. The wire format ust:"1.0" is stable across all release candidates; pin exact versions.](.github/status.svg)
 
+> **Status: `1.0.0-rc.36`** — a release candidate, not a final 1.0. External AI reviews are folded in structurally; an independent human cryptographic audit is pending. Suitable for evaluation and integration testing. The wire format `ust:"1.0"` is stable across all rc's — pin exact versions. *(This line mirrors the panel above as plain text, for readers and agents that don't render the image.)*
+
 ## What this is
 
 UST is a small open protocol for **tamper-evident records of state** — some data about the world, at a moment,

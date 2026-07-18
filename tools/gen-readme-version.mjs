@@ -11,15 +11,20 @@ import { VERSION } from '../packages/ust-protocol/index.mjs';
 // 1) README status — the Status prose moved into the TUI SVG panel (gen-status-svg.mjs, .github/status.svg); the markdown
 // carries it as the image ALT text (searchable + screen-reader text). Replace only the version token in that alt's backticks.
 const readmePath = new URL('../README.md', import.meta.url);
-const readme = readFileSync(readmePath, 'utf8');
-const reReadme = /(!\[UST status:\s*`)[^`]+(`)/;
-if (!reReadme.test(readme)) {
-  console.error('  ✗ README status image not found (expected an "![UST status: `<version>` — …](.github/status.svg)" line) — update the anchor if the README format changed');
-  process.exit(1);
+let readme = readFileSync(readmePath, 'utf8');
+// TWO version tokens track VERSION.spec: the status image ALT (searchable text agents read) AND the plain-text Status
+// blockquote below it (the fallback for readers/agents that don't render the image). Both are stamped + git-diff-gated.
+const anchors = [
+  { re: /(!\[UST status:\s*`)[^`]+(`)/, what: 'status image alt' },
+  { re: /(\*\*Status:\s*`)[^`]+(`\*\*)/, what: 'status text blockquote' },
+];
+for (const { re, what } of anchors) {
+  if (!re.test(readme)) { console.error(`  ✗ README ${what} anchor not found — update tools/gen-readme-version.mjs if the README format changed`); process.exit(1); }
+  const before = (readme.match(re) || [])[0];
+  readme = readme.replace(re, `$1${VERSION.spec}$2`);
+  console.log(`  ✓ README ${what} → ${VERSION.spec}` + (before.includes(VERSION.spec) ? '  [already in sync]' : `  [was: ${before.replace(/[^0-9a-z.\-]/gi, '').replace(/^UST.*?status|Status/i, '')}]`));
 }
-const readmeBefore = (readme.match(reReadme) || [])[0];
-writeFileSync(readmePath, readme.replace(reReadme, `$1${VERSION.spec}$2`));
-console.log(`  ✓ README status alt → ${VERSION.spec} (canonical VERSION.spec)` + (readmeBefore.includes(VERSION.spec) ? '  [already in sync]' : `  [was: ${readmeBefore.replace(/!\[UST status:\s*`|`/g, '')}]`));
+writeFileSync(readmePath, readme);
 
 // 2) root package.json version — the FIRST `"version": "..."` in the file is the root package's own (deps never use that
 // key). Replace only that token, so JSON formatting is byte-preserved (no reformat, minimal diff).
