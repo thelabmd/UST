@@ -1,0 +1,22 @@
+# Dependabot — keep the pinned GitHub Actions and the npm dependency tree current (OpenSSF Dependency-Update-Tool).
+# Actions are pinned by commit SHA in the workflows; Dependabot bumps those SHAs (with the version comment) when a new
+# release lands, so pinning stays SECURE without going stale.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    labels:
+      - dependencies
