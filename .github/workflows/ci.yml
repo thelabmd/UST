@@ -44,7 +44,7 @@ jobs:
         run: npm run test:web-signer
       - name: MCP live stdio transport (CWD-independent)
         run: npm run test:mcp-live
-      - name: dependency audit — no critical advisories in the non-optional tree (P1-08)
+      - name: dependency audit — no critical advisories in the SHIPPED (production) tree (P1-08)
         run: npm run test:audit
       - name: npm-drift gate (a published version is immutable)
         run: node tools/npm-drift-check.mjs
