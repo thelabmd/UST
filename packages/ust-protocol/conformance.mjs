@@ -625,6 +625,14 @@ console.log('\n═════════════════════�
   const fAB = await P.forkChoice([cA, cB], { genesis: gen, keylog: [], ...nfe(gen), substrateVerify: svBoth });
   const fBA = await P.forkChoice([cB, cA], { genesis: gen, keylog: [], ...nfe(gen), substrateVerify: svBoth });
   check('round-22 P1-01 forkChoice same set, reversed order → byte-identical full output (F.5c: canonical is set-determined)', JSON.stringify(fAB) === JSON.stringify(fBA));
+  // round-23 P1-03/04 — the order key is TOTAL even when canon(doc) THROWS (a proof carrying a numeric diagnostic that
+  // canon rejects but verifyAnchor accepts). rev20 fell back to arrival order here; rev21 uses JSON.stringify (total).
+  const rootN = anchorOf(P.contentHash(gkDoc)).root;
+  const pN = (n) => ({ root: rootN, path: [], anchor: { substrate: 'test', block: n } });   // numeric extra → canon(doc) throws
+  const svN = async (a, root) => root === rootN ? { final: true, time: '2026-07-13T14:05:00Z' } : null;
+  const gnAB = await P.forkChoice([{ ...gkDoc, proof: pN(900001) }, { ...gkDoc, proof: pN(900002) }], { genesis: gen, keylog: [], ...nfe(gen), substrateVerify: svN });
+  const gnBA = await P.forkChoice([{ ...gkDoc, proof: pN(900002) }, { ...gkDoc, proof: pN(900001) }], { genesis: gen, keylog: [], ...nfe(gen), substrateVerify: svN });
+  check('round-23 P1-03 forkChoice total order even when canon(doc) throws (numeric proof extra) → byte-identical output', JSON.stringify(gnAB) === JSON.stringify(gnBA) && gnAB.result === 'CANONICAL');
   // P1-02 — combineSubstrates isolates a throwing plugin so a later valid plugin still verifies the anchor.
   const combined = P.combineSubstrates([() => { throw new Error('plugin down'); }, async () => ({ final: true, time: '2026-07-13T14:05:00Z' })]);
   const r22c = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog), substrateVerify: combined });
@@ -1037,6 +1045,14 @@ console.log('\n═════════════════════�
   check('PhC witnesses signing NON-identical claims → mismatches dropped → quorum not met', VU([ua(Wa, { observed_map_root: 'sha256:' + 'a1'.repeat(32) }), ua(Wb, { observed_map_root: 'sha256:' + 'b2'.repeat(32) })]).attested === false);
   check('PhC witness NOT in consumer trustRoots → not admitted', P.verifyCheckpointUniqueness([ua(Wa), ua(Wb)], { domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, trustRoots: { [Wa.key_id]: Wa.pubB64 }, domains, threshold: 2 }).attested === false);
   check('PhC self-declared trust_domain inside the claim → rejected', VU([{ claim: { ...P.checkpointUniquenessClaim({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId }), trust_domain: 'independent-7' }, issuer_id: Wa.key_id, sig: ua(Wa).sig }, ua(Wb)]).attested === false);
+  // ─── round-23 (rev21) — the quorum evidence surface had the SAME class as witness/forkChoice, never applied to it ────
+  // P0-01 — two issuers mapped to structurally-equal OBJECT trust-domains must NOT count as two independent voters (a Set
+  // of objects counts by identity → a fake quorum). Only NFC strings are admitted domains.
+  check('round-23 P0-01 object trust-domains (structurally equal) do not fake independence → attested:false', P.verifyCheckpointUniqueness([ua(Wa), ua(Wb)], { domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: headId, trustRoots, domains: { [Wa.key_id]: { name: 'same' }, [Wb.key_id]: { name: 'same' } }, threshold: 2 }).attested === false);
+  // P1-01 — the quorum full output is set-determined (voters/tags sorted in the M5 core), not arrival-order.
+  check('round-23 P1-01 quorum full output is order-independent (voters/tags sorted)', JSON.stringify(VU([ua(Wa), ua(Wb)])) === JSON.stringify(VU([ua(Wb), ua(Wa)])) && VU([ua(Wa), ua(Wb)]).attested === true);
+  // P1-02 — null / non-record config is total on the exported quorum surfaces (structured, never a host throw).
+  check('round-23 P1-02 quorum functions total for null config (no host throw)', (() => { try { P.verifyCheckpointUniqueness([], null); P.verifyCheckpointRecovery([], null); P.quorumTrustDomains([], null); return true; } catch { return false; } })());
   check('PhC uniqueness for a DIFFERENT checkpoint → not admitted (binding)', VU([P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: 'sha256:' + '00'.repeat(32) }, Wa.priv, Wa.pubB64), ua(Wb)]).attested === false);
 
   // ── M5 (UST-6vj) — ONE QUORUM ALGEBRA: admit → group → count → adjudicate; uniqueness and recovery are instances.

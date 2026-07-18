@@ -949,14 +949,16 @@ export function compareEvidenceOrder(a, b) {
 // quorumTrustDomains(list, { domains, threshold }): count DISTINCT CONSUMER-resolved trust domains. `domains` maps a
 // verified source_id → trustDomain (consumer config). Sources absent from `domains` are NOT admitted; a `trust_domain`
 // carried on the evidence itself is ignored. Multiple sources in one domain count once.
-export function quorumTrustDomains(list, { domains = {}, threshold } = {}) {
+export function quorumTrustDomains(list, config) {
+  const c = admitOpts(config); if (c === null) return { count: 0, domains: [], met: false, detail: 'config must be an inert record (round-23 P1-02)' };   // round-23 P1-02 — total boundary
+  const { domains = {}, threshold } = c;
   const seen = new Set();
   for (const e of Array.isArray(list) ? list : []) {
     const sid = e?.source_id ?? e?.facts?.source_id;
     const dom = sid !== undefined ? domains[sid] : undefined;                          // consumer-resolved ONLY
-    if (dom !== undefined) seen.add(dom);
+    if (typeof dom === 'string') seen.add(dom.normalize('NFC'));                        // round-23 P0-01 — NFC string domains only; a non-string value counts by object identity → a fake independent quorum
   }
-  const arr = [...seen];
+  const arr = [...seen].sort();                                                        // round-23 P1-01 — canonical order
   // M5 ValidThreshold — uniform across EVERY quorum surface (the rc.35 round-2 sibling of P0-4: threshold ≤ 0 here
   // made `met: true` from an EMPTY evidence list). A non-positive/non-integer threshold never satisfies a quorum.
   if (threshold !== undefined && (!Number.isInteger(threshold) || threshold < 1))
@@ -1210,15 +1212,19 @@ export async function forkChoice(candidates, opts = {}) {
   // consumers with the same candidate set … emit the SAME canonical"). All `anchored` here share ONE content_hash (byAuth
   // passed), but they may be equal-state / different-valid-proof variants; pick the one with the smallest canonical
   // serialization so `forkChoice([A,B])` and `forkChoice([B,A])` return the identical document.
-  let winner = anchored[0], winnerKey; try { winnerKey = canon(winner.doc); } catch { winnerKey = '￿'; }
-  for (const a of anchored) { let k; try { k = canon(a.doc); } catch { continue; } if (k < winnerKey) { winner = a; winnerKey = k; } }
-  // round-22 P1-01 (self-audit) — the WHOLE return is a function of the candidate SET, not arrival order: sort every
-  // diagnostic array deterministically so two consumers with the same set emit byte-identical output, not just the same canonical.
-  const bh = (x, y) => (x.content_hash < y.content_hash ? -1 : x.content_hash > y.content_hash ? 1 : 0);
+  // round-23 P1-03 — the ordering key must be TOTAL over the admitted candidate domain: canon(doc) can THROW on outer
+  // proof extras (a valid TOP doc whose proof carries numeric diagnostics), which left winner=anchored[0] (arrival order).
+  // JSON.stringify over the inert snapshot never throws and is a total order, so min is set-determined for EVERY candidate.
+  const jkey = (d) => { try { return JSON.stringify(d); } catch { return ''; } };
+  let winner = anchored[0], winnerKey = jkey(winner.doc);
+  for (const a of anchored) { const k = jkey(a.doc); if (k < winnerKey) { winner = a; winnerKey = k; } }
+  // round-22 P1-01 + round-23 P1-04 — the WHOLE return is a function of the candidate SET; every diagnostic array is
+  // sorted by its FULL record (a total tie-break), because content_hash alone leaves equal-hash records in arrival order.
+  const bj = (x, y) => { const a = jkey(x), b = jkey(y); return a < b ? -1 : a > b ? 1 : 0; };
   return { result: 'CANONICAL', ust_id, authority: winner.authority, content_hash: winner.content_hash, tier: winner.tier, canonical: winner.doc,
-    losers: losers.slice().sort(bh).map((l) => ({ content_hash: l.content_hash, tier: l.tier, reason: 'valid but not anchor-included for this slot (out-raced or unanchored)' })),
-    ...(unauthenticated.length ? { unauthenticated: unauthenticated.slice().sort(bh) } : {}),   // key-unbound impostors under a claimed name — recorded, never canonical
-    ...(invalid.length ? { invalid: invalid.slice().sort((x, y) => (JSON.stringify(x) < JSON.stringify(y) ? -1 : 1)) } : {}) };
+    losers: losers.map((l) => ({ content_hash: l.content_hash, tier: l.tier, reason: 'valid but not anchor-included for this slot (out-raced or unanchored)' })).sort(bj),
+    ...(unauthenticated.length ? { unauthenticated: unauthenticated.slice().sort(bj) } : {}),   // key-unbound impostors under a claimed name — recorded, never canonical
+    ...(invalid.length ? { invalid: invalid.slice().sort(bj) } : {}) };
 }
 
 // ─── #44 AGENT-SAFETY: throw-on-non-VALID. `isValid(r)` returns a bool an agent can IGNORE (catch the error,
@@ -1355,7 +1361,9 @@ export function buildRecoveryStatement(fields, privKeyObj, issuerPubB64url) {
   const sig = edSign(null, Buffer.from(canon(claim), 'utf8'), privKeyObj).toString('base64url');
   return { claim, issuer_id: keyId(issuerPubB64url), sig: { alg: 'Ed25519', key_id: keyId(issuerPubB64url), pub: issuerPubB64url, sig } };
 }
-export function verifyCheckpointRecovery(statements, { domain_shard, genesis_epoch, last_accepted_checkpoint, effective_sequence, recoveryKeys = {}, threshold = 2 } = {}) {
+export function verifyCheckpointRecovery(statements, config) {
+  const c = admitOpts(config); if (c === null) return { recovered: false, detail: 'config must be an inert record (round-23 P1-02 totality)' };   // round-23 P1-02 — total: admit config BEFORE destructure
+  const { domain_shard, genesis_epoch, last_accepted_checkpoint, effective_sequence, recoveryKeys = {}, threshold = 2 } = c;
   if (!Array.isArray(statements) || statements.length === 0) return { recovered: false, detail: 'no recovery statements' };
   // M5 instance — the recovery quorum is the SAME algebra (admit → group → count → adjudicate): voter = the
   // genesis-authorized recovery signer, ValidThreshold bounded by |recoveryKeys| (a closed voter set), >1 winning
@@ -1598,9 +1606,11 @@ function quorumAdjudicate(items, { threshold, maxVoters, admit }) {
   if (winners.length === 0) return { outcome: 'quorum_not_met', detail: 'no claim reached ' + threshold + ' distinct voters (groups: ' + groups.size + ')' };
   if (winners.length > 1) return { outcome: 'conflict', detail: 'equivocation: ' + winners.length + ' conflicting claims each reached threshold', count: winners.length };
   const w = winners[0];
-  return { outcome: 'accepted', voters: [...w.voters], tags: [...w.tags], payload: w.payload };
+  return { outcome: 'accepted', voters: [...w.voters].sort(), tags: [...w.tags].sort(), payload: w.payload };   // round-23 P1-01 — canonical order: the M5 result is set-determined, not iteration-order (uniqueness + recovery both inherit this)
 }
-export function verifyCheckpointUniqueness(attestations, { domain_shard, genesis_epoch, sequence, checkpoint, trustRoots = {}, domains = {}, threshold = 2 } = {}) {
+export function verifyCheckpointUniqueness(attestations, config) {
+  const c = admitOpts(config); if (c === null) return { attested: false, detail: 'config must be an inert record (round-23 P1-02 totality)' };   // round-23 P1-02 — total: admit config BEFORE destructure (a null/hostile config is a structured result, never a host throw)
+  const { domain_shard, genesis_epoch, sequence, checkpoint, trustRoots = {}, domains = {}, threshold = 2 } = c;
   if (!Array.isArray(attestations) || attestations.length === 0) return { attested: false, detail: 'no attestations' };
   // M5 instance — voter = the CONSUMER-resolved trust domain (many issuers in one domain count once); admission =
   // typed purpose + no self-declared independence + binding + consumer-accepted issuer + strict signature, all
@@ -1615,8 +1625,8 @@ export function verifyCheckpointUniqueness(attestations, { domain_shard, genesis
     const root = trustRoots[issuer_id]; const pub = typeof root === 'string' ? root : root?.pub;
     if (!pub || pub !== sig.pub || keyId(sig.pub) !== issuer_id) return null;           // consumer-accepted issuer only
     if (strictB64url(sig.sig, 64) === null || !edVerifyStrict(sig.pub, cc, sig.sig)) return null;
-    const dom = domains[issuer_id]; if (dom === undefined) return null;                 // consumer-resolved trust domain, else unadmitted
-    return { key: cc, voter: dom, tag: issuer_id };
+    const dom = domains[issuer_id]; if (typeof dom !== 'string') return null;           // round-23 P0-01 — a trust domain MUST be an NFC string; a non-string (object/array/number/null) is NOT an admitted domain (a Set of object values counts by identity → two structurally-equal objects fake an independent quorum)
+    return { key: cc, voter: dom.normalize('NFC'), tag: issuer_id };
   } });
   if (r.outcome === 'conflict') return { attested: false, conflict: true, detail: r.detail };   // two rival uniqueness claims each with quorum = equivocation, never first-wins
   return r.outcome === 'accepted'
@@ -2143,11 +2153,16 @@ export function isPublicDnsShard(shard) {
 // round-21 — anchored iff ANY of the given (already unioned + budget-checked) proofs both includes and is substrate-final.
 // The witness caller does the grouping/union/budget so this is a pure per-root check. `proofs` is the FULL evidence set
 // for one content_hash (P0-01/P0-02: no first-wins, no anchor/anchors shadow, no truncation upstream).
+// round-23 P1-05 — a connector must SETTLE within a bound: a never-resolving promise cannot block the verifier forever
+// (I4 totality / F.9). Race each plugin call against a deadline; a timeout is that plugin's unavailability, and the timer
+// is unref'd + cleared so it neither keeps the process alive nor leaks. Matches the discovery fetch AbortSignal.timeout.
+const SUBSTRATE_DEADLINE_MS = 10000;
+const withDeadline = (p, ms = SUBSTRATE_DEADLINE_MS) => { let t; const to = new Promise((_, rej) => { t = setTimeout(() => rej(new Error('substrate plugin deadline exceeded')), ms); }); return Promise.race([Promise.resolve(p).finally(() => clearTimeout(t)), to]); };
 async function anchoredByProofs(content_hash, proofs, substrateVerify) {
   for (const proof of proofs) {
     const incl = verifyAnchor(content_hash, proof);   // inclusion only (no substrateVerify → sync)
     if (!incl.inclusion || !substrateVerify) continue;
-    let sub; try { sub = await substrateVerify(proof.anchor, proof.root); } catch { continue; }   // round-21 P1-01 — a connector throw is UNAVAILABLE evidence, not a host exception (parity with verifyAsync's substrate guard)
+    let sub; try { sub = await withDeadline(substrateVerify(proof.anchor, proof.root)); } catch { continue; }   // round-21 P1-01 / round-23 P1-05 — a connector throw OR a hang is UNAVAILABLE evidence, never a host exception or an infinite block
     if (substrateFinal(sub)) return true;               // round-18 P0-02 — same closed decoder as verifyAnchor (a bare truthy `final` no longer confirms the witness genesis)
   }
   return false;
@@ -2240,9 +2255,10 @@ export async function witnessNoFork(shard, genesisHash, { fetchImpl = fetch, sub
 export function combineSubstrates(verifiers) {
   const list = (Array.isArray(verifiers) ? verifiers : [verifiers]).filter(Boolean);
   return async (anchor, root) => {
-    // round-22 P1-02 — ISOLATE each plugin: a throwing/unreachable connector must not shadow a later independent one
-    // that CAN verify this substrate. A rejected promise from one plugin is that plugin's unavailability, not the seam's.
-    for (const v of list) { let r; try { r = await v(anchor, root); } catch { continue; } if (r != null) return r; }
+    // round-22 P1-02 + round-23 P1-05 — ISOLATE each plugin AND bound it: a throwing, unreachable, OR never-settling
+    // connector must not shadow a later independent one that CAN verify this substrate. A rejection/timeout from one
+    // plugin is that plugin's unavailability, not the seam's.
+    for (const v of list) { let r; try { r = await withDeadline(v(anchor, root)); } catch { continue; } if (r != null) return r; }
     return null;   // no plugin claimed this substrate → verifyAnchor reports 'unavailable' (honest, not INVALID)
   };
 }
