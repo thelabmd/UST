@@ -1273,6 +1273,16 @@ necessary. Concrete values are calibration parameters with explicit, falsifiable
   epoch means it bounds one resolution epoch, never a publisher's history.
 - `W_default = 32` — a per-call walk depth (a caller budget), not a cap on how long a provenance chain may
   exist (rc.12 naming).
+- `T_witness = 30 s` (default) — the `T_v` (time) coordinate of `ρ_v` for a WHOLE witness-resolution operation, so a
+  legal but adversarial anchor fan-out (`W_active × A_pergenesis` sequential substrate calls, each honestly under the
+  per-leaf `T_leaf = 10 s`) cannot amplify to `≈ W_active · A_pergenesis · T_leaf` (`16 × 8 × 10 s ≈ 21 min`) — the
+  attack the per-leaf bound alone did not cover. It is a VERIFIER-OWNED ceiling, not a protocol constant nor a
+  publisher declaration (F.9 assigns `ρ_v` to the verifier; a ceremony declaration can never set it — *assurance is
+  never self-declared*): the effective budget is `min(T_witness_default, ρ_v.time_consumer)` — a consumer may only
+  TIGHTEN it. Exceeding it is `INDETERMINATE(resource_limit)` per F.9.3 (`C_v(R) ⋠ ρ_v`), naming the effective budget —
+  a REFUSAL to finish, never a truncation of the served list and never a verdict about the data. `30 s = 3 · T_leaf`
+  is a declared engineering premise (a few genuinely-slow real substrate calls in series), recalibratable per §F.9.6;
+  the LAW (T_v is a resource coordinate; over-budget ⇒ resource_limit) is derived, the constant is calibrated.
 
 **The model derives the law; benchmarks calibrate the constants.** While `Ω` and `Fₜ` are purely mathematical
 objects, the resource bounds `ρ_v` and the numeric constants (`B₀`, `κ`, …) are ENGINEERING PARAMETERS

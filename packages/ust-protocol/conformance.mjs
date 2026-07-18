@@ -1074,6 +1074,24 @@ console.log('\n═════════════════════�
   // round-25 P0-04 — the TCB structural registries are DEEP-frozen: a nested axis/domain array cannot be mutated to change
   //    projectTier ranks or the canonical string sets in-process (history-independent verdict).
   check('round-25 P0-04 exported TCB registries are deep-frozen (nested arrays immutable)', Object.isFrozen(P.ASSURANCE_AXES) && Object.isFrozen(P.ASSURANCE_AXES.identity) && Object.isFrozen(P.REGISTRY) && Object.isFrozen(P.REGISTRY.hashDomains) && P.REGISTRY.assuranceAxes === P.ASSURANCE_AXES);
+  // round-25 Div2 (F.9) — the T_v coordinate of ρ_v: the whole-operation witness budget is min(reference default,
+  //    consumer maxWitnessOpMs). The consumer can only TIGHTEN; over-budget is INDETERMINATE(resource_limit) naming the
+  //    effective budget — a refusal, never a truncation and never a verdict about the data. (These are the FIRST witness
+  //    budget vectors: round-24 P1-04 shipped without one — the vector-in-same-commit rule now enforced retroactively.)
+  {
+    const AGW = 'sha256:' + 'ab'.repeat(32), shard = 'w.example';
+    const wRoot = P.Hbytes('ust:leaf', Buffer.from(AGW, 'utf8'));                       // single-leaf inclusion so anchoredByProofs reaches the substrate call
+    const wp = (n) => ({ root: wRoot, path: [], anchor: { substrate: 'test-anchor', n } });   // canon-distinct proofs → the op-deadline check runs between leaves
+    const log = JSON.stringify({ domain_shard: shard, genesis_log: [{ content_hash: AGW, anchors: [wp('1'), wp('2')] }] });
+    const fetchW = async () => ({ ok: true, headers: { get: () => undefined }, arrayBuffer: async () => new TextEncoder().encode(log).buffer });
+    const neverSV = () => new Promise(() => {});                                        // never settles — DETERMINISTIC: each leaf can only reach the deadline, never resolve early (no wall-clock race)
+    const fastSV = () => ({ final: true, time: '2027-01-01T00:00:00Z' });
+    const capped = await P.witnessNoFork(shard, AGW, { fetchImpl: fetchW, substrateVerify: neverSV, maxWitnessOpMs: 20 });
+    check('F.9 T_v realization: the whole-operation witness budget is min(reference default, consumer deadline) — a tighter consumer deadline trips INDETERMINATE(resource_limit) naming the effective budget',
+      capped.status === 'indeterminate' && capped.reason === 'resource_limit' && capped.detail.includes('20 ms whole-operation budget'));
+    check('F.9 T_v control: the same witness with no consumer cap verifies (confirmed) — the cap lowers decisibility, never flips a verdict',
+      (await P.witnessNoFork(shard, AGW, { fetchImpl: fetchW, substrateVerify: fastSV })).status === 'confirmed');
+  }
   // P1-03 — evidenceCaps returns a FROZEN copy: a caller cannot mutate the checker's capability vocabulary.
   check('round-24 P1-03 evidenceCaps is a frozen copy (mutation cannot make check_C history-dependent)', (() => { const a = P.evidenceCaps('pow-header-chain'); try { a.push('forged'); } catch {} return Object.isFrozen(a) && !P.evidenceCaps('pow-header-chain').includes('forged'); })());
   check('PhC uniqueness for a DIFFERENT checkpoint → not admitted (binding)', VU([P.buildUniquenessAttestation({ domain_shard: D, genesis_epoch: EP, sequence: '0', checkpoint: 'sha256:' + '00'.repeat(32) }, Wa.priv, Wa.pubB64), ua(Wb)]).attested === false);
