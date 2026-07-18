@@ -336,7 +336,8 @@ const KEYID_FORM = /^sha256:[0-9a-f]{64}$/;
 
 // ─── §13 structural bounds — hard ceilings; exceed ⇒ E-BOUNDS ─────────────────────────────────────────
 const BOUNDS = { depth: 8, array: 4096, partitions: 4096, floorPartitions: 64, breadth: 64, sizeBytes: 67108864, floorSizeBytes: 1048576, cadenceMax: 31622400,  // cadenceMax = 366 d in seconds (#75: bounded integer cadence)
-  witnessEntries: 256, witnessActive: 16, anchorsPerGenesis: 8 };  // round-20 P1-02 — F.9 structural fan-out budget: a body under the byte ceiling still bounds connector CALLS (≤ witnessActive × anchorsPerGenesis substrate invocations per resolution)
+  witnessEntries: 256, witnessActive: 16, anchorsPerGenesis: 8,  // round-20 P1-02 — F.9 structural fan-out budget: a body under the byte ceiling still bounds connector CALLS (≤ witnessActive × anchorsPerGenesis substrate invocations per resolution)
+  forkCandidates: 64 };  // round-21 P1-02 — forkChoice candidate budget (a plain JSON array of N copies must not fan out into N verifications)
 export function checkBounds(doc) {
   // #69 E3 — the normative VOLUME metric is the signed content canon({ust, state}), NOT the transport object:
   // sig/proof are bounded by transport admission (verifyJson maxInputBytes), never by the signed-content ABS.
@@ -1155,6 +1156,8 @@ export async function forkChoice(candidates, opts = {}) {
   if (opts === null) return { result: 'E-MALFORMED', detail: 'opts must be an inert record (round-20 P2-01 totality)' };
   if (!Array.isArray(candidates) || candidates.length === 0)
     return { result: 'E-MALFORMED', detail: 'forkChoice needs a non-empty array of candidate documents' };
+  if (candidates.length > BOUNDS.forkCandidates)                      // round-21 P1-02 — F.9 fan-out: refuse an over-budget candidate count BEFORE snapshotting/verifying (never truncate a fork-choice input)
+    return { result: 'INDETERMINATE', reason: 'resource_limit', detail: `forkChoice got ${candidates.length} candidates > ${BOUNDS.forkCandidates} (§F.9 fan-out — refused, never truncated; round-21 P1-02)` };
   // round-19 P0-01 — SNAPSHOT every candidate to an inert clone BEFORE ANY read, INCLUDING the ust_id grouping below.
   // rev15 still (a) read `c.state.id.ust_id` off the LIVE object to group, and (b) fell back to the live object (`d=c`)
   // when JSON cloning threw — so a one-shot throwing toJSON, or a ust_id accessor that lies once, let the classified/
@@ -1176,7 +1179,13 @@ export async function forkChoice(candidates, opts = {}) {
   const vopts = { ...opts, requireAnchored: false, requireAuthoritative: false };
   // the object returned as canonical MUST be the exact snapshot dᵢ whose content_hash is in F_t (F.5c) — verify the
   // SAME frozen dᵢ that is grouped and returned, so classification, content_hash, and returned value cannot diverge.
-  const verds = await Promise.all(snaps.map(async (d) => ({ doc: d, v: await verifyAsync(d, vopts) })));
+  // round-21 P1-02 — dedupe by content_hash BEFORE verifying: identical bytes yield an identical verdict, so N copies of
+  // one doc are ONE verification, not N substrate calls. Safe (unlike the witness fan-out): canonical is a FUNCTION of the
+  // DISTINCT content_hashes, so dropping an exact byte-duplicate cannot change which content_hash wins. A snapshot whose
+  // canon throws is not deduped (a unique key) — it flows on to verifyAsync and is rejected there.
+  const bySnap = new Map();
+  for (const d of snaps) { let h; try { h = contentHash(d); } catch { h = {}; } if (!bySnap.has(h)) bySnap.set(h, d); }
+  const verds = await Promise.all([...bySnap.values()].map(async (d) => ({ doc: d, v: await verifyAsync(d, vopts) })));
   const anchored = [], losers = [], invalid = [], unauthenticated = [];
   for (const { doc, v } of verds) {
     if (!/^VALID:/.test(v.result || '')) { invalid.push({ result: v.result, detail: v.detail }); continue; }
@@ -2125,12 +2134,14 @@ export function isPublicDnsShard(shard) {
 // A genesis is "anchored" iff AT LEAST ONE of its anchors verifies: inclusion (sync Merkle) AND substrate
 // finality (async — Bitcoin/Rekor, so it MUST be awaited; the earlier sync path silently dropped every
 // real async plugin). `anchors[]` (several substrates) is the norm; a single `anchor` is accepted too.
-async function genesisAnchored(g, substrateVerify) {
-  const proofs = (Array.isArray(g.anchors) ? g.anchors : (g.anchor ? [g.anchor] : [])).slice(0, BOUNDS.anchorsPerGenesis);   // round-20 P1-02 — cap anchors per genesis (F.9 fan-out budget); one final anchor is enough to confirm
+// round-21 — anchored iff ANY of the given (already unioned + budget-checked) proofs both includes and is substrate-final.
+// The witness caller does the grouping/union/budget so this is a pure per-root check. `proofs` is the FULL evidence set
+// for one content_hash (P0-01/P0-02: no first-wins, no anchor/anchors shadow, no truncation upstream).
+async function anchoredByProofs(content_hash, proofs, substrateVerify) {
   for (const proof of proofs) {
-    const incl = verifyAnchor(g.content_hash, proof);   // inclusion only (no substrateVerify → sync)
+    const incl = verifyAnchor(content_hash, proof);   // inclusion only (no substrateVerify → sync)
     if (!incl.inclusion || !substrateVerify) continue;
-    const sub = await substrateVerify(proof.anchor, proof.root);
+    let sub; try { sub = await substrateVerify(proof.anchor, proof.root); } catch { continue; }   // round-21 P1-01 — a connector throw is UNAVAILABLE evidence, not a host exception (parity with verifyAsync's substrate guard)
     if (substrateFinal(sub)) return true;               // round-18 P0-02 — same closed decoder as verifyAnchor (a bare truthy `final` no longer confirms the witness genesis)
   }
   return false;
@@ -2176,22 +2187,31 @@ export async function witnessNoFork(shard, genesisHash, { fetchImpl = fetch, sub
   } catch (e) { return { status: 'unreachable', detail: 'witness endpoint unreachable: ' + (e && e.message || e) }; }
   if (anyLoneSurrogate(log)) return { status: 'unreachable', detail: 'witness log has an unpaired UTF-16 surrogate — outside the §6 canonical Unicode domain (round-19 P1-01)' };   // round-19 P1-01 — same Unicode domain as genesis/key-log/byte checker
   if (!log || log.domain_shard !== shard || !Array.isArray(log.genesis_log)) return { status: 'unreachable', detail: 'witness log malformed' };
-  // round-20 P1-02 — F.9 structural budget: a witness body under the 2 MiB ceiling can still encode thousands of anchor
-  // records and force thousands of connector calls (μ(R) W-coordinate: authority enlarges VOLUME, never makes STRUCTURE
-  // cheaper). Refuse an oversize log; dedupe active roots by content_hash (identical roots verify once, not N times);
-  // cap distinct active roots — so total substrate calls ≤ witnessActive × anchorsPerGenesis, independent of body size.
-  if (log.genesis_log.length > BOUNDS.witnessEntries) return { status: 'unreachable', detail: `witness genesis_log has ${log.genesis_log.length} entries > ${BOUNDS.witnessEntries} (§F.9 resource_limit — structural fan-out refused; round-20 P1-02)` };
-  const seen = new Set();
-  const active = log.genesis_log.filter((g) => g && !g.superseded_by && /^sha256:[0-9a-f]{64}$/.test(g.content_hash || '') && !seen.has(g.content_hash) && seen.add(g.content_hash));   // dedupe by content_hash
-  if (active.length > BOUNDS.witnessActive) return { status: 'unreachable', detail: `witness has ${active.length} distinct active roots > ${BOUNDS.witnessActive} (§F.9 resource_limit — fan-out refused; round-20 P1-02)` };
+  // round-21 P0-01/P0-02 — the served list is a MEASURABLE input (F.5a corroborated: "the served witness list shows
+  // exactly one active anchored binding"), NOT a lossy projection of it. rev17 dedup'd first-wins and slice()'d anchors
+  // — both DISCARD rival evidence and then mint HIGH, which the model forbids: "authority is denied, never forged", and a
+  // resource cap must LOWER decisibility, never RAISE assurance. So: (1) GROUP entries by content_hash and UNION their
+  // anchor evidence (`anchors[]` + `anchor`) — no first-wins, no anchor/anchors shadow; (2) a structural over-budget is a
+  // REFUSAL (INDETERMINATE resource_limit), NEVER a truncation that could delete the one rival proof.
+  const OVER = (detail) => ({ status: 'indeterminate', reason: 'resource_limit', detail });   // round-21 P2-01 — machine-readable, not 'unreachable'
+  if (log.genesis_log.length > BOUNDS.witnessEntries) return OVER(`witness genesis_log has ${log.genesis_log.length} entries > ${BOUNDS.witnessEntries} (§F.9 — structural fan-out refused, never truncated; round-21 P0-02)`);
+  const byHash = new Map();
+  for (const g of log.genesis_log) {
+    if (!g || g.superseded_by || !/^sha256:[0-9a-f]{64}$/.test(g.content_hash || '')) continue;
+    const proofs = [...(Array.isArray(g.anchors) ? g.anchors : []), ...(g.anchor ? [g.anchor] : [])];   // UNION — never an anchor-vs-anchors first-wins shadow (round-21 P0-01)
+    if (!byHash.has(g.content_hash)) byHash.set(g.content_hash, []);
+    byHash.get(g.content_hash).push(...proofs);                                                          // MERGE evidence across repeated content_hash entries (no first-wins loss)
+  }
+  if (byHash.size > BOUNDS.witnessActive) return OVER(`witness has ${byHash.size} distinct active roots > ${BOUNDS.witnessActive} (§F.9 — refused, never truncated; round-21 P0-02)`);
+  for (const [h, proofs] of byHash) if (proofs.length > BOUNDS.anchorsPerGenesis) return OVER(`active genesis ${h.slice(0, 20)}… carries ${proofs.length} anchors > ${BOUNDS.anchorsPerGenesis} (§F.9 — witness evaluation refused, never truncated; round-21 P0-02)`);
   const anchoredActive = [];
-  for (const g of active) if (await genesisAnchored(g, substrateVerify)) anchoredActive.push(g);
+  for (const [content_hash, proofs] of byHash) if (await anchoredByProofs(content_hash, proofs, substrateVerify)) anchoredActive.push({ content_hash });
   if (anchoredActive.length >= 2) return { status: 'fork', detail: `${anchoredActive.length} anchored active genesis roots for ${shard} — a rival name-binding root exists` };
   if (anchoredActive.length === 1) {
     if (anchoredActive[0].content_hash !== genesisHash) return { status: 'fork', detail: `the anchored active genesis (${anchoredActive[0].content_hash.slice(0, 20)}…) differs from the one served at /.well-known/ust-genesis` };
     return { status: 'confirmed', detail: 'a single anchored active genesis, cross-checked against its substrate — no rival root' };
   }
-  return { status: 'pending', detail: active.length ? 'genesis present in the witness log but no anchor is final yet (substrate) — no-fork not yet evidence' : 'no active genesis in the witness log' };
+  return { status: 'pending', detail: byHash.size ? 'genesis present in the witness log but no anchor is final yet (substrate) — no-fork not yet evidence' : 'no active genesis in the witness log' };
 }
 
 // Multi-substrate router (#68): a verifier may understand SEVERAL anchor substrates (Bitcoin-OTS, Rekor,
@@ -2252,12 +2272,13 @@ export async function resolveByDiscovery(doc, opts = {}, transport = {}) {
   // (out-of-band responsibility) or a future anchored map-inclusion reaches `authoritative`. A fork ⇒ E-GENESIS.
   // P0-2 — a caller-supplied no-fork basis (verified `noForkEvidence`, or the raw `noForkConfirmed` override) skips the
   // witness auto-query; otherwise the served genesis-log is queried and only ever CORROBORATES (never independent).
-  let witnessConfirmed = false, noFork = 'unconfirmed';
+  let witnessConfirmed = false, noFork = 'unconfirmed', witnessReason;
   const callerNoFork = opts.noForkEvidence !== undefined || opts.noForkConfirmed;
   if (!callerNoFork && !opts.offline) {
     const w = await witnessNoFork(shard, genesisHash, { fetchImpl, substrateVerify });
     if (w.status === 'fork') return { verdict: bad('E-GENESIS', w.detail), resolution: { publisher: shard, fork: true, detail: w.detail } };
     witnessConfirmed = w.status === 'confirmed';
+    if (w.reason) witnessReason = w.reason;   // round-21 P2-01 — preserve the machine-readable witness reason (resource_limit) through the resolution, not just a 'HIGH pending' string
     noFork = witnessConfirmed ? 'served-list (corroborated)' : 'HIGH pending — ' + w.detail;
   }
   // VERIFIED served-list evidence (bound to THIS genesis) — the ONLY way the stateless core earns `corroborated`; a
@@ -2271,7 +2292,7 @@ export async function resolveByDiscovery(doc, opts = {}, transport = {}) {
   if (auth.error) return { verdict: base, resolution: { error: auth.error + (auth.detail ? ' — ' + auth.detail : '') } };
   if (callerNoFork) noFork = auth.independently_verified ? 'accepted-external-witness (authoritative)' : 'caller-asserted (consumer-override)';
   const verdict = await verifyAsync(doc, { ...opts, genesis, keylog, noForkConfirmed: opts.noForkConfirmed, servedNoFork, keylogFreshAsOf, capacity: auth.capacity, substrateVerify });   // #69 E1 — await the doc's own anchor substrate (TOP); carry the EARNED freshness token (round-16 P0-02) into the final verdict
-  return { verdict, resolution: { publisher: auth.publisher ?? shard, strength: auth.strength, capacity: auth.capacity, noFork, source: `https://${shard}/.well-known/ (§20.1 discovery + §12.1a witness)` } };
+  return { verdict, resolution: { publisher: auth.publisher ?? shard, strength: auth.strength, capacity: auth.capacity, noFork, ...(witnessReason ? { witness_reason: witnessReason } : {}), source: `https://${shard}/.well-known/ (§20.1 discovery + §12.1a witness)` } };
 }
 
 // minimal duplicate-key-detecting JSON scanner (zero-dep). Returns an error string or null. Keys are parsed

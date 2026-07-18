@@ -563,6 +563,42 @@ console.log('\n═════════════════════�
   try { fcRes = await P.forkChoice([doc], new Proxy({}, { ownKeys() { throw new Error('h'); }, get() { throw new Error('h'); }, getOwnPropertyDescriptor() { throw new Error('h'); } })); } catch { fcThrew = true; }
   check('round-20 P2-01 forkChoice hostile opts Proxy → structured E-MALFORMED, never a host throw', !fcThrew && fcRes.result === 'E-MALFORMED');
 
+  // ─── round-21 (rev18) — the round-20 witness fan-out fix was LOSSY: it DISCARDED rival evidence, then minted HIGH ─────
+  // P0-01 — a rival root split across entries (one without an anchor, one WITH) must UNION its anchor evidence, not
+  // first-wins drop it (F.5a: the served list is a MEASURABLE input, not a lossy projection). rival IS anchored ⇒ fork.
+  const gHashB = 'sha256:' + 'cd'.repeat(32);
+  const splitLog = wlog([
+    { content_hash: gHash, superseded_by: null, anchor: anchorOf(gHash) },
+    { content_hash: gHashB, superseded_by: null },                                     // rival, first occurrence: NO anchor
+    { content_hash: gHashB, superseded_by: null, anchor: anchorOf(gHashB) },           // SAME rival, WITH anchor (rev17 dropped this)
+  ], gHash);
+  const r21a = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(splitLog), substrateVerify: final });
+  check('round-21 P0-01 rival anchor split across entries → UNIONed → fork, never false corroborated HIGH', r21a.verdict.result !== 'VALID:HIGH');
+  const shadowLog = wlog([
+    { content_hash: gHash, superseded_by: null, anchor: anchorOf(gHash) },
+    { content_hash: gHashB, superseded_by: null, anchors: [], anchor: anchorOf(gHashB) },   // empty plural must NOT shadow the valid singular
+  ], gHash);
+  const r21b = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(shadowLog), substrateVerify: final });
+  check('round-21 P0-01 anchors:[] does not shadow a valid singular anchor (union both) → fork, never false HIGH', r21b.verdict.result !== 'VALID:HIGH');
+  // P0-02 — a genesis carrying more anchors than the budget is REFUSED (resource_limit), never truncated to hide a late valid one.
+  const nineAnchors = Array.from({ length: 9 }, (_, i) => anchorOf('sha256:' + String(i).padStart(64, 'a')));
+  const bigAnchorLog = wlog([{ content_hash: gHash, superseded_by: null, anchors: nineAnchors }], gHash);
+  const r21c = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(bigAnchorLog), substrateVerify: final });
+  check('round-21 P0-02 over-budget anchors/genesis → resource_limit refuse (never truncate) → NOT HIGH', r21c.verdict.result !== 'VALID:HIGH' && /resource_limit/.test(JSON.stringify(r21c.resolution || {})));
+  // P1-01 — a connector that throws is UNAVAILABLE evidence, not a host exception escaping the verifier.
+  const throwLog = wlog([{ content_hash: gHash, superseded_by: null, anchor: anchorOf(gHash) }], gHash);
+  let r21threw = false, r21tres;
+  try { r21tres = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(throwLog), substrateVerify: () => { throw new Error('connector parser failure'); } }); } catch { r21threw = true; }
+  check('round-21 P1-01 witness connector throw → structured result, never a host exception', !r21threw && !!r21tres.verdict.result);
+  // P1-02 — forkChoice over the candidate budget is refused, never a fan-out of N verifications.
+  const manyCands = Array.from({ length: 100 }, () => ({ ...gkDoc, proof: anchorOf(P.contentHash(gkDoc)) }));
+  const r21fc = await P.forkChoice(manyCands, { genesis: gen, keylog: [], ...nfe(gen), substrateVerify: final });
+  check('round-21 P1-02 forkChoice over candidate budget → INDETERMINATE resource_limit (no N-way fan-out)', r21fc.result === 'INDETERMINATE' && /resource_limit/.test(JSON.stringify(r21fc)));
+  // P2-01 — an over-budget witness is machine-readably INDETERMINATE(resource_limit), surfaced through the resolution.
+  const bigWit = wlog(Array.from({ length: 300 }, (_, i) => ({ content_hash: 'sha256:' + String(i).padStart(64, '0'), superseded_by: null, anchor: anchorOf('sha256:' + String(i).padStart(64, '0')) })), gHash);
+  const r21p2 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(bigWit), substrateVerify: final });
+  check('round-21 P2-01 over-budget witness → machine-readable resource_limit in the resolution', /resource_limit/.test(JSON.stringify(r21p2.resolution || {})));
+
   const r4 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog), substrateVerify: () => ({ final: false }) });
   check('anchor not final (Bitcoin pending) = no HIGH, honest pending', r4.verdict.result === 'VALID:LIGHT' && r4.resolution.noFork.startsWith('HIGH pending'));
 
