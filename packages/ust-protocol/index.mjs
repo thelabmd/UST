@@ -620,6 +620,11 @@ function walkReferents(st, opts, depth, visited, budget) {
 // a REAL RFC3339-Z calendar instant (not just the regex shape — 9999-99-99T99:99:99Z matches the shape but is not a
 // time); module-level so resolveKeys, resolveAuthority and resolveByDiscovery share ONE definition (round-15 P1-01).
 const isRealRfc3339Z = (x) => { if (typeof x !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(x)) return false; const t = Date.parse(x); return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 19) + 'Z' === x; };
+// round-18 P0-02 — the ONE closed substrate-receipt decoder (F.5.0/C3/I4): an "anchored" determination requires a
+// verified status from the seam with a real anchored instant — `final` a STRICT Boolean true AND `time` a real
+// RFC3339-Z. Every substrate decision (verifyAnchor AND the witness genesisAnchored path) routes through it, so a
+// truthy-non-Boolean ({final:"yes"}) or a timeless/typeless receipt ({final:true,time:{}}) can never mint F_t anywhere.
+const substrateFinal = (sub) => sub !== null && typeof sub === 'object' && sub.final === true && isRealRfc3339Z(sub.time);
 // §12.2 — the SHARED key-log walk (genesis self-signed root + prev-chained entries each signed by a CURRENT
 // valid key). Returns { validKeys: Map<key_id,pub>, revoked: Map } or { error, detail }. Used by BOTH
 // resolveAuthority (name authority) AND resolveCadence — a cadence-log entry MUST be signed by an AUTHORIZED
@@ -896,8 +901,9 @@ const VERIFIED_FRESH = new WeakSet();
 // a closed key lifecycle fails closed. `provenAnchor` is module-private so a caller cannot forge it.
 const VERIFIED_ANCHOR = new WeakSet();
 const provenAnchor = (t) => { const tok = { anchorTime: t }; VERIFIED_ANCHOR.add(tok); return tok; };
-export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = false, noForkEvidence, nameMap, trustRoots, corroborated = false, servedNoFork, anchorTime, keylogFreshAsOf, keylogHeadAnchor, substrateVerify, trust } = {}) {
+export function resolveAuthority(doc, opts = {}) {
   if (!doc || typeof doc !== 'object' || !doc.state?.id?.domain_shard || !doc.sig?.pub) return { error: 'E-MALFORMED', detail: 'document must be a UST object with state.id and sig (round-17 P1-02 totality)' };
+  const { genesis, keylog = [], noForkConfirmed = false, noForkEvidence, nameMap, trustRoots, corroborated = false, servedNoFork, anchorTime, keylogFreshAsOf, keylogHeadAnchor, substrateVerify, trust } = opts || {};   // round-18 P1-01 — destructure INSIDE from (opts || {}) so a null opts is a structured reject/default, not a host throw
   // round-17 P0-02 — U comes ONLY from a proven-anchor token (verify/verifyAsync mint it); a raw string never reaches K_n(t).
   const U = (anchorTime && typeof anchorTime === 'object' && VERIFIED_ANCHOR.has(anchorTime) && isRealRfc3339Z(anchorTime.anchorTime)) ? anchorTime.anchorTime : undefined;
   if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
@@ -1007,6 +1013,7 @@ export function resolveAuthority(doc, { genesis, keylog = [], noForkConfirmed = 
 //     ust:leaf/ust:node). The SUBSTRATE check (e.g. bitcoin-ots) is DELEGATED to opts.substrateVerify (needs
 //     external Bitcoin access — the caller/ustate's job). Returns { inclusion, time, status, anchorTime? }.
 export function verifyAnchor(contentHash, proof, opts = {}) {
+  opts = opts || {};                                             // round-18 P1-01 — a default param only catches `undefined`; coerce `null` too (total boundary)
   // fail-closed on a malformed proof: validate shape BEFORE recomputing (no TypeError, no dir!=L ⇒ R fallthrough).
   const HASH = /^sha256:[0-9a-f]{64}$/;
   if (!proof || typeof proof !== 'object' || !Array.isArray(proof.path) || !HASH.test(proof.root || ''))
@@ -1027,8 +1034,7 @@ export function verifyAnchor(contentHash, proof, opts = {}) {
   // round-17 P1-01 — the substrate result is a CLOSED, TYPED leaf (F.5.0/C3/I4): `final` must be a strict Boolean and
   // a final anchor MUST carry a REAL RFC3339-Z instant. A truthy non-Boolean ("yes") or a non-string/empty time
   // ({}) can no longer mint TimeStrength=anchored (and can no longer coerce past the N9 generated_at ≤ anchor check).
-  if (sub.final !== true) return { inclusion: true, time: 'unproven', status: 'verified', detail: 'substrate not final (final must be Boolean true; e.g. <6 conf)' };
-  if (!isRealRfc3339Z(sub.time)) return { inclusion: true, time: 'unproven', status: 'unavailable', detail: 'substrate final but anchor time is not a real RFC3339-Z instant (untyped receipt — no F_t, round-17 P1-01)' };
+  if (!substrateFinal(sub)) return { inclusion: true, time: 'unproven', status: 'unavailable', detail: 'substrate not a typed FINAL receipt (final must be Boolean true AND carry a real RFC3339-Z instant; e.g. <6 conf or an untyped receipt) — no F_t (round-17 P1-01 / round-18 P0-02)' };
   // #71 — carry the substrate's ASSURANCE basis so TOP names its trust model honestly (an OTS plugin that
   // corroborates via independent explorers reports `explorer-corroborated`; an operator real-node/SPV plugin
   // would report `bitcoin-node`). TOP is earned either way; assurance says HOW, never inflating the tier.
@@ -1040,6 +1046,7 @@ export function verifyAnchor(contentHash, proof, opts = {}) {
 // runs the sync verifier with the resolved receipt as a sync shim — so TOP is reachable with async plugins
 // through a single contract, and verify() never has to become async. Everything else is identical to verify().
 export async function verifyAsync(doc, opts = {}) {
+  opts = opts || {};                                             // round-18 P1-01 — coerce null opts (total boundary)
   if (!doc?.proof || !opts.substrateVerify || opts.offline) return verify(doc, opts);
   // round-17 P0-01 — verify an IMMUTABLE SNAPSHOT. The live object could be swapped between the await and the sync
   // verify (TOCTOU): the substrate receipt is obtained for root A, then a mutated document B with root B reuses it and
@@ -1068,7 +1075,11 @@ export async function forkChoice(candidates, opts = {}) {
   // verify each at its NATURAL tier (strip the floors — forkChoice does its own tier logic). A candidate is
   // ANCHOR-INCLUDED iff it VERIFIES and its content_hash sits in a substrate-final anchored root (time 'anchored').
   const vopts = { ...opts, requireAnchored: false, requireAuthoritative: false };
-  const verds = await Promise.all(candidates.map(async (d) => ({ doc: d, v: await verifyAsync(d, vopts) })));
+  // round-18 P0-01 — carry the IMMUTABLE SNAPSHOT, not the live candidate: verifyAsync proves content_hash of a clone,
+  // but forkChoice used to keep `doc: d` (the mutable original) and return it as `canonical`, certifying hash A while
+  // returning object B if the live object was swapped mid-await. The object returned as canonical MUST be the exact d
+  // whose content_hash is in F_t (F.5c: canonical(ust_id) = the unique dᵢ with content_hash(dᵢ) ∈ leaves).
+  const verds = await Promise.all(candidates.map(async (c) => { let d; try { d = JSON.parse(JSON.stringify(c)); } catch { d = c; } return { doc: d, v: await verifyAsync(d, vopts) }; }));
   const anchored = [], losers = [], invalid = [], unauthenticated = [];
   for (const { doc, v } of verds) {
     if (!/^VALID:/.test(v.result || '')) { invalid.push({ result: v.result, detail: v.detail }); continue; }
@@ -2022,7 +2033,7 @@ async function genesisAnchored(g, substrateVerify) {
     const incl = verifyAnchor(g.content_hash, proof);   // inclusion only (no substrateVerify → sync)
     if (!incl.inclusion || !substrateVerify) continue;
     const sub = await substrateVerify(proof.anchor, proof.root);
-    if (sub && sub.final) return true;                  // one independent substrate confirming is enough
+    if (substrateFinal(sub)) return true;               // round-18 P0-02 — same closed decoder as verifyAnchor (a bare truthy `final` no longer confirms the witness genesis)
   }
   return false;
 }
@@ -2030,16 +2041,26 @@ async function genesisAnchored(g, substrateVerify) {
 // round-17 P1-03 — a BYTE CEILING for authority discovery (F.9/§13). A §13 key-log is ≤256 entries and genesis/witness
 // are small, so a 2 MiB cap bounds every discovery body. Reject a declared oversize BEFORE accumulating; when the body
 // is a real stream, read with a hard cap and abort past it (no full accumulation); for a mocked response, cap after read.
-const DISCOVERY_MAX_BYTES = 1 << 21;
+const DISCOVERY_MAX_BYTES = 1 << 21;                              // 2 MiB — a single genesis/witness doc
+const KEYLOG_MAX_BYTES = 1 << 23;                                // 8 MiB — a ≤256-entry key-log of ordinary small key docs (round-18 P0-03: rev14's 2 MiB was below a valid K≤256 log). This is a RESOURCE BUDGET, not the K bound: a genuinely huge valid log honestly hits INDETERMINATE(resource_limit), never keylog=[].
+// round-18 P1-02 — authority-discovery bytes are STRICT UTF-8: an invalid sequence is REJECTED (via the existing
+// module strictUtf8 fatal decoder → null), never replacement-decoded to U+FFFD (I4/M-BYTE: an FF byte and a genuine
+// U+FFFD string must not collapse to one transcript — that is a cross-implementation split at the authority byte boundary).
+const strictUtf8OrThrow = (buf) => { const s = strictUtf8(buf); if (s === null) throw new Error('discovery body is not valid UTF-8 (invalid byte sequence) — §6 canonical UTF-8'); return s; };
 const readBounded = async (r, cap = DISCOVERY_MAX_BYTES) => {
   const cl = Number(r.headers?.get?.('content-length'));
   if (Number.isFinite(cl) && cl > cap) throw new Error(`discovery body ${cl} B exceeds the ${cap} B ceiling (§13)`);
   if (r.body && typeof r.body.getReader === 'function') {
     const reader = r.body.getReader(); let total = 0; const chunks = [];
     for (;;) { const { done, value } = await reader.read(); if (done) break; total += value.length; if (total > cap) { try { await reader.cancel(); } catch { /* already closed */ } throw new Error(`discovery body exceeds the ${cap} B ceiling (§13)`); } chunks.push(value); }
-    return Buffer.concat(chunks).toString('utf8');
+    return strictUtf8OrThrow(Buffer.concat(chunks));
   }
-  const body = await r.text();
+  if (typeof r.arrayBuffer === 'function') {                      // real fetch without a stream: strict-decode the raw bytes (never Response.text()'s replacement decode)
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.byteLength > cap) throw new Error(`discovery body ${buf.byteLength} B exceeds the ${cap} B ceiling (§13)`);
+    return strictUtf8OrThrow(buf);
+  }
+  const body = await r.text();                                   // test-mock path: text() returns an already-decoded JS string (no raw bytes to mis-decode)
   if (Buffer.byteLength(body, 'utf8') > cap) throw new Error(`discovery body exceeds the ${cap} B ceiling (§13)`);
   return body;
 };
@@ -2075,7 +2096,8 @@ export function combineSubstrates(verifiers) {
   };
 }
 
-export async function resolveByDiscovery(doc, opts = {}, { fetchImpl = fetch, substrateVerify } = {}) {
+export async function resolveByDiscovery(doc, opts = {}, transport = {}) {
+  opts = opts || {}; const { fetchImpl = fetch, substrateVerify } = transport || {};   // round-18 P1-01 — coerce null opts AND null transport (total boundary)
   const base = verify(doc, opts);
   const shard = doc?.state?.id?.domain_shard || '';
   const worth = !opts.offline && !opts.genesis &&
@@ -2084,9 +2106,16 @@ export async function resolveByDiscovery(doc, opts = {}, { fetchImpl = fetch, su
   if (!isPublicDnsShard(shard)) return { verdict: base, resolution: { skipped: 'domain_shard is not a public DNS name — discovery refused (SSRF guard)' } };
   let genesis, keylog = [], genesisHash, gRaw, kRaw;
   try {
-    const get = async (p) => { const r = await fetchImpl(`https://${shard}${p}`, { signal: AbortSignal.timeout(10000), redirect: 'error' }); if (!r.ok) throw new Error(`HTTP ${r.status} at ${p}`); return readBounded(r); };   // round-17 P1-03 — bounded read (byte ceiling before accumulate/scan/parse)
+    const get = async (p, cap) => { const r = await fetchImpl(`https://${shard}${p}`, { signal: AbortSignal.timeout(10000), redirect: 'error' }); if (!r.ok) { const e = new Error(`HTTP ${r.status} at ${p}`); e.httpStatus = r.status; throw e; } return readBounded(r, cap); };   // round-17 P1-03 — bounded read (byte ceiling before accumulate/scan/parse)
     gRaw = await get('/.well-known/ust-genesis');
-    try { kRaw = await get('/.well-known/ust-keylog'); } catch { /* key-log not served — resolution may fail on key membership */ }
+    try { kRaw = await get('/.well-known/ust-keylog', KEYLOG_MAX_BYTES); }
+    catch (e) {
+      // round-18 P0-03 — an ABSENT key-log (404/410) is genuinely not served (fail-safe: only genesis-key docs stay
+      // authoritative). A PRESENT-but-UNREADABLE one (oversize / transport error) must NEVER become keylog=[] — that
+      // erases a real retirement and false-accepts a post-retirement doc. It is INDETERMINATE(resource_limit), F.9.
+      if (e.httpStatus !== 404 && e.httpStatus !== 410)
+        return { verdict: base, resolution: { status: 'INDETERMINATE', reason: /ceiling|§13/.test(e.message || '') ? 'resource_limit' : 'unavailable', error: 'key-log present but unreadable (' + (e.message || e) + ') — authority NOT computed (round-18 P0-03; never substituted with an empty log)' } };
+    }
   } catch (e) { return { verdict: base, resolution: { error: 'discovery fetch failed: ' + (e && e.message || e) } }; }
   // #69 Theme D — genesis AND key-log are AUTHORITY input; both MUST cross the SAME raw-byte boundary as any
   // untrusted transcript (I4). JSON.parse silently collapses duplicate members, so the genesis goes through
