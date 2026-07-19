@@ -1154,7 +1154,7 @@ console.log('\n═════════════════════�
     //   deadline is checked AFTER every awaited leaf, not only before (a single never-settling anchor + a tight budget).
     const oneAnchorLog = JSON.stringify({ domain_shard: shard, genesis_log: [{ content_hash: AGW, anchor: { root: P.Hbytes('ust:leaf', Buffer.from(AGW, 'utf8')), path: [], anchor: { substrate: 'test-anchor', n: '1' } } }] });
     const fetch1 = async () => ({ ok: true, headers: { get: () => undefined }, arrayBuffer: async () => new TextEncoder().encode(oneAnchorLog).buffer });
-    const lastLeaf = await P.witnessNoFork(shard, AGW, { fetchImpl: fetch1, substrateVerify: neverSV, maxWitnessOpMs: 10 });
+    const lastLeaf = await P.witnessNoFork(shard, AGW, { fetchImpl: fetch1, substrateVerify: neverSV, maxWitnessOpMs: 50 });   // 50ms not 10 — timer jitter under CI load must be a small fraction of the budget (deterministic)
     check('round-27 P1-01 a budget exhausted on the FINAL leaf → INDETERMINATE(resource_limit), never reported as pending',
       lastLeaf.status === 'indeterminate' && lastLeaf.reason === 'resource_limit');
   }
@@ -1466,6 +1466,37 @@ console.log('\n═════════════════════�
   check('#39 verified interval does NOT contain the window ⇒ publisher-asserted', P.noEventBacking(window, { complete: 'complete', interval: { from: 'ust:20260628.10', to: 'ust:20260628.11' } }, observedFrames) === 'publisher-asserted');
   check('#39 completeness WITHOUT a verified interval ⇒ publisher-asserted (no spoofable checkpoint)', P.noEventBacking(window, { complete: 'complete' }, observedFrames) === 'publisher-asserted');
   check('#39 no window ⇒ not-applicable', P.noEventBacking({}, { complete: 'complete', interval: cover }, observedFrames) === 'not-applicable');
+}
+
+// ─── round-27 (3) THE INPUT-BOUNDARY GRID — the CONTROL that answers "did every exported verifier admit its input?"
+//     from CODE, not memory. Each verifier gets its primary input with a READ-COUNTING getter on a key signed field; the
+//     invariant is the getter fires ≤1 time (admitDeep rejects at the DESCRIPTOR → 0; a JSON/snapshot reads once → 1; an
+//     UNSNAPSHOTTED multi-read TOCTOU → ≥2). This is what would have caught round-27 P0-01/02/03 before shipping: a new
+//     or existing exported verifier that re-reads a caller field is FLAGGED here, in CI. Add a verifier ⇒ add a grid row.
+{
+  const G = kp('7e'.repeat(32)), tt = { generated_at: '2026-07-13T14:00:00Z', valid_from: '2026-07-13T14:00:00Z', valid_to: '2026-08-13T14:00:00Z' };
+  const gen = P.seal(P.buildGenesis({ domain_shard: 'grid.example', ust_id: 'ust:20260713.10', key_id: G.key_id }, tt, G.pubB64), G.priv, G.pubB64);
+  const doc = P.seal(P.buildState({ domain_shard: 'grid.example', ust_id: 'ust:20260713.14', key_id: G.key_id, class: 'observation' }, tt, { r: { kind: 'captured', value: { v: 'A' } } }, { prev: P.contentHash(gen) }), G.priv, G.pubB64);
+  const klc = P.buildKeylogCommitment(['sha256:' + '22'.repeat(32)]);
+  const cp = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: 'grid.example', genesis_epoch: P.genesisEpoch(P.contentHash(gen)), sequence: '0', active_genesis: P.contentHash(gen), current_key_id: G.key_id, keylog: { root: klc.root, length: klc.length, head: klc.head } }), G.priv, G.pubB64);
+  const rcpt = P.buildEvidenceReceipt({ domain_shard: 'grid.example', active_genesis: P.contentHash(gen), subject: 'ust:s', proof_kind: 'pow-header-chain', facts: { substrate: 'bitcoin', position: '1' }, issued_at: '2026-01-01T00:00:00Z' }, G.priv, G.pubB64);
+  const nf = P.buildNoForkEvidence({ domain_shard: 'grid.example', active_genesis: P.contentHash(gen) }, G.priv, G.pubB64);
+  // wrap `obj[key]` in a read-counter getter; returns a reader for the count.
+  const spy = (obj, key) => { let n = 0; const real = obj[key]; Object.defineProperty(obj, key, { enumerable: true, configurable: true, get() { n++; return real; } }); return () => n; };
+  // each row: [label, () => a fresh input with a spied field, fn]. fn is called; assert the spy fired ≤ 1.
+  const g = (label, make) => { const c = make(); Promise.resolve(c.call()).catch(() => {}); check('BOUNDARY-GRID ' + label + ' admits its input (getter read ≤1 — no TOCTOU re-read)', c.reads() <= 1); };
+  const wrapTop = (o, key) => { const clone = JSON.parse(JSON.stringify(o)); const reads = spy(clone, key); return { clone, reads }; };
+  g('verify(doc)', () => { const { clone, reads } = wrapTop(doc, 'state'); return { call: () => P.verify(clone, { context: 'data' }), reads }; });
+  g('verifyEvidenceReceipt(receipt)', () => { const { clone, reads } = wrapTop(rcpt, 'claim'); return { call: () => P.verifyEvidenceReceipt(clone, {}), reads }; });
+  g('verifyNoForkEvidence(evidence)', () => { const { clone, reads } = wrapTop(nf, 'claim'); return { call: () => P.verifyNoForkEvidence(clone, {}), reads }; });
+  g('verifyAuthorityCheckpointChain(chain[0])', () => { const clone = JSON.parse(JSON.stringify(cp)); const reads = spy(clone, 'body'); return { call: () => P.verifyAuthorityCheckpointChain([clone], {}), reads }; });
+  g('verifiedGenesisContext(genesis)', () => { const { clone, reads } = wrapTop(gen, 'state'); return { call: () => P.verifiedGenesisContext(clone), reads }; });
+  g('resolveCheckpointRoots(genesis)', () => { const { clone, reads } = wrapTop(gen, 'state'); return { call: () => P.resolveCheckpointRoots(clone), reads }; });
+  g('verifyKeylogTerminality(proof)', () => { const clone = JSON.parse(JSON.stringify(klc.headProof)); const reads = spy(clone, 'siblings'); return { call: () => P.verifyKeylogTerminality({ root: klc.root, length: klc.length, head: klc.head }, clone), reads }; });
+  g('verifyStream(frames[0])', () => { const clone = JSON.parse(JSON.stringify(doc)); const reads = spy(clone, 'state'); return { call: () => P.verifyStream([clone], {}), reads }; });
+  g('verifyCheckpointRecovery(statements[0])', () => { const st = { claim: { purpose: 'ust:checkpoint-authority-recovery' }, issuer_id: 'x', sig: { sig: 'a', pub: 'b' } }; const reads = spy(st, 'claim'); return { call: () => P.verifyCheckpointRecovery([st], {}), reads }; });
+  g('verifyEpochTransition(statement)', () => { const st = { claim: { purpose: 'ust:genesis-epoch-transition' }, sig: { sig: 'a', pub: 'b' } }; const reads = spy(st, 'claim'); return { call: () => P.verifyEpochTransition(st, { fromAuthority: { key_id: 'k', pub: 'p' } }), reads }; });
+  g('forkChoice(candidates[0])', () => { const clone = JSON.parse(JSON.stringify(doc)); const reads = spy(clone, 'state'); return { call: () => P.forkChoice([clone], {}), reads }; });
 }
 
 console.log('  ust-protocol ' + P.VERSION.spec + ' conformance vs ' + V.version);

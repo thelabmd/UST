@@ -425,15 +425,18 @@ export function checkBounds(doc) {
 
 // ─── §14 Verification (LIGHT floor: steps 1,2,4,5,8 + §13 bounds). Returns the three-outcome result. ──
 // opts: { requireVersion:'1.0', context:'data'|'key' } ; HIGH/TOP (steps 3,6,7) are separate, later.
+// round-27 (3) — THE ONE INPUT BOUNDARY. `verify` (public) admits its untrusted `doc` ONCE at the door (a getter/accessor
+// at any depth → E-MALFORMED; `admitDeep` is canon-exact so a legit doc is byte-transparent) and hands an inert snapshot to
+// `verifyCore`. INTERNAL machinery that already holds an admitted/getter-free object (verifyAsync's JSON snapshot + the
+// substrate-receipt identity shim, forkChoice) calls `verifyCore` directly — so the door snapshot does not re-clone inside
+// the hot core and break the internal identity coupling. One place admits; the core trusts. This is the single seat.
 export function verify(doc, opts = {}) {
+  const D = admitDeep(doc);
+  if (D === ADMIT_REJECT) return bad('E-MALFORMED', 'document is not an inert record — an accessor/getter cannot sign one payload and disclose another (round-27: the ONE input boundary)');
+  return verifyCore(D, opts);
+}
+function verifyCore(doc, opts = {}) {
   try {
-    // round-27 note — verify() itself does NOT re-snapshot `doc`: the authority-bearing PUBLIC entries that mint trusted
-    // outputs (verifyAuthorityCheckpointChain / resolveCheckpointRoots / verifyCheckpointRecovery / verifyEvidenceReceipt /
-    // verifiedGenesisContext / the epoch/uniqueness/stream verifiers) each admitDeep their own input, verifyJson is a bytes
-    // (getter-free) boundary, and the internal async/forkChoice callers JSON-snapshot before calling verify. A consumer who
-    // hand-builds a getter-object and calls verify() directly can only mislead ITSELF (the disclosed view ≠ the signed
-    // bytes on its OWN input); no third party consumes that verdict without re-verifying the bytes. (div1: the boundary is
-    // the authority graph, done above — not a re-clone inside the hot core, which broke the receipt-identity coupling.)
     // step 1 — structural admission (§14.1)
     if (typeof doc !== 'object' || doc === null) return bad('E-MALFORMED', 'not an object');
     if (doc.ust === undefined || doc.state === undefined || doc.sig === undefined) return bad('E-MALFORMED', 'missing ust/state/sig');
@@ -1215,16 +1218,19 @@ export function verifyAnchor(contentHash, proof, opts = {}) {
 export async function verifyAsync(doc, opts = {}) {
   opts = admitOpts(opts);                                        // round-19 P1-02 — inert snapshot; a throwing accessor/Proxy trap → null → structured reject (not a host throw)
   if (opts === null) return { result: 'E-MALFORMED', tier: 'NONE', detail: 'opts must be an inert record (round-19 P1-02 totality)' };
-  if (!doc?.proof || !opts.substrateVerify || opts.offline) return verify(doc, opts);
+  const D = admitDeep(doc);                                      // round-27 (3) — admit ONCE at this public door; below runs verifyCore over the inert snapshot (a getter can't split the substrate await from the sync verify)
+  if (D === ADMIT_REJECT) return { result: 'E-MALFORMED', tier: 'NONE', detail: 'document is not an inert record (round-27: the ONE input boundary)' };
+  doc = D;
+  if (!doc?.proof || !opts.substrateVerify || opts.offline) return verifyCore(doc, opts);
   // round-17 P0-01 — verify an IMMUTABLE SNAPSHOT. The live object could be swapped between the await and the sync
   // verify (TOCTOU): the substrate receipt is obtained for root A, then a mutated document B with root B reuses it and
   // gets VALID:TOP for evidence that was never its own (I4/F.5c: TimeStrength=anchored must be evidence for content_hash(d)).
   // Snapshot before the await; the sync shim ALSO binds the receipt to the captured (anchor, root), so a different root
   // can never claim it.
-  let snap; try { snap = JSON.parse(JSON.stringify(doc)); } catch { return verify(doc, opts); }
+  let snap; try { snap = JSON.parse(JSON.stringify(doc)); } catch { return verifyCore(doc, opts); }
   const capA = snap.proof?.anchor, capR = snap.proof?.root;
   let receipt; try { receipt = await opts.substrateVerify(capA, capR); } catch { receipt = null; }
-  return verify(snap, { ...opts, substrateVerify: (a, r) => (a === capA && r === capR ? receipt : null) });   // receipt (or null) → sync verifyAnchor path (identity binding holds: verify() does not re-clone the doc)
+  return verifyCore(snap, { ...opts, substrateVerify: (a, r) => (a === capA && r === capR ? receipt : null) });   // verifyCore (NOT verify): no re-clone, so the receipt-identity binding `a === capA` holds across the door
 }
 
 // §3.1/F.5c FORK-CHOICE — canonical = anchor-included. One `ust_id` may have several candidate documents with
