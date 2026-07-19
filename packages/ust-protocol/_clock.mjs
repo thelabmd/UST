@@ -1,31 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
-// rev33 R4 — the witness-budget clock is a VERIFIER-OWNED faculty, NOT untrusted input.
+// rev36 R4 — the witness-budget clock is a MONOTONIC ELAPSED-time faculty, owned by the verifier, NOT untrusted input.
 //
-// round-29 P0-02: exposing the clock as a public `opts.__nowMs` field let a CALLER pass a non-monotonic clock through the
-// DATA PATH (`verify`/`resolveByDiscovery` opts) and expand the effective witness leaf timeout, flipping a resource_limit
-// into a served-list `VALID:HIGH`. The verifier's own resource measurement `ρ_v` (F.9) must not be caller-writable.
+// round-29 P0-02: exposing the clock as a public `opts.__nowMs` field let a CALLER expand the effective witness budget and
+// flip resource_limit into a served-list VALID:HIGH. The clock therefore lives HERE, in an INTERNAL module that is NOT part
+// of the package's public API (not in package.json `exports`; a wire caller passing a document cannot reach it).
 //
-// The clock therefore lives HERE, in an INTERNAL module that is NOT part of the package's public API (not in
-// package.json `exports`, never reachable from a `verify(doc, opts)` call — a wire caller passing a document cannot set
-// it). Production uses a monotonic-guarded wall clock. The conformance harness (and only it) imports this module directly
-// to drive budget-exhaustion deterministically, then restores the default — that is a code-level test capability, not a
-// data-path surface.
-const wall = () => Date.now();
-let _now = wall;
-let _last = -Infinity;
+// round-30 P1-01: the rev33 realization used `Date.now()` behind a non-decreasing WRAPPER (clamp a backward source to its
+// last value). That is exactly what F.9 forbids — a wall-clock value with a monotone wrapper. On a backward step (an NTP
+// correction on a real wall clock; a test rollback) the wrapper FROZE time at `_last`, so the whole-operation deadline was
+// never reached and the aggregate budget DISAPPEARED, leaving only the per-leaf timers. A slow connector then confirmed.
+//
+// The fix is not a better wrapper but the RIGHT source: `performance.now()` is a MONOTONIC elapsed-time clock (milliseconds
+// since an arbitrary epoch, guaranteed non-decreasing, immune to wall-clock/NTP correction). It cannot go backward, so it
+// needs no wrapper and cannot freeze. The whole-op budget is measured as ELAPSED against an operation-local start
+// (`opDeadline = witnessNow() + budget`, computed at op start), never a wall-clock deadline. `Date.now()` is not used.
+//
+// The conformance harness (and only it) imports this module directly to drive time deterministically with a MONOTONIC test
+// clock, then restores the default — a code-level test capability, not a data-path surface.
+import { performance } from 'node:perf_hooks';
 
-// The clock the witness budget reads. MONOTONE-GUARDED: a source that moves backward is clamped to its last value, so
-// even a mis-set clock can never REWIND the deadline to grant a slow connector more time than a forward clock would.
+const monotonic = () => performance.now();
+let _now = monotonic;
+
+// The monotonic elapsed clock the witness budget reads. In production this is performance.now(); never Date.now().
 export function witnessNow() {
-  const t = _now();
-  if (typeof t !== 'number' || !Number.isFinite(t) || t < _last) return _last === -Infinity ? (_last = wall()) : _last;
-  _last = t;
-  return t;
+  return _now();
 }
 
-// TEST-ONLY (conformance harness). NOT exported from index.mjs; not on the public API. Pass a function to drive time
-// deterministically; pass nothing to restore the wall clock. Always restore in a finally.
+// TEST-ONLY (conformance harness). NOT exported from index.mjs; not on the public API. Pass a MONOTONIC (non-decreasing)
+// function to drive elapsed time deterministically; pass nothing to restore the real monotonic clock. Restore in a finally.
 export function __setWitnessClockForConformance(fn) {
-  _now = (typeof fn === 'function') ? fn : wall;
-  _last = -Infinity;
+  _now = (typeof fn === 'function') ? fn : monotonic;
 }

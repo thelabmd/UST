@@ -4,7 +4,7 @@
 import * as P from './index.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createPrivateKey, createPublicKey, createHash } from 'node:crypto';
-import { __setWitnessClockForConformance } from './_clock.mjs';   // rev33 R4 — the witness clock is verifier-owned in an INTERNAL module; the harness drives it deterministically HERE (not through public opts), then restores
+import { __setWitnessClockForConformance, witnessNow } from './_clock.mjs';   // rev33/36 R4 — the witness clock is verifier-owned in an INTERNAL module; the harness drives it deterministically HERE (not through public opts), then restores
 const withWitnessClock = async (clock, body) => { __setWitnessClockForConformance(clock); try { return await body(); } finally { __setWitnessClockForConformance(); } };
 
 const V = JSON.parse(readFileSync(new URL('../../vectors/conformance-vectors.json', import.meta.url)));
@@ -487,6 +487,12 @@ console.log('\n═════════════════════�
   const rEvil = await withWitnessClock(eNow, () => P.resolveByDiscovery(doc, { context: 'data', maxWitnessOpMs: 50, __nowMs: evilClock }, { fetchImpl: mk(budgetLog), substrateVerify: eSV }));
   check('R4 CLOCK-OWNED: a hostile __nowMs in public opts is DEAD (never read) — it cannot expand the witness budget or flip resource_limit into a served-list HIGH (round-29 P0-02; ρ_v belongs to the verifier)',
     ecalls === 0 && rEvil.verdict.no_fork !== 'served-list');
+  // rev36 R4 (round-30 P1-01) — the witness budget is measured against a MONOTONIC ELAPSED source (performance.now), not a
+  //   wall clock behind a non-decreasing wrapper. The rev33 wrapper FROZE on a backward step and DISABLED the whole-op
+  //   budget; performance.now cannot go backward (immune to NTP/wall-clock correction), so it needs no wrapper and cannot
+  //   freeze. Assert the production clock (no injection) is non-decreasing across many reads.
+  { __setWitnessClockForConformance(); let prev = -Infinity, monotone = true; for (let i = 0; i < 2000; i++) { const t = witnessNow(); if (typeof t !== 'number' || t < prev) monotone = false; prev = t; }
+    check('R4 MONOTONIC: the witness budget clock is a monotonic ELAPSED source (performance.now), non-decreasing across reads — a wall-clock/NTP rollback cannot rewind the deadline and disable the whole-op budget (round-30 P1-01; not a wall clock with a wrapper)', monotone); }
   // round-18 P0-01 — forkChoice returns the IMMUTABLE snapshot: a live mutation during the substrate await cannot make the returned canonical object differ from its proven content_hash (F.5c: canonical = the dᵢ with content_hash(dᵢ) ∈ F_t). Genesis-key-signed doc ⇒ authoritative with no key-log.
   const gkDoc = P.seal(P.buildState({ domain_shard: 'wit-test.example', ust_id: 'ust:20260713.150000', key_id: rootW.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { v: 'A' } } }), rootW.priv, rootW.pubB64);
   const fcCand = { ...gkDoc, proof: anchorOf(P.contentHash(gkDoc)) };

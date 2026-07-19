@@ -760,6 +760,18 @@ resolver surface — a resolver that re-reads a raw signed field fires the read-
 lesson: a controller rule realized only at the obvious entry (`verify`) is not realized; it must hold at every operation
 that touches untrusted input.
 
+**Realization (rev36 — R4's faculty is a monotonic ELAPSED clock, not a wall clock behind a wrapper).** A round-30 audit
+showed the rev33 R4 realization was still wrong at the FACULTY. The whole-op witness budget was measured with `Date.now()`
+behind a non-decreasing WRAPPER that clamped a backward step to its last value. F.9 forbids exactly this: a wall-clock value
+with a monotone wrapper. On a backward step — an NTP correction on a real wall clock jumping forward then back, or a test
+rollback — the wrapper FROZE time at `_last`, so the operation deadline was never reached, the aggregate `ρ_v.time` budget
+DISAPPEARED, and a slow connector confirmed a served-list HIGH that a forward clock would have refused. The fix is not a
+better wrapper but the RIGHT source: `performance.now()` — a MONOTONIC elapsed-time clock (milliseconds since an arbitrary
+epoch, non-decreasing by construction, immune to wall-clock/NTP correction). It cannot go backward, so it needs no wrapper
+and cannot freeze; the budget is elapsed against an operation-local start, never a `Date.now()` deadline (and every
+deadline comparison across the witness/substrate path is on this one monotonic scale — mixing it with `Date.now()` was its
+own bug). Machine-checked: the production clock is non-decreasing across reads (*"R4 MONOTONIC: the witness budget clock is a monotonic ELAPSED source (performance.now), non-decreasing across reads — a wall-clock/NTP rollback cannot rewind the deadline and disable the whole-op budget (round-30 P1-01; not a wall clock with a wrapper)"*).
+
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):
 

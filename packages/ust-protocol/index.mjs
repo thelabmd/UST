@@ -2482,7 +2482,7 @@ export function combineSubstrates(verifiers) {
     // also honor the AbortSignal to cancel its own in-flight work.
     const ac = typeof AbortController === 'function' ? new AbortController() : null;
     for (const v of list) {
-      if (ctx?.deadline && Date.now() >= ctx.deadline) { ac?.abort(); return null; }   // budget spent → no new plugin, cancel any signal-honoring work
+      if (ctx?.deadline && witnessNow() >= ctx.deadline) { ac?.abort(); return null; }   // budget spent → no new plugin, cancel any signal-honoring work (rev36 — the deadline is on the witnessNow() monotonic scale, NOT Date.now())
       let r; try { r = await withDeadline(v(anchor, root, { deadline: ctx?.deadline, signal: ac?.signal })); } catch { continue; }
       if (r != null) return r;
     }
