@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Universal State Transcript → UST Protocol → UST
 
-[![CI](https://img.shields.io/github/actions/workflow/status/thelabmd/UST-Protocol/ci.yml?branch=main&label=CI)](https://github.com/thelabmd/UST-Protocol/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/thelabmd/UST-Protocol/ci.yml?branch=main&label=CI)](https://github.com/thelabmd/UST-Protocol/actions) [![conformance](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/thelabmd/UST-Protocol/main/.github/badge-conformance.json)](https://github.com/thelabmd/UST-Protocol/actions/workflows/ci.yml)
 [![code license](https://img.shields.io/badge/code-Apache--2.0-blue)](./LICENSE)
 [![docs license](https://img.shields.io/badge/docs-CC--BY--4.0-blue)](./LICENSE-SPEC)
 [![ust-protocol](https://img.shields.io/npm/v/ust-protocol?label=ust-protocol)](https://www.npmjs.com/package/ust-protocol) [![pulls](https://img.shields.io/npm/dt/ust-protocol?label=pulls&color=informational)](https://www.npmjs.com/package/ust-protocol)
@@ -52,7 +52,11 @@ plain JSON**. Nothing to retrofit. One line switches it on:
 ```js
 import { verify } from 'ust-protocol';
 verify(doc, { context: 'data' }).result   // → VALID:LIGHT / HIGH / TOP
+// don't hash the JSON yourself — hashes are domain-separated; the library canonicalizes
 ```
+
+Or skip even that line: paste any transcript into the [web verifier](https://thelabmd.github.io/UST-Protocol/) —
+client-side, nothing is uploaded.
 
 ## ●  Verify one right now
 
