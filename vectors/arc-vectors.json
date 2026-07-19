@@ -1,7 +1,7 @@
 {
   "version": "UST 1.0 assurance-arc vectors (1.0.0-rc.36)",
   "note": "language-neutral contract: pre-signed inputs + expected verdict, executable by any implementation (see run-arc-vectors.mjs)",
-  "count": 61,
+  "count": 65,
   "vectors": [
     {
       "id": "ac-valid-chain",
@@ -2597,7 +2597,7 @@
       "id": "order-same-substrate-after",
       "op": "compareEvidenceOrder",
       "a": {
-        "proof_kind": "t",
+        "proof_kind": "pow-header-chain",
         "subject": "ust:x",
         "source_id": "s",
         "facts": {
@@ -2606,7 +2606,7 @@
         }
       },
       "b": {
-        "proof_kind": "t",
+        "proof_kind": "pow-header-chain",
         "subject": "ust:x",
         "source_id": "s",
         "facts": {
@@ -2619,22 +2619,132 @@
       }
     },
     {
-      "id": "order-two-upper-bounds-unproven",
+      "id": "order-interval-after",
       "op": "compareEvidenceOrder",
       "a": {
-        "proof_kind": "t",
+        "proof_kind": "rfc3161-tsa",
         "subject": "ust:x",
         "source_id": "s",
         "facts": {
-          "not_after": "2027-02-01T00:00:00Z"
+          "clock_id": "c1",
+          "not_before": "2027-01-02T00:00:00Z",
+          "not_after": "2027-01-03T00:00:00Z"
         }
       },
       "b": {
-        "proof_kind": "t",
+        "proof_kind": "rfc3161-tsa",
         "subject": "ust:x",
         "source_id": "s",
         "facts": {
+          "clock_id": "c1",
+          "not_before": "2026-12-31T00:00:00Z",
           "not_after": "2027-01-01T00:00:00Z"
+        }
+      },
+      "expect": {
+        "value": "proven-after"
+      }
+    },
+    {
+      "id": "order-cross-kind-unproven",
+      "op": "compareEvidenceOrder",
+      "a": {
+        "proof_kind": "transparency-log",
+        "subject": "ust:x",
+        "source_id": "s",
+        "facts": {
+          "substrate": "bitcoin",
+          "position": "900"
+        }
+      },
+      "b": {
+        "proof_kind": "pow-header-chain",
+        "subject": "ust:x",
+        "source_id": "s",
+        "facts": {
+          "substrate": "bitcoin",
+          "position": "800"
+        }
+      },
+      "expect": {
+        "value": "unproven"
+      }
+    },
+    {
+      "id": "order-noncalendar-unproven",
+      "op": "compareEvidenceOrder",
+      "a": {
+        "proof_kind": "rfc3161-tsa",
+        "subject": "ust:x",
+        "source_id": "s",
+        "facts": {
+          "clock_id": "c1",
+          "not_before": "9999-99-99T99:99:99Z",
+          "not_after": "2027-01-01T00:00:00Z"
+        }
+      },
+      "b": {
+        "proof_kind": "rfc3161-tsa",
+        "subject": "ust:x",
+        "source_id": "s",
+        "facts": {
+          "clock_id": "c1",
+          "not_before": "2026-01-01T00:00:00Z",
+          "not_after": "2026-07-01T00:00:00Z"
+        }
+      },
+      "expect": {
+        "value": "unproven"
+      }
+    },
+    {
+      "id": "order-inverted-interval-unproven",
+      "op": "compareEvidenceOrder",
+      "a": {
+        "proof_kind": "rfc3161-tsa",
+        "subject": "ust:x",
+        "source_id": "s",
+        "facts": {
+          "clock_id": "c1",
+          "not_before": "2099-01-01T00:00:00Z",
+          "not_after": "2020-01-01T00:00:00Z"
+        }
+      },
+      "b": {
+        "proof_kind": "rfc3161-tsa",
+        "subject": "ust:x",
+        "source_id": "s",
+        "facts": {
+          "clock_id": "c1",
+          "not_before": "2020-01-01T00:00:00Z",
+          "not_after": "2021-01-01T00:00:00Z"
+        }
+      },
+      "expect": {
+        "value": "unproven"
+      }
+    },
+    {
+      "id": "order-cross-clock-unproven",
+      "op": "compareEvidenceOrder",
+      "a": {
+        "proof_kind": "rfc3161-tsa",
+        "subject": "ust:x",
+        "source_id": "s",
+        "facts": {
+          "clock_id": "c1",
+          "not_before": "2027-02-01T00:00:00Z",
+          "not_after": "2027-03-01T00:00:00Z"
+        }
+      },
+      "b": {
+        "proof_kind": "rfc3161-tsa",
+        "subject": "ust:x",
+        "source_id": "s",
+        "facts": {
+          "clock_id": "c2",
+          "not_before": "2020-01-01T00:00:00Z",
+          "not_after": "2021-01-01T00:00:00Z"
         }
       },
       "expect": {

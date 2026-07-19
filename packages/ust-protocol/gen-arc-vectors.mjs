@@ -107,9 +107,13 @@ const add = (id, op, fields) => V.push({ id, op, ...fields });
 
 // ─── Phase A connector evidence algebra (F.5g) — order proof-relation, quorum by consumer-resolved domains, class ───
 {
-  const ev = (facts) => ({ proof_kind: 't', subject: 'ust:x', source_id: 's', facts });
-  add('order-same-substrate-after', 'compareEvidenceOrder', { a: ev({ substrate: 'bitcoin', position: '900' }), b: ev({ substrate: 'bitcoin', position: '800' }), expect: { value: 'proven-after' } });
-  add('order-two-upper-bounds-unproven', 'compareEvidenceOrder', { a: ev({ not_after: '2027-02-01T00:00:00Z' }), b: ev({ not_after: '2027-01-01T00:00:00Z' }), expect: { value: 'unproven' } });
+  const ev = (proof_kind, facts) => ({ proof_kind, subject: 'ust:x', source_id: 's', facts });   // round-32 P0-01: the order coordinate is typed BY proof_kind (mirrors the kernel's ORDER_COORD)
+  add('order-same-substrate-after', 'compareEvidenceOrder', { a: ev('pow-header-chain', { substrate: 'bitcoin', position: '900' }), b: ev('pow-header-chain', { substrate: 'bitcoin', position: '800' }), expect: { value: 'proven-after' } });
+  add('order-interval-after', 'compareEvidenceOrder', { a: ev('rfc3161-tsa', { clock_id: 'c1', not_before: '2027-01-02T00:00:00Z', not_after: '2027-01-03T00:00:00Z' }), b: ev('rfc3161-tsa', { clock_id: 'c1', not_before: '2026-12-31T00:00:00Z', not_after: '2027-01-01T00:00:00Z' }), expect: { value: 'proven-after' } });
+  add('order-cross-kind-unproven', 'compareEvidenceOrder', { a: ev('transparency-log', { substrate: 'bitcoin', position: '900' }), b: ev('pow-header-chain', { substrate: 'bitcoin', position: '800' }), expect: { value: 'unproven' } });
+  add('order-noncalendar-unproven', 'compareEvidenceOrder', { a: ev('rfc3161-tsa', { clock_id: 'c1', not_before: '9999-99-99T99:99:99Z', not_after: '2027-01-01T00:00:00Z' }), b: ev('rfc3161-tsa', { clock_id: 'c1', not_before: '2026-01-01T00:00:00Z', not_after: '2026-07-01T00:00:00Z' }), expect: { value: 'unproven' } });
+  add('order-inverted-interval-unproven', 'compareEvidenceOrder', { a: ev('rfc3161-tsa', { clock_id: 'c1', not_before: '2099-01-01T00:00:00Z', not_after: '2020-01-01T00:00:00Z' }), b: ev('rfc3161-tsa', { clock_id: 'c1', not_before: '2020-01-01T00:00:00Z', not_after: '2021-01-01T00:00:00Z' }), expect: { value: 'unproven' } });
+  add('order-cross-clock-unproven', 'compareEvidenceOrder', { a: ev('rfc3161-tsa', { clock_id: 'c1', not_before: '2027-02-01T00:00:00Z', not_after: '2027-03-01T00:00:00Z' }), b: ev('rfc3161-tsa', { clock_id: 'c2', not_before: '2020-01-01T00:00:00Z', not_after: '2021-01-01T00:00:00Z' }), expect: { value: 'unproven' } });
   add('quorum-distinct-domains', 'quorumTrustDomains', { list: [{ source_id: 'a1' }, { source_id: 'b1' }, { source_id: 'a2' }], opts: { domains: { a1: 'op-a', a2: 'op-a', b1: 'op-b' }, threshold: 2 }, expect: { count: 2, met: true } });
   add('class-transparency-log-not-nonmembership', 'evidenceClass', { proof_kind: 'transparency-log', expect: { value: 'append-only-inclusion+consistency' } });
   add('class-unknown-opaque', 'evidenceClass', { proof_kind: 'made-up', expect: { value: 'opaque' } });

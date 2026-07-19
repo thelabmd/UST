@@ -877,10 +877,36 @@ console.log('\n═════════════════════�
   const btc = (h) => ev('pow-header-chain', { substrate: 'bitcoin', position: String(h) });
   check('PhA order: same substrate a.pos>b.pos → proven-after', P.compareEvidenceOrder(btc(900), btc(800)) === 'proven-after');
   check('PhA order: same substrate a.pos<b.pos → not-after', P.compareEvidenceOrder(btc(800), btc(900)) === 'not-after');
-  check('PhA order: a.not_before ≥ b.not_after → proven-after', P.compareEvidenceOrder(ev('t', { not_before: '2027-01-02T00:00:00Z' }), ev('t', { not_after: '2027-01-01T00:00:00Z' })) === 'proven-after');
-  check('PhA order: b.not_before ≥ a.not_after → not-after', P.compareEvidenceOrder(ev('t', { not_after: '2027-01-01T00:00:00Z' }), ev('t', { not_before: '2027-01-02T00:00:00Z' })) === 'not-after');
-  check('PhA order: two not_after upper bounds alone → unproven', P.compareEvidenceOrder(ev('t', { not_after: '2027-01-02T00:00:00Z' }), ev('t', { not_after: '2027-01-01T00:00:00Z' })) === 'unproven');
-  check('PhA order: cross-substrate positions → unproven', P.compareEvidenceOrder(ev('t', { substrate: 'bitcoin', position: '900' }), ev('t', { substrate: 'rekor', position: '5' })) === 'unproven');
+  const iv = (clock_id, not_before, not_after) => ev('rfc3161-tsa', { clock_id, not_before, not_after });   // a well-formed same-clock interval (kernel FACTS_SCHEMA: clock_id + BOTH real-calendar bounds)
+  check('PhA order: a.not_before ≥ b.not_after → proven-after', P.compareEvidenceOrder(iv('c1', '2027-01-02T00:00:00Z', '2027-01-03T00:00:00Z'), iv('c1', '2026-12-31T00:00:00Z', '2027-01-01T00:00:00Z')) === 'proven-after');
+  check('PhA order: b.not_before ≥ a.not_after → not-after', P.compareEvidenceOrder(iv('c1', '2026-12-31T00:00:00Z', '2027-01-01T00:00:00Z'), iv('c1', '2027-01-02T00:00:00Z', '2027-01-03T00:00:00Z')) === 'not-after');
+  check('PhA order: overlapping intervals prove neither → unproven', P.compareEvidenceOrder(iv('c1', '2027-01-01T00:00:00Z', '2027-01-03T00:00:00Z'), iv('c1', '2027-01-02T00:00:00Z', '2027-01-04T00:00:00Z')) === 'unproven');
+  check('PhA order: cross-substrate positions → unproven', P.compareEvidenceOrder(ev('pow-header-chain', { substrate: 'bitcoin', position: '900' }), ev('pow-header-chain', { substrate: 'litecoin', position: '5' })) === 'unproven');
+  // round-32 P0-01 — the public order path mirrors the reference KERNEL's orderSemantic (ORDER_COORD/FACTS_SCHEMA), so
+  // the two independent derivations agree: a cross-kind tag, a non-calendar instant, an inverted interval, or a
+  // cross-clock pair mints NO temporal-order predicate (the corroborated-freshness forge).
+  check('R32 order cross-kind: transparency-log wearing pow facts {substrate,position} → unproven (its coord is log_id/index)', P.compareEvidenceOrder(ev('transparency-log', { substrate: 'bitcoin', position: '900' }), ev('pow-header-chain', { substrate: 'bitcoin', position: '800' })) === 'unproven');
+  check('R32 order transparency-log legit {log_id,index} orders within one log', P.compareEvidenceOrder(ev('transparency-log', { log_id: 'rekor', index: '900' }), ev('transparency-log', { log_id: 'rekor', index: '800' })) === 'proven-after');
+  check('R32 order non-calendar: rfc3161-tsa not_before 9999-99-99T99:99:99Z (shape-valid, calendar-invalid) → unproven', P.compareEvidenceOrder(iv('c1', '9999-99-99T99:99:99Z', '2027-01-01T00:00:00Z'), iv('c1', '2026-01-01T00:00:00Z', '2026-07-01T00:00:00Z')) === 'unproven');
+  check('R32 order inverted-interval: rfc3161-tsa not_before > not_after in one receipt → unproven', P.compareEvidenceOrder(iv('c1', '2099-01-01T00:00:00Z', '2020-01-01T00:00:00Z'), iv('c1', '2020-01-01T00:00:00Z', '2021-01-01T00:00:00Z')) === 'unproven');
+  check('R32 order cross-clock: two intervals on different clocks prove nothing → unproven', P.compareEvidenceOrder(iv('c1', '2027-02-01T00:00:00Z', '2027-03-01T00:00:00Z'), iv('c2', '2020-01-01T00:00:00Z', '2021-01-01T00:00:00Z')) === 'unproven');
+  check('R32 order calendar-valid still holds: real same-clock instants compare chronologically', P.compareEvidenceOrder(iv('c1', '2027-02-28T23:59:59Z', '2027-03-01T00:00:00Z'), iv('c1', '2026-01-01T00:00:00Z', '2027-01-01T00:00:00Z')) === 'proven-after');
+  // round-32 P2-01 — the Horn explanatory trace must AGREE with the canonical projectTier over the whole grid: a
+  // `pinned` identity is below the HIGH threshold, so the trace derives no TierHIGH where projectTier returns LIGHT.
+  check('R32 Horn≡projectTier: pinned identity derives NO TierHIGH (key-pinned, not name-bound)', (() => {
+    const g = P.provePredicates({ identity: { status: 'verified', strength: 'pinned' } });
+    return !g.provenAtoms.includes('name-bound') && g.provenAtoms.includes('key-pinned') && !g.derivation.some((t) => t.rule === 'TierHIGH');
+  })());
+  check('R32 Horn≡projectTier: every identity×time cell — max Horn Tier == projectTier', (() => {
+    const RANK = { LIGHT: 1, HIGH: 2, TOP: 3 };
+    for (const strength of ['pinned', 'corroborated', 'authoritative']) for (const time of ['unproven', 'anchored']) {
+      const g = P.provePredicates({ identity: { status: 'verified', strength }, anchor: time === 'anchored' ? { inclusion: true, time: 'anchored' } : undefined });
+      let best = 'NONE', r = 0;
+      for (const t of g.derivation) if (/^Tier/.test(t.rule) && RANK[t.rule.slice(4)] > r) { r = RANK[t.rule.slice(4)]; best = t.rule.slice(4); }
+      if (best !== P.projectTier({ integrity: 'valid', identity: strength, freshness: 'unverified', time })) return false;
+    }
+    return true;
+  })());
   const domains = { a1: 'op-a', a2: 'op-a', b1: 'op-b', c1: 'op-c' };
   check('PhA quorum: two sources in one domain → count 1', P.quorumTrustDomains([ev('k', {}, 'a1'), ev('k', {}, 'a2')], { domains }).count === 1);
   check('PhA quorum: three domains → count 3, threshold 2 met', (q => q.count === 3 && q.met === true)(P.quorumTrustDomains([ev('k', {}, 'a1'), ev('k', {}, 'b1'), ev('k', {}, 'c1')], { domains, threshold: 2 })));

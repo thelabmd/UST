@@ -1044,18 +1044,44 @@ function admitFreshnessEvidence(x, subject, scope, trust) {
   return { detail: 'caller-supplied evidence is neither a signed connector receipt nor core-verified (M3 — a minted look-alike earns nothing)' };
 }
 const temporalOrderCapable = (ev) => { const c = evidenceCaps(ev?.proof_kind); return c.includes('order') || c.includes('time'); };
-// compareEvidenceOrder(a, b): is `a` PROVEN to be after `b`? Same-substrate position (block height / log index) is a
-// total order; else an interval relation `a.not_before ≥ b.not_after` proves after, `b.not_before ≥ a.not_after`
-// proves not-after. Two `not_after` upper bounds ALONE (or cross-substrate positions) prove nothing ⇒ `unproven`.
+// round-32 P0-01 (M3 evidence-seam soundness / R2 processing-purity) — THE public evidence-order path
+// (deriveCheckpointFreshness → compareEvidenceOrder) must apply the SAME closed typed decode the reference KERNEL's
+// `orderSemantic` does (ORDER_COORD/FACTS_SCHEMA in reference-checker.mjs), so the two INDEPENDENT derivations agree.
+// A connector's `facts` are untyped strings; the order coordinate is read ONLY from the proof_kind's authorised fields
+// and is proof-kind-NAMESPACED — a transparency-log's log-index is never comparable to a pow chain's block-height, a
+// rfc3161-tsa interval is a SAME-CLOCK pair of REAL calendar instants with not_before ≤ not_after (isRealRfc3339Z, the
+// one real-calendar validator, = the kernel's pRFC). Cross-kind, non-calendar, inverted, cross-clock, or half-open
+// inputs decode to NOTHING ⇒ no `proven-after` (the corroborated-freshness forge). Total, fail-closed, never throws.
+const decSeq = (s) => (typeof s === 'string' && /^(0|[1-9]\d*)$/.test(s)) ? s : null;      // CanonicalSeq — mirrors reference-checker decodeSeq/pSeq
+function decodeOrderFacts(proof_kind, facts) {
+  if (!facts || typeof facts !== 'object' || Array.isArray(facts)) return null;
+  const pid = (s) => (typeof s === 'string' && s.length > 0) ? s : null;                    // a non-empty identifier — mirrors the kernel's pId
+  switch (proof_kind) {                                                                     // the CLOSED admissible-kind set = ORDER_COORD keys (no free substrate)
+    case 'pow-header-chain': { const sub = pid(facts.substrate), pos = decSeq(facts.position);   // Position(substrate, position)
+      return (sub && pos) ? { order: { ns: 'pow-header-chain ' + sub, pos } } : null; }
+    case 'transparency-log': { const log = pid(facts.log_id), idx = decSeq(facts.index);        // Position(log_id, index) — the field is `index`, NOT `log_index`/`substrate`
+      return (log && idx) ? { order: { ns: 'transparency-log ' + log, pos: idx } } : null; }
+    case 'rfc3161-tsa': { const clk = pid(facts.clock_id);                                       // Interval(clock_id, not_before ≤ not_after)
+      if (!clk || !isRealRfc3339Z(facts.not_before) || !isRealRfc3339Z(facts.not_after) || facts.not_before > facts.not_after) return null;   // clock_id + BOTH real-calendar bounds, well-formed
+      return { interval: { id: 'rfc3161-tsa ' + clk, nb: facts.not_before, na: facts.not_after } }; }
+    default: return null;                                                                       // authenticated-map / content-addressed (no order coord) + unknown ⇒ nothing
+  }
+}
+// compareEvidenceOrder(a, b): is `a` PROVEN to be after `b`? Routed through the ONE closed decoder — positions in the
+// SAME proof-kind order-namespace are a total order; else a SAME-CLOCK real-calendar interval relation (`a.not_before ≥
+// b.not_after` proves after, `b.not_before ≥ a.not_after` proves not-after). Cross-kind, cross-namespace, cross-clock,
+// or two-bounds-unrelated inputs prove nothing ⇒ `unproven`.
 export function compareEvidenceOrder(a, b) {
-  const fa = a?.verified_facts ?? a?.facts ?? a ?? {}, fb = b?.verified_facts ?? b?.facts ?? b ?? {};   // M3: VerifiedEvidence carries verified_facts
-  const decint = (s) => typeof s === 'string' && /^(0|[1-9]\d*)$/.test(s);            // P1-02: canonical unsigned decimal — total/fail-closed, never BigInt(NaN)
-  if (fa.substrate && fb.substrate && fa.substrate === fb.substrate && decint(fa.position) && decint(fb.position))
-    return BigInt(fa.position) > BigInt(fb.position) ? 'proven-after' : 'not-after';   // one total order ⇒ decidable
-  const iso = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(s);
-  if (iso(fa.not_before) && iso(fb.not_after) && fa.not_before >= fb.not_after) return 'proven-after';
-  if (iso(fb.not_before) && iso(fa.not_after) && fb.not_before >= fa.not_after) return 'not-after';
-  return 'unproven';                                                                   // two upper bounds, or cross-substrate
+  const da = decodeOrderFacts(a?.proof_kind, a?.verified_facts ?? a?.facts ?? (a && typeof a === 'object' ? a : {}));   // M3: VerifiedEvidence carries proof_kind + verified_facts
+  const db = decodeOrderFacts(b?.proof_kind, b?.verified_facts ?? b?.facts ?? (b && typeof b === 'object' ? b : {}));
+  if (!da || !db) return 'unproven';
+  if (da.order && db.order && da.order.ns === db.order.ns)                                 // same kind + same substrate/log ⇒ one total order
+    return BigInt(da.order.pos) > BigInt(db.order.pos) ? 'proven-after' : 'not-after';
+  if (da.interval && db.interval && da.interval.id === db.interval.id) {                   // same clock ⇒ comparable (cross-clock proves nothing — kernel P0-03)
+    if (da.interval.nb >= db.interval.na) return 'proven-after';
+    if (db.interval.nb >= da.interval.na) return 'not-after';
+  }
+  return 'unproven';                                                                       // two upper bounds, cross-namespace, or undecodable
 }
 // quorumTrustDomains(list, { domains, threshold }): count DISTINCT CONSUMER-resolved trust domains. `domains` maps a
 // verified source_id → trustDomain (consumer config). Sources absent from `domains` are NOT admitted; a `trust_domain`
@@ -2098,7 +2124,8 @@ export function provePredicates(seams = {}) {
   // derives the composite rungs + a premise trace; a coordinate never lifts without its atom (no-upward-forge).
   const atomSet = ['integrity-valid'];
   if (idStr === 'authoritative') atomSet.push('name-bound', 'active-genesis-unique');
-  else if (idStr === 'corroborated' || idStr === 'pinned') atomSet.push('name-bound');
+  else if (idStr === 'corroborated') atomSet.push('name-bound');                          // corroborated ≥ the HIGH threshold ⇒ name-bound (TierHIGH)
+  else if (idStr === 'pinned') atomSet.push('key-pinned');                                // round-32 P2-01 — pinned < corroborated ⇒ NOT name-bound; the Horn trace must not derive TierHIGH where projectTier returns LIGHT (key-pinned lifts no Tier rule)
   if (frStr === 'corroborated' || frStr === 'attested') atomSet.push('checkpoint-authorized', 'scope-bound', 'keylog-append-only', 'snapshot-terminal', 'checkpoint-committed', 'checkpoint-after-target');
   if (frStr === 'attested') atomSet.push('checkpoint-unique');
   if (tmStr === 'anchored') atomSet.push('time-anchored');

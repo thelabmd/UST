@@ -13,11 +13,11 @@
 // never read from the term. Checker Soundness: check_C(π,W)=VALID(J) ⇒ ∃ derivation of J whose leaves are crypto
 // verifications over W (proof: structural induction on π). TCB = this file + the imported leaf primitives.
 import { canon, H, keyId, edVerifyStrict, contentHash, verify, isValid, verifyKeylogTerminality,
-  verifyCheckpointMapUniqueness, evidenceCaps, compareEvidenceOrder, authorityScopeId, genesisEpoch,
+  verifyCheckpointMapUniqueness, evidenceCaps, authorityScopeId, genesisEpoch,
   resolveKeys, buildKeylogCommitment, authorityCheckpointId, strictB64url, isPublicDnsShard,
   admitUtf8, anyLoneSurrogate } from './index.mjs';   // round-19 P1-01 — ONE Unicode byte-admission, shared with the discovery resolver (no drift)
 
-export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev39';
+export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev40';
 // RULE_CONTRACTS (§2b) — the STRUCTURAL source of truth: exactly one inference rule per name, one switch branch per
 // name, and a fixed (children arity, witness count, allowed params, conclusion kind). DecodeTerm enforces these on
 // decode; a term with an extra child / extra witness / free param / unknown field / stored conclusion is rejected
@@ -471,7 +471,14 @@ function checkTermInner(node, C, W, memo, km) {
       const soC = orderSemantic(A.j.proof_kind, A.j.facts), soT = orderSemantic(B.j.proof_kind, B.j.facts);
       if (soC.kind === 'none' || soT.kind === 'none') return ind('evidence class cannot establish temporal order');
       if (soC.kind !== soT.kind || soC.id !== soT.id) return ind('incomparable order semantics (different order/clock identity)');   // P0-03: interval must share a clock; position a substrate
-      if (compareEvidenceOrder({ facts: soC.facts }, { facts: soT.facts }) !== 'proven-after') return ind('commitment not proven-after the target');
+      // magnitude compare over the checker's OWN typed+namespaced coordinate — position by CanonicalSeq, interval by
+      // real-calendar lower ≥ upper (both pre-validated by orderSemantic/FACTS_SCHEMA). Kept INDEPENDENT: the kernel does
+      // NOT delegate its order verdict to the producer's compareEvidenceOrder (round-32 P0-01 — the public path mirrors
+      // THIS decode, never the reverse).
+      const provenAfter = soC.kind === 'position'
+        ? BigInt(soC.facts.position) > BigInt(soT.facts.position)
+        : soC.facts.not_before >= soT.facts.not_after;
+      if (!provenAfter) return ind('commitment not proven-after the target');
       return { j: { kind: 'After', s: A.j.s, eC: A.j.e, eT: B.j.e, orderIdentity: soC.id } };   // M-REL: After indexed by the two evidences AND the order identity
     }
     case 'Corroborated': {

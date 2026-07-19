@@ -150,6 +150,18 @@
       "rev": "rev28",
       "model_locus": "ONLY an ABSENT budget selects the reference default",
       "conformance_check": "round-27 P2-01 invalid maxWitnessOpMs (0/-1/NaN/Infinity/fractional) is REFUSED (resource_limit), never expanded to the reference default"
+    },
+    {
+      "id": "R40-r2-order-unified",
+      "rev": "rev40",
+      "model_locus": "the public evidence-order path is the SAME closed decode as the kernel",
+      "conformance_check": "R32 order cross-kind: transparency-log wearing pow facts {substrate,position} → unproven (its coord is log_id/index)"
+    },
+    {
+      "id": "R40-horn-projecttier",
+      "rev": "rev40",
+      "model_locus": "a `key-pinned` atom that lifts no Tier",
+      "conformance_check": "R32 Horn≡projectTier: every identity×time cell — max Horn Tier == projectTier"
     }
   ]
 }

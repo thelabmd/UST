@@ -800,9 +800,13 @@ The same audit corrected an OVERCLAIM in rev37: the in-process lockstep enforcem
 stale/forged-MANIFEST defect (it proves a registered check RAN and returned truthy in-process), but it does NOT prove the
 check's ADVERSARIAL SEMANTICS — a maintainer who, in the SAME commit, weakens a registered `check(id, …)` to `check(id, true)`
 keeps the label present and the enforcement green. Label membership is a drift/consistency control, not a cryptographic
-proof of test quality. The SEMANTIC trust root for the checker is elsewhere and immutable: the language-neutral BYTE-VECTORS
-(each an input bound to an EXPECTED result — a tautology cannot satisfy them) plus independent implementation and the
-pending human review. The model claims only what each layer proves. (round-31 P2-01: a signature-registry fixture
+proof of test quality. The SEMANTIC trust root is NOT the byte-vectors themselves (round-32 P1-01, conceded): they are
+generated from THIS implementation and drift-gated by regenerate==committed, so a same-commit maintainer who changes the
+impl AND regenerates the expected results keeps the gate green — the corpus proves cross-implementation CONSISTENCY and
+portability, not correctness. The byte-vectors are therefore a VERSIONED, EXTERNALLY-PINNABLE conformance/regression
+oracle, not a self-authenticating authority. The semantic root proper is the reviewed normative specification, at least
+one INDEPENDENTLY-authored implementation that passes the unchanged corpus, externally-pinned release-signed vector
+digests, and human cryptographic review (still pending). The model claims only what each layer proves. (round-31 P2-01: a signature-registry fixture
 (`verifyKeylogTerminality`) whose first argument was a domain string short-circuited before the hostile position — replaced
 with a real key-log head record so every declared position is actually reached.)
 
@@ -815,6 +819,25 @@ boundary: **`admitOpts` now DEEP-admits every nested value** (a function stays a
 array is frozen inert). No resolver — patched or not, present or future — can hold a live nested caller object to re-read
 after verification. Machine-checked on a resolver that was NEVER individually patched (*"R3 ONE-CONTROL: admitOpts deep-admits EVERY nested opts/config DATA value once, so a resolver NOT individually patched (verifyEpochTransition) reads its nested doc ≤1 and cannot be shown a second face — the whole nested-doc re-read class is closed at ONE boundary (round-31)"*), and the read-count grid now covers seven nested positions across the resolver surface. This is the concrete
 form of the controller lesson: close the CLASS at one control, do not chase its instances.
+
+**Realization (rev40 — the public evidence-order path is the SAME closed decode as the kernel; and the Horn trace agrees
+with the canonical projection).** A round-32 audit found that the temporal-order predicate had TWO decoders. The reference
+KERNEL (`checkAuthorityProof`, the independent second derivation) types evidence facts through a CLOSED per-proof-kind ADT
+(`FACTS_SCHEMA`/`ORDER_COORD`/`orderSemantic`): a position coordinate is read only from the kind's authorised fields
+(`pow-header-chain`→substrate/position, `transparency-log`→log_id/index), namespaced by the trusted proof_kind; a
+`rfc3161-tsa` is a SAME-CLOCK pair of REAL calendar instants with not_before ≤ not_after. But the PUBLIC path
+(`deriveCheckpointFreshness → compareEvidenceOrder`) never applied that decode — it read generic `substrate`/`position`/
+`not_before`/`not_after` off whatever facts were present. So a connector receipt could wear another kind's ordering facts
+(a `transparency-log` carrying `{substrate, position}`), a lexicographically-maximal NON-calendar string
+(`9999-99-99T99:99:99Z`, shape-valid), an INVERTED interval, or a CROSS-CLOCK pair — and mint `proven-after`, lifting the
+corroborated-freshness rung. Fix: the public `compareEvidenceOrder` now mirrors the kernel's decode EXACTLY (same closed
+kind set, same coordinate fields, `isRealRfc3339Z` = the kernel's `pRFC`, same proof-kind/clock namespacing), so the two
+INDEPENDENT derivations agree; the kernel in turn does its own inline magnitude compare and no longer delegates its order
+verdict to the producer (*"R32 order cross-kind: transparency-log wearing pow facts {substrate,position} → unproven (its coord is log_id/index)"*). The same audit found the Horn explanatory trace internally contradicted the canonical
+`projectTier`: `provePredicates` mapped a `pinned` identity (below the HIGH threshold) to `name-bound`, so the trace
+derived `TierHIGH` while `projectTier` returned `LIGHT`. Fix: `pinned` maps to a `key-pinned` atom that lifts no Tier
+rule, and a grid check pins every derived `Tier*` to `projectTier` over the whole identity×time lattice (*"R32 Horn≡projectTier: every identity×time cell — max Horn Tier == projectTier"*). (round-32 P1-01, conceded: the byte-vectors
+are a portability oracle, not the semantic root — see rev38's corrected R2 bound above.)
 
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):
@@ -930,7 +953,7 @@ remains a builder (throws `E-EVIDENCE` on a self-declared class) but its output 
 - receipt facts-only ban: *"M3 receipt: facts self-declaring assurance/trust_domain/capability → INVALID(E-EVIDENCE) at build AND verify"*.
 - facts-only (raw shape, no self-declared class/independence): *"PhA facts-only: connector self-declaring assurance → E-EVIDENCE"*, *"... trust_domain → E-EVIDENCE"*.
 - `cls`, transparency-log ≠ non-membership: *"PhA class: transparency-log → append-only (NOT non-membership)"*, *"... authenticated-map → keyed non-membership"*, *"... unknown proof-kind → opaque"*.
-- `After` proof relation: *"PhA order: same substrate a.pos>b.pos → proven-after"* / *"... a.pos<b.pos → not-after"* / *"... a.not_before ≥ b.not_after → proven-after"* / *"... b.not_before ≥ a.not_after → not-after"* / *"... two not_after upper bounds alone → unproven"* / *"... cross-substrate positions → unproven"*.
+- `After` proof relation: *"PhA order: same substrate a.pos>b.pos → proven-after"* / *"... a.pos<b.pos → not-after"* / *"... a.not_before ≥ b.not_after → proven-after"* / *"... b.not_before ≥ a.not_after → not-after"* / *"... overlapping intervals prove neither → unproven"* / *"... cross-substrate positions → unproven"*. The public order coordinate is the SAME closed decode as the kernel (round-32 P0-01): *"R32 order cross-kind: transparency-log wearing pow facts {substrate,position} → unproven (its coord is log_id/index)"* / *"R32 order cross-clock: two intervals on different clocks prove nothing → unproven"*.
 - `q` domain-cardinality: *"PhA quorum: two sources in one domain → count 1"* / *"... three domains → count 3, threshold 2 met"* / *"... source not in consumer config → not counted"* / *"... self-declared trust_domain on evidence ignored"*.
 
 All green at REV 44 (conformance 243/0).
