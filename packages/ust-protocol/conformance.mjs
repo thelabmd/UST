@@ -899,11 +899,13 @@ console.log('\n═════════════════════�
   })());
   check('R32 Horn≡projectTier: every identity×time cell — max Horn Tier == projectTier', (() => {
     const RANK = { LIGHT: 1, HIGH: 2, TOP: 3 };
-    for (const strength of ['pinned', 'corroborated', 'authoritative']) for (const time of ['unproven', 'anchored']) {
-      const g = P.provePredicates({ identity: { status: 'verified', strength }, anchor: time === 'anchored' ? { inclusion: true, time: 'anchored' } : undefined });
+    const IDS = [{ spec: {}, id: 'self-asserted' }, { spec: { status: 'verified', strength: 'pinned' }, id: 'pinned' },   // ALL four identity states incl. the integrity-floor self-asserted (status≠verified) — "every cell" means every cell
+      { spec: { status: 'verified', strength: 'corroborated' }, id: 'corroborated' }, { spec: { status: 'verified', strength: 'authoritative' }, id: 'authoritative' }];
+    for (const { spec, id } of IDS) for (const time of ['unproven', 'anchored']) {
+      const g = P.provePredicates({ identity: spec, anchor: time === 'anchored' ? { inclusion: true, time: 'anchored' } : undefined });
       let best = 'NONE', r = 0;
       for (const t of g.derivation) if (/^Tier/.test(t.rule) && RANK[t.rule.slice(4)] > r) { r = RANK[t.rule.slice(4)]; best = t.rule.slice(4); }
-      if (best !== P.projectTier({ integrity: 'valid', identity: strength, freshness: 'unverified', time })) return false;
+      if (best !== P.projectTier({ integrity: 'valid', identity: id, freshness: 'unverified', time })) return false;
     }
     return true;
   })());
