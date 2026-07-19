@@ -1520,6 +1520,13 @@ console.log('\n═════════════════════�
   g('forkChoice(candidates[0])', () => { const clone = JSON.parse(JSON.stringify(doc)); const reads = spy(clone, 'state'); return { call: () => P.forkChoice([clone], {}), reads }; });
   g('resolveByDiscovery(doc)', () => { const clone = JSON.parse(JSON.stringify(doc)); const reads = spy(clone, 'state'); return { call: () => P.resolveByDiscovery(clone, { context: 'data' }, { fetchImpl: async () => ({ ok: false, status: 404, text: async () => '' }) }), reads }; });
   g('verifyAsync(doc)', () => { const clone = JSON.parse(JSON.stringify(doc)); const reads = spy(clone, 'state'); return { call: () => P.verifyAsync(clone, { context: 'data' }), reads }; });
+  // rev35 R3 (round-30 P0-01/02) — the grid now covers the RESOLVERS too: a resolver that verifies its input then RE-READS
+  //   the raw object fires the spied getter ≥2 times (resolveKeys read `state` 8× before the fix). Extending the ≤1-read
+  //   invariant to resolveKeys/resolveAuthority/resolveCadence makes the R3 "no post-admission raw re-read" machine-checked
+  //   across the resolver surface, not just verify.
+  g('resolveKeys(genesis)', () => { const clone = JSON.parse(JSON.stringify(gen)); const reads = spy(clone, 'state'); return { call: () => P.resolveKeys(clone, []), reads }; });
+  g('resolveAuthority(doc)', () => { const clone = JSON.parse(JSON.stringify(doc)); const reads = spy(clone, 'state'); return { call: () => P.resolveAuthority(clone, {}), reads }; });
+  g('resolveCadence(genesis)', () => { const clone = JSON.parse(JSON.stringify(gen)); const reads = spy(clone, 'state'); return { call: () => P.resolveCadence(clone, [], undefined, {}), reads }; });
   // round-29 (div1) NEGATIVE CONTROL — prove the grid's await-then-count mechanism OBSERVES a post-await read: a synthetic
   //   verifier that reads its spied input, awaits, then reads AGAIN must be seen as read-count 2 (a sync snapshot sees 1).
   { const o = {}; const rd = spy(o, 'f'); const postAwaitReader = async (x) => { void x.f; await Promise.resolve(); void x.f; }; await postAwaitReader(o).catch(() => {});
@@ -1690,6 +1697,20 @@ console.log('\n═════════════════════�
     check('R3 NON-BYPASS: a stateful Proxy answering the descriptor one value and [[Get]] another → INVALID, not a false VALID — verify reads the SAME face canon/identity reads', P.verify(twoFace, { context: 'data' }).result === 'INVALID');
     const vGood = P.verify(g, { context: 'data' });
     check('R3 IDENTITY: verify emits id(x̂) bound to the admitted snapshot it verified — the transcript is addressed by the returned id, not by a re-read of the raw input', vGood.result === 'VALID:LIGHT' && vGood.id === P.contentHash(g));
+    // rev35 R3 (round-30 P0-01) — the CONTROLLER spans the RESOLVERS, not just verify. resolveKeys verifies its genesis then
+    //   reduces the key-log; a stateful Proxy that shows a SIGNED genesis A to the verify-admission and a different signed
+    //   genesis B to the reducer's re-reads must NOT emit B's keys. admitting the genesis ONCE at the reducer door → verify
+    //   and every read see the SAME face → the reducer emits the VERIFIED face's keys (A), never the re-read (B).
+    {
+      const kpR = (h) => { const priv = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.from(h.repeat(32), 'hex')]), format: 'der', type: 'pkcs8' }); const pubB = createPublicKey(priv).export({ format: 'der', type: 'spki' }).slice(-32).toString('base64url'); return { priv, pubB, kid: P.keyId(pubB) }; };
+      const RA = kpR('1a'), RB = kpR('2b'), tR = { generated_at: '2026-06-28T14:00:00Z', valid_from: '2026-06-28T14:00:00Z', valid_to: '2026-06-28T14:00:00Z' };
+      const genOf = (K, uid) => P.seal(P.buildGenesis({ domain_shard: 'r3.example', ust_id: uid, key_id: K.kid }, tR, K.pubB), K.priv, K.pubB);
+      const gA = genOf(RA, 'ust:20260628.140000'), gB = genOf(RB, 'ust:20260628.140001');
+      let rs = 0;
+      const face2 = new Proxy(gA, { ownKeys: (t) => Reflect.ownKeys(t), getOwnPropertyDescriptor: (t, k) => Reflect.getOwnPropertyDescriptor(t, k), getPrototypeOf: (t) => Reflect.getPrototypeOf(t), get(t, k, r) { if (k === 'state') { rs++; return rs === 1 ? gA.state : gB.state; } if (k === 'sig') return Reflect.get(t, k, r); return Reflect.get(t, k, r); } });
+      const rr = P.resolveKeys(face2, []);
+      check('R3 RESOLVER: resolveKeys admits its genesis ONCE — a two-face Proxy (signed A to verify, tampered B to the reducer) emits keys for the VERIFIED face or errors, NEVER the re-read face', !!rr.error || (rr.validKeys && !rr.validKeys.has(RB.kid)));
+    }
   }
 }
 

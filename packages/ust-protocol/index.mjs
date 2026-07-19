@@ -751,14 +751,20 @@ function walkReferents(st, opts, depth, visited, budget) {
   for (const h of refs) {
     if (visited.has(h)) return { error: 'E-CYCLE', detail: 'referent cycle at ' + h };
     if (visited.size > BOUNDS.array) return { error: 'E-BOUNDS', detail: 'referent walk exceeds bounds (§13)' };
-    const refDoc = opts.resolveRef(h);
-    if (!refDoc) { sawUnresolved = true; continue; }
+    const rawRef = opts.resolveRef(h);
+    if (!rawRef) { sawUnresolved = true; continue; }
+    // rev35 R3 (round-30 P0-02) — ADMIT the resolved referent ONCE and verify + RECURSE over that SAME frozen snapshot.
+    // Previously verify(refDoc) ran, then the walk recursed through the RAW refDoc.state — a stateful Proxy from resolveRef
+    // showed the signed face to verify and a provenance-stripped face to the walk, so a missing nested referent was falsely
+    // reported 'verified'. R3: the provenance report is a projection over the admitted snapshot, never a live re-read.
+    const refDoc = admitDeep(rawRef);
+    if (refDoc === ADMIT_REJECT) { sawUnresolved = true; continue; }     // a non-inert referent is unresolved (availability ≠ failure), never a host throw
     if (--budget.left < 0) return { error: 'E-BOUNDS', detail: 'referent walk exceeds the verified-node budget (§13 P4 — default 256, opts.refBudget)' };
-    const rv = verify(refDoc, { ...opts, provenanceDepth: 0 });          // verify the referent itself (one level)
+    const rv = verify(refDoc, { ...opts, provenanceDepth: 0 });          // verify the ADMITTED referent (one level)
     if (!isValid(rv)) return { error: rv.error || 'E-SIG', detail: 'referent ' + h + ' invalid: ' + (rv.detail || rv.error) };
     if (rv.content_hash !== h) return { error: 'E-MALFORMED', detail: 'resolver returned a different document for ' + h };
     if (depth > 1) {
-      const sub = walkReferents(refDoc.state, opts, depth - 1, new Set([...visited, h]), budget);
+      const sub = walkReferents(refDoc.state, opts, depth - 1, new Set([...visited, h]), budget);   // recurse over the ADMITTED snapshot, not raw
       if (sub.error) return sub;
       if (sub.referents === 'partial') sawUnresolved = true;
       reached = Math.max(reached, 1 + sub.depth);
@@ -799,9 +805,14 @@ const substrateFinal = (sub) => decodeSubstrate(sub) !== null;
 // key (not any LIGHT doc with the same domain_shard), the P0 the cadence-log missed.
 export function resolveKeys(genesis, keylog = []) {
   if (!genesis || typeof genesis !== 'object') return { error: 'E-GENESIS', detail: 'no genesis' };
+  // rev35 R3 (round-30 P0-01) — ADMIT the genesis ONCE at THIS door and operate ONLY on the frozen snapshot. Previously the
+  // reducer called verify(genesis) but then RE-READ the raw genesis (genesis.state, contentHash(genesis), genesis.sig) — a
+  // stateful Proxy showed the SIGNED face to verify and a DIFFERENT face to the reducer, so it emitted keys for a genesis
+  // verify never vouched for. R3: every emitted quantity is a projection over the admitted x̂, nothing re-reads raw x.
+  { const G = admitDeep(genesis); if (G === ADMIT_REJECT) return { error: 'E-GENESIS', detail: 'genesis is not an inert record (round-30 R3 — the reducer verifies and reads ONE admitted snapshot, never a live re-read)' }; genesis = G; }
   keylog = admitArray(keylog);                                                    // round-19 P1-02 — a native array snapshot; a Proxy length/index trap is contained → structured reject, never a host throw
   if (keylog === null) return { error: 'E-MALFORMED', detail: 'key-log must be a native array (round-17 P1-02 / round-19 P1-02 — the reducer is TOTAL: a hostile accessor/Proxy is a structured reject, never a host throw)' };
-  const gv = verify(genesis);                                                     // genesis is itself a UST transcript
+  const gv = verify(genesis);                                                     // genesis is the ADMITTED snapshot (frozen inert) — verify re-admits it idempotently; every read below is of this snapshot
   if (!isValid(gv)) return { error: 'E-GENESIS', detail: 'genesis invalid: ' + gv.error };
   if (genesis.state.id.class !== 'genesis') return { error: 'E-GENESIS', detail: 'not class:genesis' };
   if (genesis.sig.key_id !== genesis.state.id.key_id) return { error: 'E-GENESIS', detail: 'genesis not self-signed' };

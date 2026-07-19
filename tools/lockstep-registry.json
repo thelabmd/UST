@@ -68,6 +68,12 @@
       "conformance_check": "CANON-TRANSPARENT FUZZ: 3000 random inputs (pollution names / non-enumerable / sparse / non-plain proto / deep) — admitDeep is never looser than canon and byte-identical when accepted"
     },
     {
+      "id": "R35-r3-resolver",
+      "rev": "rev35",
+      "model_locus": "every resolver admits its untrusted input ONCE",
+      "conformance_check": "R3 RESOLVER: resolveKeys admits its genesis ONCE — a two-face Proxy (signed A to verify, tampered B to the reducer) emits keys for the VERIFIED face or errors, NEVER the re-read face"
+    },
+    {
       "id": "R34-signature-registry",
       "rev": "rev34",
       "model_locus": "machine SIGNATURE REGISTRY",

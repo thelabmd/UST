@@ -745,6 +745,21 @@ of `conformance.mjs` and `index.mjs`, and the gate recomputes and rejects a stal
 content-bound to the state it attests (*"SOURCE-BOUND MANIFEST: the executed-check manifest carries the sha256 of conformance.mjs and index.mjs — the lockstep gate recomputes them and rejects a stale manifest (evidence content-bound to its source, not trusted by CI order)"*). The principle: a gate that proves a controller rule must MACHINE-VERIFY it
 self-containedly — reach the real code path, bind evidence to its source — never trust a heuristic or a detached artifact.
 
+**Realization (rev35 — R3 spans the whole controller, not just `verify`).** A round-30 audit showed the rev32 R3 fix was
+INCOMPLETE: it closed `verify`'s own path (admit through canon's channel, emit `id(x̂)`), but the RESOLVERS — which are
+themselves verifier operations — call `verify(x)` and then RE-READ the raw `x`. `resolveKeys` called `verify(genesis)` then
+read `genesis.state`/`genesis.sig`/`contentHash(genesis)` off the original object (eight raw reads); the provenance walk
+called `verify(refDoc)` then recursed through raw `refDoc.state`. A stateful `Proxy` showed the SIGNED face to the admission
+and a DIFFERENT signed face to the re-reads, so `resolveKeys` emitted keys for a genesis `verify` never vouched for, and a
+missing nested referent was falsely reported `verified` — R3 broken INSIDE the controller. R3 is a property of the ENTIRE
+controller: every resolver admits its untrusted input ONCE at its own door and operates only on the frozen snapshot (the
+reducer's genesis and each resolved referent are `admitDeep`'d once; `verify` re-admits the frozen snapshot idempotently;
+every downstream read and recursion is over that snapshot). Machine-checked by extending the input-boundary grid to the
+resolver surface — a resolver that re-reads a raw signed field fires the read-counting getter ≥2 (`resolveKeys` read `state`
+8× before the fix) — and by an adversarial closure (*"R3 RESOLVER: resolveKeys admits its genesis ONCE — a two-face Proxy (signed A to verify, tampered B to the reducer) emits keys for the VERIFIED face or errors, NEVER the re-read face"*). The
+lesson: a controller rule realized only at the obvious entry (`verify`) is not realized; it must hold at every operation
+that touches untrusted input.
+
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):
 
