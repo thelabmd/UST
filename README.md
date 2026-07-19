@@ -55,7 +55,7 @@ verify(doc, { context: 'data' }).result   // → VALID:LIGHT / HIGH / TOP
 // don't hash the JSON yourself — hashes are domain-separated; the library canonicalizes
 ```
 
-Or skip even that line: paste any transcript into the [web verifier](https://thelabmd.github.io/UST-Protocol/) —
+Or skip even that line: paste [any transcript](https://raw.githubusercontent.com/thelabmd/UST-Protocol/refs/heads/main/examples/ust-sample.json) into the [web verifier](https://thelabmd.github.io/UST-Protocol/) —
 client-side, nothing is uploaded.
 
 ## ●  Verify one right now
