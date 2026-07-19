@@ -1639,6 +1639,19 @@ console.log('\n═════════════════════�
     if (!(dr || (tx ? td : (!td && cd === cx)))) { fuzzOk = false; break; }   // reject, OR (canon throws ⇒ admit throws too) OR (canon ok ⇒ byte-identical)
   }
   check('CANON-TRANSPARENT FUZZ: 3000 random inputs (pollution names / non-enumerable / sparse / non-plain proto / deep) — admitDeep is never looser than canon and byte-identical when accepted', fuzzOk);
+  // rev32 R3 (round-29 P0-01) — the CONTROLLER non-bypass. A stateful Proxy answers getOwnPropertyDescriptor one value
+  //   (the SIGNED state) and [[Get]] another (a tampered state). admitDeep now snapshots the VALUE through canon's OWN
+  //   [[Get]] channel, so verify sees the SAME tampered face canon/contentHash see → the signature fails → INVALID (no
+  //   false VALID). And verify EMITS id(x̂), the hash of the admitted snapshot, so identity is a projection of the
+  //   admitted artifact, addressed by the returned id — never by a re-read of the raw input.
+  {
+    const g = P.seal(P.buildState({ domain_shard: A.key_id, ust_id: 'ust:20260628.14', key_id: A.key_id, class: 'observation' }, T, { x: { kind: 'captured', value: { v: 'GOOD' } } }), A.priv, A.pubB64);
+    const badState = structuredClone(g.state); badState.data.x.value.v = 'TAMPERED';
+    const twoFace = new Proxy(g, { get(t, k, r) { return k === 'state' ? badState : Reflect.get(t, k, r); }, getOwnPropertyDescriptor(t, k) { return Reflect.getOwnPropertyDescriptor(t, k); }, ownKeys(t) { return Reflect.ownKeys(t); }, getPrototypeOf(t) { return Reflect.getPrototypeOf(t); } });
+    check('R3 NON-BYPASS: a stateful Proxy answering the descriptor one value and [[Get]] another → INVALID, not a false VALID — verify reads the SAME face canon/identity reads', P.verify(twoFace, { context: 'data' }).result === 'INVALID');
+    const vGood = P.verify(g, { context: 'data' });
+    check('R3 IDENTITY: verify emits id(x̂) bound to the admitted snapshot it verified — the transcript is addressed by the returned id, not by a re-read of the raw input', vGood.result === 'VALID:LIGHT' && vGood.id === P.contentHash(g));
+  }
 }
 
 console.log('  ust-protocol ' + P.VERSION.spec + ' conformance vs ' + V.version);

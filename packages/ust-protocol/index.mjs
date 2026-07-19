@@ -218,8 +218,8 @@ export const admitDeep = (v, seen = new WeakSet()) => {   // THE input-boundary 
     // the extra member (E-MALFORMED), never erases it. admitDeep must be NEVER LOOSER than canon.
     for (const k of Object.keys(v)) {
       const d = Object.getOwnPropertyDescriptor(v, k);
-      if (d.get || d.set) return ADMIT_REJECT;                                         // an accessor at ANY depth → not inert (the TOCTOU seam)
-      const r = admitDeep(d.value, seen);
+      if (d.get || d.set) return ADMIT_REJECT;                                         // a DECLARED accessor at ANY depth → not inert (round-26 TOCTOU closure)
+      const r = admitDeep(v[k], seen);                                                 // rev32 R3 — read the VALUE through canon's OWN channel ([[Get]] / v[k]), NOT descriptor.value: a Proxy answering the descriptor one value and [[Get]] another must have its [[Get]] face (the one canon/contentHash read) snapshotted and verified, so a tampered get-face fails the signature instead of a signed descriptor-face passing (round-29 P0-01)
       if (r === ADMIT_REJECT) return ADMIT_REJECT;
       Object.defineProperty(out, k, { value: r, enumerable: true });                  // read-only own data (safe for __proto__ on a null-proto object)
     }
@@ -437,7 +437,13 @@ export function checkBounds(doc) {
 export function verify(doc, opts = {}) {
   const D = admitDeep(doc);
   if (D === ADMIT_REJECT) return bad('E-MALFORMED', 'document is not an inert record — an accessor/getter cannot sign one payload and disclose another (round-27: the ONE input boundary)');
-  return verifyCore(D, opts);
+  const verdict = verifyCore(D, opts);
+  // rev32 R3 (non-bypass output) — EMIT id(x̂): the content hash of the ADMITTED snapshot the verdict is about. A consumer
+  // addresses the transcript by THIS returned id (a projection of the admitted artifact), never by re-hashing the raw input
+  // `doc` — so a live/mutable/Proxy object that shows one face to `verify` and another to a later `contentHash(doc)` cannot
+  // split the verdict from the identity. The verdict and the id come from the SAME single admission.
+  let id; try { if (D && typeof D === 'object' && D.state !== undefined) id = contentHash(D); } catch { /* malformed → no addressable id */ }
+  return id === undefined ? verdict : { ...verdict, id };
 }
 function verifyCore(doc, opts = {}) {
   try {

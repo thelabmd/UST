@@ -692,6 +692,27 @@ reads (a synchronous read-count would see only the reads before the first await;
 field AFTER an await would slip it), proven by a negative control that reads its input, awaits, then re-reads and is
 OBSERVED as two reads (*"BOUNDARY-GRID async-aware: a verifier that re-reads its input AFTER an await is OBSERVED as read-count 2 (the grid awaits settlement; a sync snapshot would miss it) — round-29 div1"*).
 
+**Realization (rev32 — the controller invariant: single admission, non-bypass output).** A round-29 audit showed the
+rev30/31 target was WRONG. "`admitDeep` byte-transparent to canon" tries to make the admission a faithful MIRROR of the
+raw input `x`, so that a downstream reader may consult EITHER `x` or the snapshot `x̂`. For a stateful `Proxy` a faithful
+mirror is IMPOSSIBLE: `canon` reads a value through `[[Get]]` (`v[k]`) while `admitDeep` read it through the DESCRIPTOR
+(`getOwnPropertyDescriptor(v,k).value`), and a Proxy returns one value to the descriptor (the signed `state`) and another
+to `[[Get]]` (a tampered `state`). `verify` then vouched for the descriptor face while the consumer's `contentHash(x)`
+addressed the `[[Get]]` face — a false `VALID` for data the consumer never had. The soundness linchpin is therefore NOT
+mirror-fidelity but a **non-bypass** rule: the verifier is a CONTROLLER with three stages —
+(**R1**) admission `𝒜` reads `x` through ONE channel ONCE into an inert frozen `x̂`, or rejects; after `𝒜`, `x` is DEAD;
+(**R2**) verification is a total function of `x̂` and the verifier's OWN faculties `(ℐ_v, ρ_v)`;
+(**R3**) EVERY emitted quantity — the verdict, the identity `id(x̂)`, the handle, the served-list basis — is a projection
+of the processing over `x̂`, and NO emitted quantity re-reads `x`. Under R3 the mirror's fidelity is irrelevant, because
+`x` is never read after `𝒜`. Realized two ways: `admitDeep` snapshots each value through canon's OWN channel (`v[k]`,
+`[[Get]]`) — the exact face `canon`/`contentHash` read — so a Proxy's tampered `[[Get]]` face is what gets verified and
+FAILS the signature (*"R3 NON-BYPASS: a stateful Proxy answering the descriptor one value and [[Get]] another → INVALID, not a false VALID — verify reads the SAME face canon/identity reads"*); and `verify` EMITS `id(x̂)`, the content hash of
+the admitted snapshot, so a consumer addresses the transcript by the RETURNED id, never by re-hashing a mutable object
+(*"R3 IDENTITY: verify emits id(x̂) bound to the admitted snapshot it verified — the transcript is addressed by the returned id, not by a re-read of the raw input"*). "byte-transparent to canon" is retained only as core hygiene (the
+admission reads through canon's channels), no longer as the load-bearing claim. A real declared accessor is still rejected
+at its descriptor (the round-26 TOCTOU closure holds); a Proxy that hides behind a data descriptor no longer wins because
+its `[[Get]]` face — not the descriptor face — is the one admitted and verified.
+
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):
 
