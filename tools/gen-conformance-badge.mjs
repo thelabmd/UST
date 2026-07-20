@@ -16,6 +16,12 @@ const arc = JSON.parse(readFileSync(new URL('../vectors/arc-vectors.json', impor
 if (!Array.isArray(byte.vectors) || !Array.isArray(arc.vectors)) { console.error('  ✗ vector corpora missing a .vectors array'); process.exit(1); }
 const vectors = byte.vectors.length + arc.vectors.length;   // language-neutral conformance vectors (byte + arc)
 
+// the in-process conformance suite (the largest, fastest-growing corpus) — COUNTED from the drift-gated manifest that
+// conformance.mjs regenerates (test:model-lockstep git-diffs it), so the badge tracks every adversarial-closure check added.
+const manifest = JSON.parse(readFileSync(new URL('../vectors/conformance-checks.json', import.meta.url), 'utf8'));
+if (!Array.isArray(manifest.checks)) { console.error('  ✗ conformance-checks.json missing a .checks array'); process.exit(1); }
+const checks = manifest.checks.length;
+
 // MEASURE the fuzz probe count from the runner's own deterministic report — not a constant.
 const fuzzPath = fileURLToPath(new URL('../packages/ust-protocol/reference-checker.fuzz.mjs', import.meta.url));
 const fuzzOut = execSync('node ' + JSON.stringify(fuzzPath), { encoding: 'utf8' });
@@ -23,7 +29,7 @@ const m = fuzzOut.match(/\((\d+) probes\)/);
 if (!m) { console.error('  ✗ could not read the fuzz probe count from the runner output'); process.exit(1); }
 const fuzz = Number(m[1]);
 
-const message = `${vectors} vectors · ${fuzz} fuzz`;
+const message = `${checks} checks · ${vectors} vectors · ${fuzz} fuzz`;
 // STATIC shields badge encoding: `-`→`--`, `_`→`__`, then percent-encode (spaces → %20, `·` → %C2%B7).
 const enc = (s) => encodeURIComponent(s.replace(/-/g, '--').replace(/_/g, '__'));
 const url = `https://img.shields.io/badge/conformance-${enc(message)}-brightgreen`;
@@ -34,4 +40,4 @@ const re = /!\[conformance\]\(https:\/\/img\.shields\.io[^)]*\)/;
 if (!re.test(readme)) { console.error('  ✗ README has no ![conformance](https://img.shields.io…) badge tag'); process.exit(1); }
 readme = readme.replace(re, `![conformance](${url})`);
 writeFileSync(readmePath, readme);
-console.log(`  ✓ README conformance badge → static shields "${message}" (${byte.vectors.length} byte + ${arc.vectors.length} arc vectors, fuzz measured)`);
+console.log(`  ✓ README conformance badge → static shields "${message}" (${checks} conformance checks + ${byte.vectors.length} byte + ${arc.vectors.length} arc vectors, fuzz measured from the runner)`);
