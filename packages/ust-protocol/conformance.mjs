@@ -1464,6 +1464,27 @@ console.log('\n═════════════════════�
     check('R43 legit boolean policy values still honored (requirePerFrameValid:false, allowExperimentalAttested defaults) — no over-reject', P.verifyStream([], { genesis: gen43, requirePerFrameValid: false }).error === undefined);
     const doc43 = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260720.14', key_id: gK.key_id, class: 'observation' }, T43, { r: { kind: 'captured', value: { v: 'A' } } }), gK.priv, gK.pubB64);
     check('R43 the RESTRICTION booleans are measured too — a coerced requireAuthoritative:0 → E-MALFORMED, never a silently DROPPED requirement (a real boolean still restricts)', P.verify(doc43, { context: 'data', requireAuthoritative: 0 }).error === 'E-MALFORMED' && P.verify(doc43, { context: 'data', requireAuthoritative: true }).error === 'E-GENESIS' && P.verify(doc43, { context: 'data' }).result === 'VALID:LIGHT'); }
+  // round-45 P0-01/P1-01/P1-02 — a SEMANTIC (behavioral, from-ENTRYPOINT) adapter/kernel gate, NOT a source regex: the prior gates
+  // scanned text and stayed green while a public adapter (a) encoded the UNTRUSTED arg before the TRUSTED config (a hostile getter
+  // rewrote the config the verdict used — cross-argument admission order), (b) returned a non-Freshness judgment as a public VALID,
+  // and (c) normalized a malformed policy away instead of deferring to the sole-checker. These probes DRIVE the adapters and check
+  // the invariant by BEHAVIOR, so a future adapter that re-reads the live graph or diverges from the kernel fails HERE.
+  { const gK = kp('e5f6'.repeat(16)), Wa = kp('a1b2c3d4'.repeat(8));
+    const T45 = { generated_at: '2026-07-20T01:00:00Z', valid_from: '2026-07-20T01:00:00Z', valid_to: '2026-08-20T01:00:00Z' };
+    const gen45 = P.seal(P.buildGenesis({ domain_shard: 'noosphere.md', ust_id: 'ust:20260720.00', key_id: gK.key_id }, T45, gK.pubB64, 256, 1048576, '3600'), gK.priv, gK.pubB64);
+    const pkg = P.buildAuthorityProof({ genesis: gen45 });
+    const mkCfg = () => ({ connectors: {}, witnesses: {}, domains: {}, mapRoots: [], policy: {} });
+    const cfg2 = mkCfg(); let fired = false;
+    const evilPkg = new Proxy(pkg, { get(t, k, r) { if (!fired) { fired = true; cfg2.witnesses[Wa.key_id] = Wa.pubB64; cfg2.domains[Wa.key_id] = 'attacker'; cfg2.policy.uniqueness_threshold = 1; } return Reflect.get(t, k, r); } });
+    const base = P.checkAuthorityProof(pkg, mkCfg()), evil = P.checkAuthorityProof(evilPkg, cfg2);
+    check('R45 P0-01 (R1/R3) checkAuthorityProof ISOLATES the trusted config — a hostile package getter cannot inject witnesses/threshold into the config the verdict uses (config encoded BEFORE package; identical config_id + verdict)', base.result === evil.result && base.config_id !== undefined && base.config_id === evil.config_id);
+    const cfgB = { trust: { connectors: {}, witnesses: {}, domains: {} }, policy: {} };
+    const evilInputs = { genesis: gen45, toJSON() { cfgB.trust.witnesses[Wa.key_id] = Wa.pubB64; cfgB.trust.domains[Wa.key_id] = 'attacker'; cfgB.trust.uniqueness_threshold = 1; return { genesis: gen45 }; } };
+    const bBase = P.verifyAuthorityBundle({ genesis: gen45 }, { trust: { connectors: {}, witnesses: {}, domains: {} }, policy: {} }), bEvil = P.verifyAuthorityBundle(evilInputs, cfgB);
+    check('R45 P0-01 (R1/R3) verifyAuthorityBundle ISOLATES the trusted config — a hostile inputs.toJSON cannot inject trust into the config the verdict uses (config snapshotted BEFORE inputs; identical verdict)', bBase.result === bEvil.result);
+    check('R45 P1-01 verifyAuthorityBundle DIFFERENTIAL vs the sole checker — a malformed policy is INVALID at the adapter too, never normalized away to {}', (r => r.result === 'INVALID' && /policy|config/i.test(r.reason || ''))(P.verifyAuthorityBundle({ genesis: gen45 }, { trust: { connectors: {} }, policy: 'not-a-record' })));
+    check('R45 P1-01 verifyAuthorityBundle success is EXCLUSIVE to a Freshness judgment — a Genesis-only proof → INDETERMINATE authority_unresolved, never a public VALID', P.verifyAuthorityBundle({ genesis: gen45 }, { trust: {}, policy: {} }).result !== 'VALID');
+    check('R45 P1-02 the admission ORDER is enforced in source too — checkAuthorityProof encodes config BEFORE the package (belt to the behavioral gate)', (src => { const c = src.indexOf("encodeLive(config"), p = src.indexOf("encodeLive(obj"); return c > 0 && p > 0 && c < p; })(readFileSync(new URL('../../packages/ust-protocol/reference-checker.mjs', import.meta.url), 'utf8'))); }
   check('RECOVERY signer NOT in the genesis recovery set → not counted', VR([stmt(rf(KR), R1), stmt(rf(KR), RX)]).recovered === false);
   check('RECOVERY threshold-complete malformed replacement (BOTH signers agree on key_id ≠ keyId(pub)) → NOT recovered (admitAuthorityKey binds the pair; round-36 P1-01/P2-01 — the vacuous single-malformed vector could not see it)', (() => { const bad = { ...P.checkpointRecoveryClaim(rf(KR)), replacement_authority: { key_id: K1.key_id, pub: KR.pubB64 } }; const st = (W) => { const sg = sign(null, Buffer.from(P.canon(bad), 'utf8'), W.priv).toString('base64url'); return { claim: bad, issuer_id: W.key_id, sig: { alg: 'Ed25519', key_id: W.key_id, pub: W.pubB64, sig: sg } }; }; return VR([st(R1), st(R2)]).recovered === false; })());
   check('RECOVERY effective_sequence ≠ last+1 → not recovered (only the next checkpoint)', VR([stmt(rf(KR, '2'), R1), stmt(rf(KR, '2'), R2)]).recovered === false);

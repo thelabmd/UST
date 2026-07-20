@@ -300,6 +300,18 @@
       "rev": "rev53",
       "model_locus": "public adapter around a sound kernel is a TCB surface too",
       "conformance_check": "R44 P1-01 verifyAuthorityCheckpointChain rejects a PRESENT malformed authority selector (genesisAuthority:false / recoveryKeys:0) → E-MALFORMED, never silently overridden or coalesced to {}"
+    },
+    {
+      "id": "R54-cross-arg-admission-order",
+      "rev": "rev54",
+      "model_locus": "at a multi-argument boundary, capture the TRUSTED inputs before executing",
+      "conformance_check": "R45 P0-01 (R1/R3) checkAuthorityProof ISOLATES the trusted config — a hostile package getter cannot inject witnesses/threshold into the config the verdict uses (config encoded BEFORE package; identical config_id + verdict)"
+    },
+    {
+      "id": "R54-behavioral-adapter-gate",
+      "rev": "rev54",
+      "model_locus": "closed by a BEHAVIORAL from-entrypoint gate, not a source regex",
+      "conformance_check": "R45 P1-01 verifyAuthorityBundle success is EXCLUSIVE to a Freshness judgment — a Genesis-only proof → INDETERMINATE authority_unresolved, never a public VALID"
     }
   ]
 }

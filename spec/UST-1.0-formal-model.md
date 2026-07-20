@@ -1071,6 +1071,28 @@ bans `X || {}` / `X || []` as well as the `Array.isArray(X)?X` coalesce, and cov
 public adapter around a sound kernel is a TCB surface too: it must admit its input once and defer to the kernel's contract,
 never re-read the live graph or inject a default the kernel would reject.**
 
+**Realization (rev54 — cross-argument admission ORDER (trusted before untrusted), target-judgment projection, and a
+BEHAVIORAL adapter/kernel gate instead of a source regex).** The rev53 fix was still not enough — and the reason is
+structural: a from-SOURCE regex gate cannot see a SEMANTIC violation. (P0-01, R1/R3) both object adapters encoded/snapshotted
+the UNTRUSTED argument BEFORE the TRUSTED config — `checkAuthorityProof` ran `encodeLive(obj, 'package')` before
+`encodeLive(config, 'config')`, and `verifyAuthorityBundle` ran `JSON.stringify(inputs)` before `JSON.stringify(config)` (a
+bug I introduced at rev52). A hostile getter / `toJSON` in the untrusted argument therefore executed and MUTATED the
+still-live consumer config (adding witnesses/domains, setting `uniqueness_threshold: 1`) BEFORE the config was captured, so
+the untrusted proof selected the trust world under which its own proof was checked. Fix: **admit the TRUSTED config to
+bytes/snapshot FIRST, then the untrusted proof** — a cross-argument mutation now hits only the already-captured,
+now-irrelevant original. This generalizes R1: at a multi-argument boundary, capture the TRUSTED inputs before executing ANY
+untrusted-object behavior. (P1-01) `verifyAuthorityBundle` returned a non-`Freshness` judgment as a public `VALID` (a
+Genesis-only proof read as success by a generic caller) and normalized a malformed `policy` away with `C?.policy || {}`
+instead of deferring to the checker's `E-CONFIG-POLICY`. Fix: success is EXCLUSIVE to a `Freshness` judgment (a Genesis-only
+proof → `INDETERMINATE` authority_unresolved), and a present malformed `trust`/`policy` is rejected, matching the sole
+checker. (P1-02) the from-source gate stayed green through all of this — a regex cannot model admission order, cross-argument
+mutation, target-judgment projection, or adapter/kernel agreement. Fix: a **BEHAVIORAL gate that DRIVES each adapter through
+its entrypoint** — a hostile getter in the untrusted argument must not change the config the verdict uses, the adapter's
+verdict must AGREE with the sole checker over the same config, and a non-target judgment must not become success.
+Cf. *"R45 P0-01 (R1/R3) checkAuthorityProof ISOLATES the trusted config — a hostile package getter cannot inject witnesses/threshold into the config the verdict uses (config encoded BEFORE package; identical config_id + verdict)"* and *"R45 P1-01 verifyAuthorityBundle success is EXCLUSIVE to a Freshness judgment — a Genesis-only proof → INDETERMINATE authority_unresolved, never a public VALID"*. **A defect class whose
+invariant is SEMANTIC (order, mutation, agreement) is closed by a BEHAVIORAL from-entrypoint gate, not a source regex — the
+regex checks the symptom's spelling, the behavioral gate checks the invariant.**
+
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):
 
