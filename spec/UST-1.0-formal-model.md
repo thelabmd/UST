@@ -1012,6 +1012,28 @@ MALFORMED — `E-GENESIS`/`E-MALFORMED`/`complete:none` (*"R41 P1-02 (R1) resolv
 must fail CLOSED (present-malformed → reject) — a selector silently degraded to "no authority" is a totality break, not a
 conservative default.
 
+**Realization (rev51 — R3 applies to ARRAY ELEMENTS: the key-log is DEEP-admitted; and the axiom/evidence boundary is a
+PROVENANCE gate, not a truthiness one).** rev50 hardened the top-level snapshots, but the audit found R3 was not applied
+one level INTO an array. (P0-01, R1/R3) `resolveKeys` deep-admitted its `genesis` but ran the key-log through `admitArray`,
+which SHALLOW-copied the array (`out[i] = v[i]`) — every element stayed a LIVE reference. The reducer calls `verify(e)`
+(which admits and validates ONE face) and then RE-READS `e.state`/`e.sig`/`contentHash(e)` from the live element, so a
+two-face key-log entry showed a SIGNED key B to `verify` and an UNSIGNED key C to the re-reads → `resolveKeys` emitted an
+attacker key `C` that no accepted signature authorized (a direct authority-soundness break — the first P0 since rev45). Fix:
+`admitArray` DEEP-admits each element (`admitDeep(v[i])`) and freezes the array — the reducer verifies and reads ONE frozen
+graph, one face (*"R42 P0-01 (R1/R3) resolveKeys DEEP-admits the key-log — a two-face entry (signed key B / unsigned key C) never authorizes C (structured error OR authorizes only B)"*). **R3 is not just "admit the top-level document" — every
+untrusted ARRAY the reducer iterates and re-reads must be deep-admitted; a shallow snapshot of an array of records is not
+inert.** (P1-01, F.5a.1) the `consumer-override` channel was entered by truthiness — `if (noForkConfirmed || corroborated ||
+servedNoFork)` — so an unminted `servedNoFork:{}` (present-invalid EVIDENCE) crossed into the override channel and, with
+`acceptConsumerOverride`, reached HIGH. The evidence/axiom boundary is a PROVENANCE gate: only an explicit boolean AXIOM
+(`noForkConfirmed`/`corroborated === true`) may create a consumer-override that `acceptConsumerOverride` can lift; an
+unminted `servedNoFork` is a caller LOOK-ALIKE that DIVERTS from `corroborated` (rc35-P0a) but carries `override_liftable:
+false` and can never reach authoritative (*"R42 P1-01 (R1) an unminted servedNoFork + acceptConsumerOverride does NOT reach HIGH (override_liftable:false), yet still ≠ corroborated (rc35-P0a)"*). (P1-02, I4) the GRANT policy booleans
+(`acceptConsumerOverride`/`noForkConfirmed`/`corroborated`) were read by JS truthiness, so the string `"false"` — truthy —
+activated the HIGH override; `admitBool` now accepts only a real boolean (`undefined`/`null` → default, any other present
+value → `E-MALFORMED`), and `verifyStream` no longer coalesces a present non-array `keylog` to `[]`. The three are one rule:
+**a security decision reads a MEASURED input, never a coerced one — a live array element, a truthy look-alike, and a truthy
+non-boolean are all inputs that were used without being admitted.**
+
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):
 

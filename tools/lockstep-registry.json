@@ -270,6 +270,18 @@
       "rev": "rev50",
       "model_locus": "must fail CLOSED",
       "conformance_check": "R41 P1-02 (R1) resolveAuthority with a PRESENT falsy/scalar/array genesis → E-GENESIS (falsy ≠ absent), never a silent self-asserted"
+    },
+    {
+      "id": "R51-keylog-array-deep-admit",
+      "rev": "rev51",
+      "model_locus": "must be deep-admitted",
+      "conformance_check": "R42 P0-01 (R1/R3) resolveKeys DEEP-admits the key-log — a two-face entry (signed key B / unsigned key C) never authorizes C (structured error OR authorizes only B)"
+    },
+    {
+      "id": "R51-override-provenance-gate",
+      "rev": "rev51",
+      "model_locus": "The evidence/axiom boundary is a PROVENANCE gate",
+      "conformance_check": "R42 P1-01 (R1) an unminted servedNoFork + acceptConsumerOverride does NOT reach HIGH (override_liftable:false), yet still ≠ corroborated (rc35-P0a)"
     }
   ]
 }

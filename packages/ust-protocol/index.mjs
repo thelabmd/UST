@@ -245,8 +245,12 @@ export const admitDeep = (v, seen = new WeakSet()) => {   // THE input-boundary 
 function admitArray(v) {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v)) return null;
-  try { const out = []; const n = v.length; for (let i = 0; i < n; i++) out[i] = v[i]; return out; } catch { return null; }
-}
+  try { const out = []; const n = v.length; for (let i = 0; i < n; i++) { const el = admitDeep(v[i]); if (el === ADMIT_REJECT) return null; out[i] = el; } return Object.freeze(out); } catch { return null; }
+}   // round-42 P0-01 (R1/R3) — DEEP-admit each element into a frozen snapshot (was a shallow ref-copy): the resolveKeys reducer verifies verify(e) then RE-READS e.state/e.sig/contentHash(e), so a two-face key-log entry showed a SIGNED key B to verify and an UNSIGNED key C to the re-reads → authorized C. One frozen graph, one face.
+// round-42 P1-02 (R1) — a STRICT optional-boolean admission for GRANTING policy coordinates (acceptConsumerOverride /
+// noForkConfirmed / corroborated): undefined/null → false (absent/default); a real boolean → itself; ANY other present
+// value → ADMIT_REJECT (a wrong-typed grant like the string "false" is truthy and would activate the override — malformed, not truthy).
+const admitBool = (x) => (x === undefined || x === null) ? false : (typeof x === 'boolean' ? x : ADMIT_REJECT);
 
 // ─── producer: §7 seal — sign canon({ust,state}) with an Ed25519 private key ─────────────────────────
 export function seal(state, privKeyObj, pubB64url) {
@@ -644,6 +648,8 @@ function verifyCore(doc, opts = {}) {
     // round-16 P0-01 — ONLY the PROVEN anchor time feeds the K_n(t) query; a raw caller `opts.anchorTime` is NOT a
     // proven upper bound and must never become the coordinate (it made a retired-key doc VALID:HIGH with a forged/absent
     // string while the honest late U rejected it). No proof ⇒ U is undefined ⇒ a closed key lifecycle fails closed.
+    const acceptOverride = admitBool(opts.acceptConsumerOverride);   // round-42 P1-02 (R1) — strict: the string "false" (or any non-boolean) is TRUTHY and would activate the HIGH override projection; a wrong-typed grant is malformed, not truthy
+    if (acceptOverride === ADMIT_REJECT) return bad('E-MALFORMED', 'acceptConsumerOverride must be a boolean (round-42 P1-02 — a non-boolean grant would flip the consumer-override projection by truthiness)');
     let identity;
     if (opts.genesis != null) identity = resolveAuthority(doc, { ...opts, anchorTime: provenAnchorTime !== undefined ? provenAnchor(provenAnchorTime) : undefined });   // round-41 P1-02 — a PRESENT genesis (incl. a falsy one) resolves authority; a malformed genesis returns E-GENESIS (propagated below), never a silent self-asserted (round-17 P0-02 — mint a proven-anchor TOKEN; a raw opts.anchorTime is dropped and can never reach K_n(t))
     else if (opts.pinnedKeys != null) identity = Array.isArray(opts.pinnedKeys)
@@ -719,7 +725,7 @@ function verifyCore(doc, opts = {}) {
     // (Pinning authenticates the KEY, not the name.)
     // P0-2 audit — a raw `consumer-override` reaches the name-authoritative TIER only when the consumer CONSCIOUSLY
     // honors its own out-of-band assertion (opts.acceptConsumerOverride); the verdict still carries independently_verified:false.
-    const nameAuthoritative = identity.strength === 'authoritative' || (identity.strength === 'consumer-override' && opts.acceptConsumerOverride && identity.status === 'verified');
+    const nameAuthoritative = identity.strength === 'authoritative' || (identity.strength === 'consumer-override' && identity.override_liftable === true && acceptOverride === true && identity.status === 'verified');   // round-42 P1-01 — acceptConsumerOverride raises ONLY a LIFTABLE consumer-override (from an explicit noForkConfirmed/corroborated axiom); a look-alike servedNoFork is override_liftable:false and can never reach authoritative/HIGH
     const nameField = nameAuthoritative ? { publisher: st.id.domain_shard } : { publisher_claimed: st.id.domain_shard };
     // (the anchor was verified in phase 1 above; `timeField`/`provenAnchorTime` already carry its proven time.)
     // The verdict CARRIES ITS SCOPE: `VALID:LIGHT|HIGH|TOP`, so a consumer cannot read "valid" without reading
@@ -1215,6 +1221,8 @@ export function resolveAuthority(doc, opts = {}) {
   const O = admitOpts(opts);   // round-19 P1-02 — inert snapshot of the caller record; a throwing accessor/Proxy trap → null → structured reject (not a host throw)
   if (O === null) return { error: 'E-MALFORMED', detail: 'opts must be an inert record (round-19 P1-02 totality — a hostile accessor/Proxy is a structured reject)' };
   let { genesis, keylog = [], noForkConfirmed = false, noForkEvidence, nameMap, trustRoots, corroborated = false, servedNoFork, anchorTime, keylogFreshAsOf, keylogHeadAnchor, substrateVerify, trust } = O;   // round-18 P1-01 — destructure from the admitted record so a null/hostile opts is a structured reject/default, not a host throw
+  const ncf = admitBool(noForkConfirmed), cor = admitBool(corroborated);   // round-42 P1-02 (R1) — the consumer-override GRANT booleans admit strictly: a wrong-typed truthy ("yes"/1/{}) must not activate the override
+  if (ncf === ADMIT_REJECT || cor === ADMIT_REJECT) return { error: 'E-MALFORMED', detail: 'noForkConfirmed/corroborated must be booleans (round-42 P1-02 — a wrong-typed grant is malformed, not truthy)' };
   // rev38 R3 (round-31 P0-01) — admitOpts is SHALLOW (it preserves function capabilities); a NESTED untrusted DATA object in
   // opts stays a live caller object. resolveAuthority verifies `genesis` via resolveKeys (which admits its OWN snapshot) but
   // then RE-READS the raw nested genesis for contentHash + max_partitions — a two-face Proxy served the signed face to
@@ -1320,8 +1328,9 @@ export function resolveAuthority(doc, opts = {}) {
   // a bare `corroborated`/`noForkConfirmed` boolean OR an unminted `servedNoFork` is a CALLER ASSERTION, not a verified
   // predicate (a STATELESS verifier cannot fetch a served list). Like noForkConfirmed it is consumer-override, NEVER a
   // silent corroborated (self-audit rc.35 — same class as the removed `corroborated:true`/`mapInclusion:true`).
-  if (noForkConfirmed || corroborated || servedNoFork) return { strength: 'consumer-override', noFork: 'caller-asserted', independently_verified: false, status: st2, capacity, freshness,
-    ...(noForkEvidence !== undefined ? { detail: 'noForkEvidence rejected → consumer-override only (not independently verified)' } : {}) };
+  if (ncf === true || cor === true) return { strength: 'consumer-override', noFork: 'caller-asserted', override_liftable: true, independently_verified: false, status: st2, capacity, freshness,
+    ...(noForkEvidence !== undefined ? { detail: 'noForkEvidence rejected → consumer-override only (not independently verified)' } : {}) };   // round-42 P1-01 — ONLY an explicit boolean AXIOM (noForkConfirmed/corroborated===true) creates a LIFTABLE consumer-override (acceptConsumerOverride may raise it to authoritative — the consumer consciously honors ITS OWN out-of-band claim)
+  if (servedNoFork != null) return { strength: 'consumer-override', noFork: 'served-lookalike', override_liftable: false, independently_verified: false, status: st2, capacity, freshness, detail: 'an unminted servedNoFork is a caller look-alike, not verified evidence and not an explicit axiom — it DIVERTS from corroborated (rc35-P0a) but is NOT liftable to authoritative by acceptConsumerOverride (round-42 P1-01)' };   // a present-but-unminted servedNoFork: neither corroborated nor a HIGH-reachable override
   return { strength: 'corroborated', noFork: 'unconfirmed', status: 'unavailable', capacity, freshness,
     detail: 'no independent no-fork evidence; a served witness only corroborates (§12.1a F.5a) → authority pending, retry' };
 }
@@ -2297,7 +2306,7 @@ export function verifyStream(frames, config) {
   let boundKeys = null;
   if (genesis) {
     if (genesis.state?.id?.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'genesis domain_shard != stream authority (' + authority + ')' };
-    const rk = resolveKeys(genesis, Array.isArray(keylog) ? keylog : []);
+    const rk = resolveKeys(genesis, keylog == null ? [] : keylog);   // round-42 P1-02 — do NOT coalesce a PRESENT non-array keylog to [] (that hid a malformed selector as absent); resolveKeys admits it and returns E-MALFORMED for a present non-array
     if (rk.error) return { error: rk.error, detail: 'stream authority: ' + rk.detail };
     boundKeys = rk.validKeys;
   }
