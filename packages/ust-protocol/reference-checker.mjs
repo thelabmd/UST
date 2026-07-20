@@ -75,8 +75,7 @@ const closedRec = (o, req, opt = []) => {
 // type, or a nested schema). Returns null (ok) or a 'code:field' tag. The identity/coordinate a rule computes is thus
 // over a TYPED closed ADT, not a merely key-closed one. Predicates below reuse the leaf refinements (§2b).
 const RFC3339Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
-const pStr = (x) => typeof x === 'string';
-const pBool = (x) => typeof x === 'boolean';
+// round-46 self-audit — DELETED dead `pStr`/`pBool` type-predicates (defined, never referenced).
 const pSeq = (x) => decodeSeq(x) !== null;                 // CanonicalSeq
 const pSig64 = (x) => strictB64url(x, 64) !== null;        // Sig64
 const pId = (x) => typeof x === 'string' && x.length > 0;  // a NON-EMPTY identifier (round-12 P0-04: subject/domain/proof_kind can't be "")
@@ -135,16 +134,9 @@ const ORDER_COORD = Object.freeze(Object.assign(Object.create(null), {
   'transparency-log': { kind: 'position', id: 'log_id',    val: 'index' },
   'rfc3161-tsa':      { kind: 'interval', id: 'clock_id',  lo: 'not_before', hi: 'not_after' },
 }));
-// §2 byte-semantics: read a caller value EXACTLY ONCE into an inert internal value. The counting replacer fires each
-// getter once and BOUNDS the read, so a cyclic or exponentially-shared object graph is rejected (not OOM); JSON.parse
-// then yields an own-data-only tree with no getters/prototype/proxy. After this the caller object is never read again.
-function inertRead(v, bound) {
-  let visits = 0, enc;
-  try { enc = JSON.stringify(v, (_k, x) => { if (++visits > bound) throw new Error('bounded-read exceeded'); return x; }); }
-  catch { return { err: 'not a bounded, acyclic, serializable value' }; }
-  if (typeof enc !== 'string') return { err: 'not an encodable object' };
-  return { v: JSON.parse(enc) };
-}
+// round-46 self-audit — DELETED `inertRead` (a JSON.stringify-based admission that FIRED the input's getters/toJSON once).
+// It is dead: every object boundary now reduces through `admitInert` (unsigned, DATA descriptors, no code executes) or
+// `admitDeep` (signed, [[Get]]-once + content-hash) per Theorem R. A getter-firing admission has no place at the boundary.
 
 // ── config normalization (total; §8/§10) — C is a WORLD PARAMETER, never in the term ──────────────────────────────
 const isPlain = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);   // a JSON object, never an array/null (round-9 P0-05)
