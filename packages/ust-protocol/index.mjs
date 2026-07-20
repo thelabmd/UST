@@ -2644,7 +2644,13 @@ export async function witnessNoFork(shard, genesisHash, opts) {
 // witness world stays coherent — not one substrate, but one QUESTION ("is this root committed & final?")
 // answered by whichever plugin speaks that substrate. §17 registry is the shared vocabulary.
 export function combineSubstrates(verifiers) {
-  const list = (Array.isArray(verifiers) ? verifiers : [verifiers]).filter(Boolean);
+  // round-46 self-audit (totality) — normalize the plugin list DEFENSIVELY: a hostile `verifiers` Proxy (a throwing get/ownKeys trap)
+  // makes `Array.isArray(...) ? ... : [...]` + `.filter(Boolean)` throw a HOST exception at this public door — the lone door the
+  // hand-maintained totality sweep (round-17/18/19/24/38/39) never listed. Fail CLOSED to an empty list → the combinator returns a
+  // function that claims no substrate → verifyAnchor reports 'unavailable' (honest floor), never a host throw. Per-plugin hostility is
+  // already isolated below (the try/catch around each v()); this closes the ARRAY-normalization surface.
+  let list;
+  try { list = (Array.isArray(verifiers) ? verifiers : [verifiers]).filter(Boolean); } catch { list = []; }
   return async (anchor, root, ctx) => {
     // round-22 P1-02 + round-23 P1-05 — ISOLATE each plugin AND bound it: a throwing, unreachable, OR never-settling
     // connector must not shadow a later independent one that CAN verify this substrate. A rejection/timeout from one

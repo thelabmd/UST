@@ -1128,6 +1128,16 @@ signed-argument getter could mutate the still-live `opts` (drop `requireAuthorit
 once BOTH are captured; therefore the OBJECT-form sync verify path admits the trusted opts BEFORE the untrusted signed
 argument — the trusted form is captured before any signed-argument getter can run. A behavioral, from-entrypoint gate drives
 each entry with an `opts`-mutating signed-argument getter and asserts the verdict is invariant vs the benign call (*"R46 self-audit (Theorem R) verify admits the TRUSTED opts BEFORE the untrusted doc — a doc getter that drops requireAuthoritative cannot rewrite the consumer policy the verdict uses (INVALID stays INVALID; cross-argument order, sync path)"*).
+**Realization (rev58 — the totality of the reductions ρᵢ is enforced FROM THE SOURCE, not a hand-roster).** Theorem R requires
+each `ρᵢ` to be a TOTAL reduction: a hostile argument yields a structured reject, never a host exception. The round-46
+self-audit found the lone door that violated it — `combineSubstrates` SYNC-threw at its plugin-array normalization
+(`Array.isArray → .filter`) on a hostile `verifiers` Proxy, because the totality sweep had been a HAND-maintained roster of
+exports (round-17/18/19/24/38/39) and this door had simply fallen out of it (the round-44 gate-completeness class, now for
+totality). It is fixed (fail CLOSED to an empty plugin list → the combinator claims no substrate → `unavailable`), and the gate
+is rebuilt so that the totality of every reduction door is enforced from the SOURCE export list: every
+verify*/resolve*/derive*/check*/combine*/fork*/no* export is driven through its entrypoint with a hostile Proxy and asserted
+not to sync-throw, with a small PRINCIPLED exclusion (a `*Claim` PRODUCER constructs prover data from TRUSTED args, and
+`verifyOrThrow` throws by contract). A new verifier is auto-covered; a new producer auto-excluded (*"R46 self-audit (totality, from-code) — NO public verifier/resolver export SYNC-throws a host exception on a hostile Proxy in every arg position (the SOURCE list is the roster; closes the combineSubstrates gate-completeness gap)"*).
 
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):

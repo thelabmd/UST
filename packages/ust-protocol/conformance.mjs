@@ -1507,6 +1507,37 @@ console.log('\n═════════════════════�
       const opts = {}; const evilProof = new Proxy(proof, { get(t, k, r) { opts.substrateVerify = () => ({ final: true, time: '2026-07-20T02:00:00Z' }); return Reflect.get(t, k, r); } });
       const base = JSON.stringify(P.verifyAnchor(ch, proof, {})), evil = JSON.stringify(P.verifyAnchor(ch, evilProof, opts));
       check('R46 self-audit (Theorem R) verifyAnchor admits opts BEFORE the proof — a proof getter cannot inject substrateVerify (the substrate oracle) into the live opts; guard read and call read see the same frozen opts (identical status)', base === evil); } }
+  // round-46 self-audit (totality) — combineSubstrates was the LONE public door the hand-maintained totality sweep
+  // (round-17/18/19/24/38/39) never listed: a hostile `verifiers` Proxy (Array.isArray→true, then a throwing .filter/length
+  // trap) SYNC-threw a host exception at its array-normalization. Now it fails CLOSED to an empty plugin list.
+  check('R46 self-audit (totality) combineSubstrates on a HOSTILE verifiers Proxy → returns a combinator that claims no substrate (null/unavailable), NEVER a host throw at the array-normalization door', (() => {
+    const hostile = new Proxy([{}], { get() { throw new Error('HOSTILE'); }, ownKeys() { throw new Error('HOSTILE'); }, getOwnPropertyDescriptor() { throw new Error('HOSTILE'); } });
+    try { const fn = P.combineSubstrates(hostile); return typeof fn === 'function'; } catch { return false; }
+  })());
+  // round-46 self-audit (totality, FROM-CODE — closes the round-44 gate-completeness class at its root) — the totality sweep
+  // was a HAND-maintained roster of exports, which is exactly why combineSubstrates fell out of it. Enumerate EVERY
+  // verify*/resolve*/derive*/check*/combine*/fork*/no* export from the SOURCE and assert none SYNC-throws a host exception when
+  // driven with a hostile Proxy (throwing get/ownKeys/descriptor traps) in every argument position. A new such export that
+  // forgets to admit its input fails HERE — the source export list IS the roster, no hand-list to fall out of.
+  check('R46 self-audit (totality, from-code) — NO public verifier/resolver export SYNC-throws a host exception on a hostile Proxy in every arg position (the SOURCE list is the roster; closes the combineSubstrates gate-completeness gap)', (() => {
+    const src = readFileSync(new URL('./index.mjs', import.meta.url), 'utf8');
+    // INCLUSION is from-code: every verify*/resolve*/derive*/check*/combine*/fork*/no* export. EXCLUSION is a small,
+    // PRINCIPLED, documented set (not a hand-roster of what to INCLUDE — the round-44 anti-pattern): a PRODUCER that
+    // CONSTRUCTS prover data from TRUSTED args (`*Claim`: checkpointRecoveryClaim/checkpointUniquenessClaim/noForkClaim) is
+    // not an untrusted-input boundary and may throw on a malformed trusted arg; `verifyOrThrow` is the throw-BY-CONTRACT
+    // variant of `verify`. A new verifier (verifyX/resolveX/…) is auto-included; a new producer (X*Claim) auto-excluded.
+    const isProducer = (n) => /Claim$/.test(n);
+    const throwByContract = (n) => n === 'verifyOrThrow';
+    const names = [...src.matchAll(/export\s+(?:async\s+)?function\s+((?:verify|resolve|derive|check|combine|fork|no)\w*)/g)].map((m) => m[1]).filter((n) => !isProducer(n) && !throwByContract(n));
+    const mkHostile = () => new Proxy([{}], { get() { throw new Error('HOSTILE'); }, ownKeys() { throw new Error('HOSTILE'); }, getOwnPropertyDescriptor() { throw new Error('HOSTILE'); }, has() { throw new Error('HOSTILE'); } });
+    const bad = [];
+    for (const n of names) {
+      const fn = P[n];
+      if (typeof fn !== 'function') { bad.push(n + ' (not exported?)'); continue; }
+      try { fn(mkHostile(), mkHostile(), mkHostile(), mkHostile()); } catch { bad.push(n); }   // a SYNC host throw at the door = totality breach (async entries return a Promise → no sync throw)
+    }
+    return bad.length === 0;
+  })());
   check('RECOVERY signer NOT in the genesis recovery set → not counted', VR([stmt(rf(KR), R1), stmt(rf(KR), RX)]).recovered === false);
   check('RECOVERY threshold-complete malformed replacement (BOTH signers agree on key_id ≠ keyId(pub)) → NOT recovered (admitAuthorityKey binds the pair; round-36 P1-01/P2-01 — the vacuous single-malformed vector could not see it)', (() => { const bad = { ...P.checkpointRecoveryClaim(rf(KR)), replacement_authority: { key_id: K1.key_id, pub: KR.pubB64 } }; const st = (W) => { const sg = sign(null, Buffer.from(P.canon(bad), 'utf8'), W.priv).toString('base64url'); return { claim: bad, issuer_id: W.key_id, sig: { alg: 'Ed25519', key_id: W.key_id, pub: W.pubB64, sig: sg } }; }; return VR([st(R1), st(R2)]).recovered === false; })());
   check('RECOVERY effective_sequence ≠ last+1 → not recovered (only the next checkpoint)', VR([stmt(rf(KR, '2'), R1), stmt(rf(KR, '2'), R2)]).recovered === false);
