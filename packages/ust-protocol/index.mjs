@@ -421,7 +421,12 @@ const KEYID_FORM = /^sha256:[0-9a-f]{64}$/;
 const BOUNDS = { depth: 8, array: 4096, partitions: 4096, floorPartitions: 64, breadth: 64, sizeBytes: 67108864, floorSizeBytes: 1048576, cadenceMax: 31622400,  // cadenceMax = 366 d in seconds (#75: bounded integer cadence)
   witnessEntries: 256, witnessActive: 16, anchorsPerGenesis: 8,  // round-20 P1-02 — F.9 structural fan-out budget: a body under the byte ceiling still bounds connector CALLS (≤ witnessActive × anchorsPerGenesis substrate invocations per resolution)
   forkCandidates: 64 };  // round-21 P1-02 — forkChoice candidate budget (a plain JSON array of N copies must not fan out into N verifications)
-export function checkBounds(doc) {
+export function checkBounds(rawDoc) {
+  const doc = admitDeep(rawDoc);                                              // round-39 P1-02 (R1) — the EXPORTED bounds validator admits its UNTRUSTED doc ONCE: a hostile accessor is a RETURNED bounds refusal, never a host throw. The internal verifyCore caller already holds an admitted snapshot → calls boundsOf directly (no re-clone on the hot path).
+  if (doc === ADMIT_REJECT) return 'non-inert document (accessor/getter at some depth — bounds undecidable, §14 admission)';
+  return boundsOf(doc);
+}
+function boundsOf(doc) {
   // #69 E3 — the normative VOLUME metric is the signed content canon({ust, state}), NOT the transport object:
   // sig/proof are bounded by transport admission (verifyJson maxInputBytes), never by the signed-content ABS.
   // Counting a large anchor proof here would falsely reject a valid signed content near 64 MiB.
@@ -467,7 +472,7 @@ function verifyCore(doc, opts = {}) {
     // §4.1 top-level is EXACTLY {ust,state,sig,proof} — REJECT unknown members (fail-closed). An "ignore unknown"
     // rule would reopen the K1/F2 class: an unsigned member riding next to a VALID verdict.
     for (const k of Object.keys(doc)) if (!RESERVED.transcript.includes(k)) return bad('E-MALFORMED', 'unknown top-level member: ' + k);
-    const bnd = checkBounds(doc); if (bnd) return bad('E-BOUNDS', bnd);               // §13 bounds
+    const bnd = boundsOf(doc); if (bnd) return bad('E-BOUNDS', bnd);                  // §13 bounds — doc is the already-admitted snapshot (verify→admitDeep→verifyCore), so call boundsOf directly (checkBounds re-admits at the public door)
     const st = doc.state;
     for (const k of Object.keys(st)) if (!RESERVED.state.includes(k)) return bad('E-MALFORMED', 'reserved-key: state.' + k);
     if (!st.id || !st.time || !st.data || !st.hashes) return bad('E-MALFORMED', 'state missing id/time/data/hashes');
@@ -543,7 +548,9 @@ function verifyCore(doc, opts = {}) {
     const sBytes = Buffer.byteLength(S, 'utf8');
     if (sBytes > BOUNDS.sizeBytes) return bad('E-BOUNDS', `canonical transcript ${sBytes} B > 64 MiB ABS`);
     // verifier CAPABILITY ceiling (rc.12): protocol-valid but beyond THIS verifier ⇒ honest refusal.
-    if (opts.maxSupportedBytes && sBytes > Number(opts.maxSupportedBytes))
+    const maxSupported = admitBudget(opts.maxSupportedBytes, BOUNDS.sizeBytes);   // round-39 P1-01 (R4) — a caller CAPABILITY ceiling may only TIGHTEN the 64 MiB reference, never disable it: 0/NaN (falsy-bypass) and Infinity (disable) are now REFUSED, not honored — a sibling of the maxInputBytes/refBudget escapes
+    if (maxSupported === null) return bad('E-MALFORMED', 'maxSupportedBytes must be a finite positive integer of bytes (a verifier capability ceiling may only tighten, never disable, the size check)');
+    if (opts.maxSupportedBytes !== undefined && sBytes > maxSupported)
       return { result: 'INDETERMINATE', reason: 'resource_limit', detail: `canonical transcript ${sBytes} B > this verifier's capability ${opts.maxSupportedBytes} B` };
     if (dk.length > BOUNDS.floorPartitions || sBytes > BOUNDS.floorSizeBytes) {
       const over = dk.length > BOUNDS.floorPartitions
@@ -698,7 +705,9 @@ function verifyCore(doc, opts = {}) {
     if (opts.provenanceDepth > 0 && typeof opts.resolveRef === 'function') {
       // §13 P4: a GLOBAL verified-node budget (default 256, opts.refBudget) — exhaustion fails the WHOLE
       // walk (E-BOUNDS), never a partial success, so traversal order cannot affect any verdict (I4).
-      const refBudget = { left: admitBudget(opts.refBudget, 256) ?? 256 };   // round-38 R4 sweep — a caller refBudget may only TIGHTEN below the 256-node reference cap, never expand it (a sibling of the maxInputBytes escape)
+      const refCap = admitBudget(opts.refBudget, 256);                        // round-39 P1-01 (R4) — a REFUSED budget (0/NaN/Infinity/fractional/string) must FAIL CLOSED, never coalesce back to the 256 default: the round-38 `admitBudget(...) ?? 256` swallowed the null-refusal into the FULL budget (the `?? default` defeats admission — the footgun removed)
+      if (refCap === null) return bad('E-MALFORMED', 'refBudget must be a finite positive integer of nodes (a caller may only tighten the 256-node reference-walk cap, never expand or disable it)');
+      const refBudget = { left: refCap };
       const walked = walkReferents(st, opts, Math.min(opts.provenanceDepth, BOUNDS.depth), new Set([ch]), refBudget);
       if (walked.error) return bad(walked.error, walked.detail);
       provenanceReport = { depth: walked.depth, referents: walked.referents };
@@ -2111,27 +2120,34 @@ export const ASSURANCE_AXES = deepFreeze({   // round-25 P0-04 — DEEP-frozen: 
 // A predicate is discharged only by an admissible capability (B4); no composition step manufactures one (B3).
 export const EVIDENCE_CAPS_UNIVERSE = Object.freeze([...new Set(Object.values(EVIDENCE_CAPS).flat())].sort());
 const AXES = Object.keys(ASSURANCE_AXES);
-export const axisRank = (axis, v) => ASSURANCE_AXES[axis].indexOf(v);          // -1 ⇒ not a value of this axis
+// round-39 P1-02 (R1) — the assurance lattice DOOR mirrors the input door: a malformed assurance value is a RETURNED
+// reject sentinel (like admitDeep→ADMIT_REJECT), never a throw — so every lattice SURFACE (meet/join/le/projectTier/
+// capAssurance) is a TOTAL function that RETURNS on any operand and passes the from-code hostile-argument sweep. The
+// half-measure (round-37/38 coded-E-ASSURANCE throw) left the family partial: a surface consumer host-threw at position 0.
+const ASSURANCE_REJECT = Symbol('assurance-reject');
+export const axisRank = (axis, v) => { const chain = ASSURANCE_AXES[axis]; return Array.isArray(chain) ? chain.indexOf(v) : -1; };   // -1 ⇒ not a value of this axis (a non-axis key is TOTAL — returns -1, never a `undefined.indexOf` throw)
+const ASSURANCE_BOTTOM = Object.freeze(Object.fromEntries(AXES.map((ax) => [ax, ASSURANCE_AXES[ax][0]])));   // ⊥ — the per-axis floor; the fail-closed value of a lattice op on an un-admittable operand (a meet under-reports, a join treats it as the identity — neither ever over-reports)
 const axisLE = (axis, a, b) => { const ra = axisRank(axis, a), rb = axisRank(axis, b); return ra >= 0 && rb >= 0 && ra <= rb; };
 // AssuranceState = a full 5-tuple; every axis present with an in-range value, else E-ASSURANCE (fail-closed).
 export function assuranceState(s = {}) {
-  const S = admitDeep(s); if (S === ADMIT_REJECT) throw Object.assign(new Error('E-ASSURANCE: assurance state is not an inert record'), { code: 'E-ASSURANCE' });   // round-38 P1-01 (R1) — admit ONCE into a frozen snapshot: a hostile getter is a coded E-ASSURANCE, never a host throw
+  const S = admitDeep(s); if (S === ADMIT_REJECT) return ASSURANCE_REJECT;   // round-39 P1-02 (R1) — the assurance DOOR RETURNS a reject sentinel (mirrors admitDeep→ADMIT_REJECT), never a throw: a hostile getter is a RETURNED reject so every lattice surface stays total-by-return under the sweep (round-38: admit ONCE into a frozen snapshot; a two-face Proxy cannot pass a weak face to the rank check and emit a strong one)
   const out = {};
-  for (const ax of AXES) { const v = S[ax]; if (axisRank(ax, v) < 0) throw Object.assign(new Error(`E-ASSURANCE: axis '${ax}' missing or out of range`), { code: 'E-ASSURANCE' }); out[ax] = v; }   // (R3) read each axis ONCE from the admitted snapshot, validate v, emit v: a two-face Proxy cannot pass a weak face to the rank check and emit a strong one
+  for (const ax of AXES) { const v = S[ax]; if (axisRank(ax, v) < 0) return ASSURANCE_REJECT; out[ax] = v; }   // (R3) read each axis ONCE from the admitted snapshot; a missing/out-of-range axis is a RETURNED reject sentinel, not a throw
   return out;
 }
 // The product order (F.5 gap 1): a ≤ b iff a ≤ b on EVERY axis — a PARTIAL order (identity & freshness independent,
 // so most pairs are incomparable). meet/join make it a LATTICE.
-export const assuranceLE = (a, b) => { const A = assuranceState(a), B = assuranceState(b); return AXES.every((ax) => axisLE(ax, A[ax], B[ax])); };   // round-37 P1-01 — ADMIT both operands into the full in-range product before comparing (an out-of-domain axis → E-ASSURANCE, never a silent rank -1)
+export const assuranceLE = (a, b) => { const A = assuranceState(a), B = assuranceState(b); return A !== ASSURANCE_REJECT && B !== ASSURANCE_REJECT && AXES.every((ax) => axisLE(ax, A[ax], B[ax])); };   // round-39 P1-02 — TOTAL: an un-admittable operand ⇒ FALSE (an order we cannot establish is never asserted), never a throw (round-37: admit both into the in-range product before comparing)
 const axisMin = (axis, a, b) => (axisRank(axis, a) <= axisRank(axis, b) ? a : b);
 const axisMax = (axis, a, b) => (axisRank(axis, a) >= axisRank(axis, b) ? a : b);
-export const meetAssurance = (a, b) => { const A = assuranceState(a), B = assuranceState(b); return Object.fromEntries(AXES.map((ax) => [ax, axisMin(ax, A[ax], B[ax])])); };   // round-37 P1-01 — ADMIT both operands (no lattice op repairs a malformed operand into an earned state)
-export const joinAssurance = (a, b) => { const A = assuranceState(a), B = assuranceState(b); return Object.fromEntries(AXES.map((ax) => [ax, axisMax(ax, A[ax], B[ax])])); };   // round-37 P1-01 — ADMIT both operands: a join with an out-of-domain axis throws E-ASSURANCE, never synthesizes a valid TOP
+export const meetAssurance = (a, b) => { const A = assuranceState(a), B = assuranceState(b); return (A === ASSURANCE_REJECT || B === ASSURANCE_REJECT) ? { ...ASSURANCE_BOTTOM } : Object.fromEntries(AXES.map((ax) => [ax, axisMin(ax, A[ax], B[ax])])); };   // round-39 P1-02 — TOTAL: a malformed operand ⇒ ⊥ (meet under-reports; no lattice op repairs a malformed operand into an earned state), never a throw
+export const joinAssurance = (a, b) => { const A = assuranceState(a), B = assuranceState(b); const A2 = A === ASSURANCE_REJECT ? ASSURANCE_BOTTOM : A, B2 = B === ASSURANCE_REJECT ? ASSURANCE_BOTTOM : B; return Object.fromEntries(AXES.map((ax) => [ax, axisMax(ax, A2[ax], B2[ax])])); };   // round-39 P1-02 — TOTAL: a malformed operand contributes ⊥ (the join-identity), so a join NEVER synthesizes strength from garbage; both malformed ⇒ ⊥, never a throw
 // PolicyProjection (F.5 gap 1 / F.5b): the classic tier reads ONLY identity+time. TOP = authoritative name ∧ anchored
 // time; HIGH = name-bound (identity ≥ corroborated); LIGHT = the integrity floor; below the floor there is NO tier.
 // This is the CANONICAL projection; the inline §14 verify tier is conformance-pinned to agree with it (no 2nd truth).
 export function projectTier(state) {
   const s = assuranceState(state);
+  if (s === ASSURANCE_REJECT) return 'NONE';                                  // round-39 P1-02 — TOTAL: an un-admittable state has NO tier (fail-closed), never a throw
   if (!axisLE('integrity', 'valid', s.integrity)) return 'NONE';              // integrity floor unmet ⇒ INVALID upstream
   if (s.identity === 'authoritative' && s.time === 'anchored') return 'TOP';
   if (axisLE('identity', 'corroborated', s.identity)) return 'HIGH';          // corroborated ≤ identity ⇒ name-bound
@@ -2144,8 +2160,12 @@ export const TIER_RANK = { NONE: -1, LIGHT: 0, HIGH: 1, TOP: 2 };
 // by trust — never self-declared; an unspecified ceiling axis imposes no cap (tops out).
 export function capAssurance(state, ceiling) {
   const s = assuranceState(state);
+  if (s === ASSURANCE_REJECT) return { ...ASSURANCE_BOTTOM };                  // round-39 P1-02 — TOTAL: an un-admittable proven state caps to ⊥
   if (!ceiling) return s;
-  const cap = assuranceState(Object.fromEntries(AXES.map((ax) => [ax, ceiling[ax] ?? ASSURANCE_AXES[ax][ASSURANCE_AXES[ax].length - 1]])));
+  const C = admitDeep(ceiling);                                               // round-39 P1-02 (R1) — ADMIT the consumer ceiling ONCE (it is UNTRUSTED consumer config C, not a post-verification value): a hostile getter is a RETURNED ⊥ cap, never a host throw
+  if (C === ADMIT_REJECT) return { ...ASSURANCE_BOTTOM };
+  const cap = assuranceState(Object.fromEntries(AXES.map((ax) => [ax, C[ax] ?? ASSURANCE_AXES[ax][ASSURANCE_AXES[ax].length - 1]])));
+  if (cap === ASSURANCE_REJECT) return { ...ASSURANCE_BOTTOM };               // an out-of-range ceiling axis caps to ⊥ (never LIFTS the reported state)
   return meetAssurance(s, cap);
 }
 
@@ -2216,7 +2236,9 @@ const sealPredicateGraph = (graph) => mintHandle('predicate-graph', graph);
 // so no coordinate lifts: round-3 P0-4 closed at the type level). Emits the frozen assurance report + the K7 trace.
 export function deriveAssurance(graph) {
   if (!isHandle('predicate-graph', graph)) return Object.freeze({ error: 'E-ASSURANCE', detail: 'deriveAssurance requires a verified PredicateGraph handle (K3 — build it with provePredicates over seam verdicts; a caller-shaped object earns nothing)' });
-  const strength = Object.freeze(assuranceState({ integrity: 'valid', ...graph.atoms }));
+  const raw = assuranceState({ integrity: 'valid', ...graph.atoms });
+  if (raw === ASSURANCE_REJECT) return Object.freeze({ error: 'E-ASSURANCE', detail: 'derived atoms out of range (a branded graph carries in-range atoms; this is the totality floor at the one internal lattice-door caller)' });   // round-39 P1-02 — the door sentinel is handled here; graph.atoms is trusted (sealed graph) so this is defensive
+  const strength = Object.freeze(raw);
   return Object.freeze({ strength, support: graph.support, tier: projectTier(strength), derivation: graph.derivation, provenAtoms: graph.provenAtoms });
 }
 

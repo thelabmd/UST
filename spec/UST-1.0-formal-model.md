@@ -925,7 +925,7 @@ break) — while the kernel already types its co-paths (`pHashArr`), a public↔
 `join` SYNTHESIZED a valid-looking `TOP`. Fix, the same shape as every prior primitive: **`admitHashPath(siblings, len)`**
 admits a co-path only if it is a length-`len` array of canonical sha256 hashes, and node preimages are built from admitted
 hash strings (both Merkle verifiers route through it, matching the kernel) (*"R37 P0-01 a GENUINE key-log terminality proof is still terminal (no over-reject)"*); and every exported lattice op ADMITS both operands with `assuranceState`
-before comparing, so an out-of-domain operand throws `E-ASSURANCE`, never a synthesized state (*"R37 P1-01 joinAssurance with an OUT-OF-DOMAIN operand → E-ASSURANCE (never a synthesized TOP)"*). A whole-surface sweep confirmed this was the
+before comparing, so an out-of-domain operand yields ⊥, never a synthesized state (rev48 made this total-by-RETURN — see below) (*"R37/R39 joinAssurance with an OUT-OF-DOMAIN operand → RETURNS the valid operand (⊥ contributes nothing, never synthesizes strength from garbage), never a throw"*). A whole-surface sweep confirmed this was the
 LAST gap: every exported verifier and algebra op now routes its untrusted structured input through ONE admission primitive
 (`admitDeep`, `admitOpts`, `admitSigner`, `admitAuthorityKey`, `admitHashPath`, `assuranceState`, `decodeExact`) before
 processing — R1 is uniform between input and output at every level, which is the invariant the recurring findings were
@@ -949,6 +949,30 @@ at a sibling the round-38 sweep found the auditor missed (`refBudget`, the refer
 uniform in all four rules across the exported surface: every op admits its input ONCE (R1), computes over the admitted
 snapshot + its own faculties (R2), emits only projections of that snapshot (R3), and lets caller policy only TIGHTEN a
 verifier-owned faculty (R4).
+
+**Realization (rev48 — the assurance lattice made a TOTAL function (a door that RETURNS, not throws), and the R4 budget
+made uniform by removing the `?? default` footgun).** rev47 claimed the frame uniform, but the audit found the SAME two
+rules realized as HALF-measures one level below. (P1-01, R4) the round-38 `admitBudget` correctly RETURNS `null` on a
+refused budget — but the call site wrote `admitBudget(opts.refBudget, 256) ?? 256`, and `?? 256` converted that refusal
+back into the FULL 256-node budget; a sibling, `maxSupportedBytes`, was read raw (`opts.maxSupportedBytes && … Number(…)`)
+so `0`/`NaN` (falsy) bypassed the capability check and `Infinity` disabled it. The refusal existed but was SWALLOWED — a
+faculty admission is realized only if its `null` FAILS CLOSED, never coalesces to a default. Fix: both scalars route
+through `admitBudget` and a `null` returns `E-MALFORMED`.
+Cf. *"R39 P1-01 (R4) refBudget:Infinity → E-MALFORMED (a refused budget FAILS CLOSED, never coalesces to the 256-node default)"* and *"R39 P1-01 (R4) maxSupportedBytes:0 → E-MALFORMED, never a falsy-bypass of the capability check"*.
+(P1-02, R1) the assurance lattice was still PARTIAL: `assuranceState` (the assurance door) THREW a coded `E-ASSURANCE` on a
+malformed operand (rev37/38), so `capAssurance` — which reads an UNTRUSTED consumer `ceiling` — and the exported
+`checkBounds` host-threw when reached as consumer surfaces, yet both were classified `primitive` and exempt from the sweep.
+A rule realized as a coded THROW at a consumer surface is not realized: the sweep demands a RETURN, and a lattice operation
+is mathematically TOTAL (meet = per-axis min, join = per-axis max), so a malformed operand must map to ⊥ and the op must
+RETURN, not throw. Fix: the door mirrors the INPUT door — `assuranceState` RETURNS a reject sentinel (like `admitDeep`
+→ `ADMIT_REJECT`), never throws; every lattice surface then fails closed by RETURN (`meet` → ⊥, `join` treats the malformed
+operand as the ⊥ identity so it never synthesizes strength, `assuranceLE` → `false`, `projectTier` → `NONE`, `capAssurance`
+admits its `ceiling` and caps to ⊥); `checkBounds` admits its `doc` at the public door (the internal hot path calls the
+private `boundsOf` over the already-admitted snapshot, no re-clone). All are RECLASSIFIED as consumer surfaces and swept.
+Cf. *"R39 P1-02 (R1) capAssurance with a HOSTILE consumer ceiling → RETURNS ⊥ (fail-closed cap), never a host throw"* and *"LATTICE (8) missing/out-of-range axis ⇒ reject sentinel (fail-closed, total-by-return) + projectTier ⇒ NONE"*.
+The lattice is now a total function into `AssuranceState ∪ {⊥}`, and R1/R4 are realized as RETURNS at every exported surface
+— a coded throw at a consumer boundary was the residual the recurring lattice findings (rev37, rev38, rev39) were tracing
+toward.
 
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):

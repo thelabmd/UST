@@ -1361,20 +1361,37 @@ console.log('\n═════════════════════�
       check('R37 P0-01 key-log Merkle sibling ' + JSON.stringify(bad) + ' (not a canonical hash) → not terminal, NO host throw', !!r && r.terminal === false);
     }
     const good = { integrity: 'valid', identity: 'authoritative', freshness: 'fresh', time: 'anchored' }, ood = { ...good, freshness: 'NOT_AN_AXIS' };
-    const throwsEA = (fn) => { try { fn(); return false; } catch (e) { return e.code === 'E-ASSURANCE'; } };
-    check('R37 P1-01 joinAssurance with an OUT-OF-DOMAIN operand → E-ASSURANCE (never a synthesized TOP)', throwsEA(() => P.joinAssurance(ood, good)));
-    check('R37 P1-01 meetAssurance with an out-of-domain operand → E-ASSURANCE', throwsEA(() => P.meetAssurance(ood, good)));
-    check('R37 P1-01 assuranceLE with an out-of-domain operand → E-ASSURANCE', throwsEA(() => P.assuranceLE(ood, good)));
+    const floor = { integrity: 'invalid', identity: 'self-asserted', freshness: 'unverified', time: 'unproven' };
+    const noThrow = (fn) => { try { return fn(); } catch { return 'THREW'; } };   // round-39 P1-02 — the lattice is now TOTAL-by-return; a throw (even coded E-ASSURANCE) is a failure of the surface contract
+    check('R37/R39 joinAssurance with an OUT-OF-DOMAIN operand → RETURNS the valid operand (⊥ contributes nothing, never synthesizes strength from garbage), never a throw', JSON.stringify(noThrow(() => P.joinAssurance(ood, good))) === JSON.stringify(good));
+    check('R37/R39 meetAssurance with an out-of-domain operand → RETURNS ⊥ (fail-closed, under-reports), never a throw', JSON.stringify(noThrow(() => P.meetAssurance(ood, good))) === JSON.stringify(floor));
+    check('R37/R39 assuranceLE with an out-of-domain operand → FALSE (an order we cannot establish is never asserted), never a throw', noThrow(() => P.assuranceLE(ood, good)) === false);
     check('R37 P1-01 joinAssurance of two VALID states still lifts (no over-reject)', P.projectTier(P.joinAssurance(good, { integrity: 'valid', identity: 'pinned', freshness: 'unverified', time: 'unproven' })) === 'TOP'); }
   // round-38 P1-01/02/03 — R1/R3/R4 uniformity: assuranceState admits ONCE (no two-face), the exported evidence algebra
   // admits its operands (no host throw), and a caller resource scalar may only TIGHTEN the ceiling (never expand it).
   { const good = { integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored' };
     let n = 0; const twoFace = new Proxy({ ...good }, { get(t, k) { if (k === 'identity') { n++; return n === 1 ? 'self-asserted' : 'authoritative'; } return t[k]; } });
     check('R38 P1-01 (R1/R3) assuranceState on a two-face Proxy emits the ADMITTED (first) face, not a stronger re-read', P.assuranceState(twoFace).identity === 'self-asserted');
-    check('R38 P1-01 (R1) assuranceState on a hostile getter → E-ASSURANCE (coded, never a host throw)', (() => { try { P.assuranceState(new Proxy({}, { get() { throw new Error('HOSTILE'); } })); return false; } catch (e) { return e.code === 'E-ASSURANCE'; } })());
+    check('R38/R39 (R1) assuranceState on a hostile getter → RETURNS a reject sentinel (a symbol, mirrors admitDeep→ADMIT_REJECT), never a throw', (() => { const r = P.assuranceState(new Proxy({ a: '1' }, { get() { throw new Error('HOSTILE'); } })); return typeof r === 'symbol'; })());
     check('R38 P1-02 (R1) quorumTrustDomains on a Proxy list with a hostile Symbol.iterator → structured, never a host throw', (() => { const h = new Proxy([{ source_id: 'a' }], { get(t, k) { if (k === Symbol.iterator) throw new Error('HOSTILE'); return t[k]; } }); try { return typeof P.quorumTrustDomains(h, { domains: { a: 'op-a' }, threshold: 1 }).count === 'number'; } catch { return false; } })());
     check('R38 P1-02 (R1) compareEvidenceOrder on a hostile Proxy operand → unproven, never a host throw', (() => { const h = new Proxy({}, { get() { throw new Error('HOSTILE'); } }); try { return P.compareEvidenceOrder(h, h) === 'unproven'; } catch { return false; } })());
-    check('R38 P1-03 (R4) verifyJson maxInputBytes:Infinity → structured E-MALFORMED, never an expanded ceiling', (r => r.error === 'E-MALFORMED' && /maxInputBytes|tighten/i.test(r.detail))(P.verifyJson('{}', { maxInputBytes: Infinity })));
+    check('R38 P1-03 (R4) verifyJson maxInputBytes:Infinity → structured E-MALFORMED, never an expanded ceiling', (r => r.error === 'E-MALFORMED' && /maxInputBytes|tighten/i.test(r.detail))(P.verifyJson('{}', { maxInputBytes: Infinity }))); }
+  // round-39 P1-01/02 — R4 budget admission is UNIFORM (no `?? default` swallow of a refusal; every caller resource scalar
+  // TIGHTENS or is refused) and the assurance lattice + bounds validator are TOTAL-by-return consumer surfaces (the door
+  // returns a reject sentinel like admitDeep, so a hostile operand yields ⊥/false/'NONE'/a bounds string, never a host throw).
+  { const H = () => new Proxy({}, { get() { throw new Error('HOSTILE'); }, ownKeys() { throw new Error('HOSTILE'); } });
+    const kR9 = kp('39'.repeat(32));
+    const docR9 = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260720.14', key_id: kR9.key_id, class: 'observation' }, { generated_at: '2026-07-20T01:00:00Z', valid_from: '2026-07-20T01:00:00Z', valid_to: '2026-08-20T01:00:00Z' }, { r: { kind: 'captured', value: { v: 'A' } } }), kR9.priv, kR9.pubB64);
+    const vd = (o) => P.verify(docR9, { context: 'data', ...o });
+    check('R39 P1-01 (R4) refBudget:Infinity → E-MALFORMED (a refused budget FAILS CLOSED, never coalesces to the 256-node default)', (r => r.error === 'E-MALFORMED' && /refBudget|tighten/i.test(r.detail))(vd({ provenanceDepth: 1, resolveRef: () => null, refBudget: Infinity })));
+    check('R39 P1-01 (R4) refBudget:0 → E-MALFORMED (0 is not a positive integer of nodes)', (r => r.error === 'E-MALFORMED')(vd({ provenanceDepth: 1, resolveRef: () => null, refBudget: 0 })));
+    check('R39 P1-01 (R4) maxSupportedBytes:0 → E-MALFORMED, never a falsy-bypass of the capability check', (r => r.error === 'E-MALFORMED' && /maxSupportedBytes|tighten/i.test(r.detail))(vd({ maxSupportedBytes: 0 })));
+    check('R39 P1-01 (R4) maxSupportedBytes:Infinity → E-MALFORMED, never a disabled capability check', (r => r.error === 'E-MALFORMED')(vd({ maxSupportedBytes: Infinity })));
+    check('R39 P1-01 (R4) maxSupportedBytes:NaN → E-MALFORMED, never a falsy-bypass', (r => r.error === 'E-MALFORMED')(vd({ maxSupportedBytes: NaN })));
+    const capH = P.capAssurance({ integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored' }, H());
+    check('R39 P1-02 (R1) capAssurance with a HOSTILE consumer ceiling → RETURNS ⊥ (fail-closed cap), never a host throw', capH.integrity === 'invalid' && capH.identity === 'self-asserted' && capH.time === 'unproven');
+    check('R39 P1-02 (R1) checkBounds on a HOSTILE doc → RETURNS a bounds refusal string, never a host throw', typeof (() => { try { return P.checkBounds(H()); } catch { return null; } })() === 'string');
+    check('R39 P1-02 (R1) axisRank on a non-axis key → -1 (total), never a `undefined.indexOf` throw', (() => { try { return P.axisRank('NOT_AN_AXIS', 'x') === -1; } catch { return false; } })());
     check('R38 P1-03 (R4) verifyJson maxInputBytes below the ceiling still applies (a valid tighten is honored)', P.verifyJson('{"a":1}', { maxInputBytes: 3 }).reason === 'resource_limit'); }
   check('RECOVERY signer NOT in the genesis recovery set → not counted', VR([stmt(rf(KR), R1), stmt(rf(KR), RX)]).recovered === false);
   check('RECOVERY threshold-complete malformed replacement (BOTH signers agree on key_id ≠ keyId(pub)) → NOT recovered (admitAuthorityKey binds the pair; round-36 P1-01/P2-01 — the vacuous single-malformed vector could not see it)', (() => { const bad = { ...P.checkpointRecoveryClaim(rf(KR)), replacement_authority: { key_id: K1.key_id, pub: KR.pubB64 } }; const st = (W) => { const sg = sign(null, Buffer.from(P.canon(bad), 'utf8'), W.priv).toString('base64url'); return { claim: bad, issuer_id: W.key_id, sig: { alg: 'Ed25519', key_id: W.key_id, pub: W.pubB64, sig: sg } }; }; return VR([st(R1), st(R2)]).recovered === false; })());
@@ -1517,10 +1534,11 @@ console.log('\n═════════════════════�
   const capped = P.capAssurance(top, { identity: 'self-asserted', freshness: 'corroborated' });
   check('LATTICE (7c) proven-TOP capped by no-trust-roots/no-domains ⇒ tier drops to LIGHT', P.projectTier(capped) === 'LIGHT' && capped.identity === 'self-asserted' && capped.freshness === 'corroborated');
 
-  // (8) fail-closed: a missing/out-of-range axis ⇒ E-ASSURANCE (never a guessed state)
-  let threw = ''; try { P.assuranceState({ integrity: 'valid', identity: 'authoritative', freshness: 'attested' }); } catch (e) { threw = e.code; }
-  let threw2 = ''; try { P.assuranceState({ integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'sometime' }); } catch (e) { threw2 = e.code; }
-  check('LATTICE (8) missing/out-of-range axis ⇒ E-ASSURANCE (fail-closed)', threw === 'E-ASSURANCE' && threw2 === 'E-ASSURANCE');
+  // (8) fail-closed: a missing/out-of-range axis ⇒ a RETURNED reject sentinel (round-39 — the assurance door returns like
+  //     admitDeep→ADMIT_REJECT, never a throw / never a guessed state); projectTier of such a state ⇒ NONE (no tier)
+  const miss = P.assuranceState({ integrity: 'valid', identity: 'authoritative', freshness: 'attested' });                         // missing `time`
+  const oor = P.assuranceState({ integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'sometime' });        // out-of-range `time`
+  check('LATTICE (8) missing/out-of-range axis ⇒ reject sentinel (fail-closed, total-by-return) + projectTier ⇒ NONE', typeof miss === 'symbol' && typeof oor === 'symbol' && P.projectTier({ integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'sometime' }) === 'NONE');
 
   // M1.1 — capability SUPPORT: a separate Boolean lattice (P(Caps), ⊆), single-sourced, |Caps| = 8
   check('M1.1 EVIDENCE_CAPS_UNIVERSE: |Caps| = 8, single-sourced from EVIDENCE_CAPS (support ≠ strength coordinate)', P.EVIDENCE_CAPS_UNIVERSE.length === 8 && ['pow-header-chain', 'transparency-log', 'authenticated-map', 'content-addressed', 'rfc3161-tsa'].every((k) => P.evidenceCaps(k).every((c) => P.EVIDENCE_CAPS_UNIVERSE.includes(c))));
@@ -1700,9 +1718,9 @@ console.log('\n═════════════════════�
     canon: 'primitive', keyId: 'primitive', contentHash: 'primitive', merkleRoot: 'primitive', H: 'primitive', Hbytes: 'primitive',
     seed: 'primitive', strictB64url: 'primitive', admitUtf8: 'primitive', admitDeep: 'primitive (the door itself; canon-transparent)',
     anyLoneSurrogate: 'primitive', edVerifyStrict: 'primitive', signedContent: 'primitive', partitionHash: 'primitive',
-    blindedCommit: 'primitive', blindPartition: 'primitive', assuranceLE: 'primitive', assuranceState: 'primitive',
-    axisRank: 'primitive', joinAssurance: 'primitive', meetAssurance: 'primitive', projectTier: 'primitive', capAssurance: 'primitive',
-    evidenceCaps: 'primitive', ustGrid: 'primitive', checkBounds: 'primitive', compareEvidenceOrder: 'surface',
+    blindedCommit: 'primitive', blindPartition: 'primitive', assuranceLE: 'surface', assuranceState: 'primitive (the assurance door — returns a reject sentinel like admitDeep, never a throw)',
+    axisRank: 'primitive', joinAssurance: 'surface', meetAssurance: 'surface', projectTier: 'surface', capAssurance: 'surface',
+    evidenceCaps: 'primitive', ustGrid: 'primitive', checkBounds: 'surface', compareEvidenceOrder: 'surface',
     quorumTrustDomains: 'surface', evidenceClass: 'primitive', parseCadenceInt: 'primitive', authorityCheckpointId: 'primitive',
     authorityScopeId: 'primitive', checkpointMapLeaf: 'primitive', checkpointRecoveryClaim: 'primitive',
     checkpointUniquenessClaim: 'primitive', epochTransitionClaim: 'primitive', evidenceReceiptClaim: 'primitive',
@@ -1733,6 +1751,7 @@ console.log('\n═════════════════════�
   const oHead = () => { const k = P.buildKeylogCommitment(['sha256:' + '22'.repeat(32)]); return { root: k.root, length: k.length, head: k.head }; };   // rev38 R1 (round-31 P2-01) — a REAL keylog head record so verifyKeylogTerminality reaches its proof argument (the old `oStr` domain string short-circuited before the hostile position → vacuous totality coverage there)
   const oStmt = () => ({ claim: {}, sig: { sig: 'a', pub: 'b' } }), oChain = () => [{ body: {}, sig: { sig: 'a', pub: 'b' } }];
   const oEv = () => ({ proof_kind: 'pow-header-chain', facts: { substrate: 'bitcoin', position: '1' } }), oList = () => [{ source_id: 'a' }];   // round-38 P1-02 — reachability fixtures for the exported evidence-algebra surfaces (now admitted, no longer exempt as 'primitive')
+  const oAssur = () => ({ integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored' });   // round-39 P1-02 — a valid-shaped assurance state; the lattice surfaces (le/meet/join/projectTier/capAssurance) now RETURN (⊥/false/'NONE') on a hostile operand rather than throw, so the sweep reaches every position
   const SIG = {
     verify: [oDoc, oOpts], verifyAsync: [oDoc, oOpts], verifyStream: [oFrames, oConf], verifyJson: [oBytes, oOpts],
     verifyAnchor: [oHash, oProof, oOpts], verifyEvidenceReceipt: [oStmt, oConf], verifyActiveGenesisUniqueness: [oProof, oConf],
@@ -1740,6 +1759,7 @@ console.log('\n═════════════════════�
     verifyCheckpointRecovery: [oChain, oConf], verifyCheckpointUniqueness: [oChain, oConf], verifyEpochTransition: [oStmt, oConf],
     verifyKeylogTerminality: [oHead, oProof], verifyNoForkEvidence: [oStmt, oConf], resolveAuthority: [oDoc, oOpts],
     compareEvidenceOrder: [oEv, oEv], quorumTrustDomains: [oList, oConf],   // round-38 P1-02 — the exported evidence algebra is now a consumer surface in the totality sweep (admits its operands)
+    assuranceLE: [oAssur, oAssur], meetAssurance: [oAssur, oAssur], joinAssurance: [oAssur, oAssur], projectTier: [oAssur], capAssurance: [oAssur, oAssur], checkBounds: [oDoc],   // round-39 P1-02 — the assurance lattice + the exported bounds validator are consumer surfaces now that the door returns a sentinel (total-by-return, never a throw)
     resolveByDiscovery: [oDoc, oOpts, netMock], resolveCadence: [oGen, oArr, oStr, oOpts], resolveCheckpointRoots: [oGen],
     resolveKeys: [oGen, oArr], deriveAssurance: [oGraph], deriveCheckpointFreshness: [oChain, oConf], forkChoice: [oFrames, oOpts],
     noEventBacking: [oConf, oConf, oFrames], verifiedGenesisContext: [oGen], checkAuthorityProof: [oConf, oConf],
