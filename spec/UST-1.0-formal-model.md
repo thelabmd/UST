@@ -991,6 +991,27 @@ the same `falsy = absent` conflation that `maxSupportedBytes && …` carried at 
 (`opts`, not only `doc`), and an admission guard must distinguish ABSENT (`undefined`/`null`) from MALFORMED (a falsy or
 wrong-typed value) — a falsy value is not a missing one.
 
+**Realization (rev50 — "inert" means IMMUTABLE: the admitted `opts` snapshot is FROZEN, and the falsy≠absent guard is swept
+to the authority SELECTORS).** rev49 admitted `opts` at every door, but the audit found the admitted snapshot was not
+INERT in the strong sense: `admitOpts` returned a null-proto object whose fields were `writable`, WITHOUT `Object.freeze`
+(its nested data values were already frozen by `admitDeep`, but the top-level wrapper was not). (P1-01, R1/R3) a preserved
+capability function is invoked with that snapshot as `this` (`opts.resolveRef(h)`), so a hostile resolver ran
+`this.acceptConsumerOverride = true` — MUTATING the policy DURING verification — and `verifyCore`'s later read of
+`acceptConsumerOverride` (the `consumer-override → authoritative` projection) then lifted the tier LIGHT→HIGH. The claimed
+"inert frozen `x̂`" was mutable. Fix: `admitOpts` returns `Object.freeze(out)` with read-only fields — the snapshot is now
+IMMUTABLE, matching `admitDeep`; a capability `this`-write is a no-op / strict-mode throw (caught fail-closed), and the
+tier cannot be flipped (*"R41 P1-01 (R1) the admitted opts snapshot handed to a capability as `this` is FROZEN (inert) — a resolveRef cannot mutate policy (acceptConsumerOverride) to flip LIGHT→HIGH"*). This sharpens R1: **"after 𝒜, `x` is DEAD"
+means the admitted value is IMMUTABLE, not merely a copy — a snapshot that can be written during processing is not inert.**
+(P1-02, R1 + I4) the falsy≠absent guard (rev49, `capAssurance`) was NOT swept to the authority SELECTORS: `resolveAuthority`
+and `verifyCore` guarded `genesis` with `if (!genesis)` / `if (opts.genesis)`, and `admitDeep` accepts a primitive scalar,
+so a PRESENT falsy `genesis` (`0`/`''`/`NaN`/`false`) was read as ABSENT → `self-asserted`/`VALID:LIGHT` instead of
+`E-GENESIS`; the same shape hid at `pinnedKeys` (a non-array pin set silently dropped the restriction) and in `verifyStream`
+(`genesis`/`checkpoint`). Fix: an authority selector treats only `undefined`/`null` as absent; a present non-record is
+MALFORMED — `E-GENESIS`/`E-MALFORMED`/`complete:none` (*"R41 P1-02 (R1) resolveAuthority with a PRESENT falsy/scalar/array genesis → E-GENESIS (falsy ≠ absent), never a silent self-asserted"*). The distinction that held: EVIDENCE fields
+(`nameMap`/`noForkEvidence`/`servedNoFork`) fail SAFE (present-invalid → no upgrade, by design), but authority SELECTORS
+must fail CLOSED (present-malformed → reject) — a selector silently degraded to "no authority" is a totality break, not a
+conservative default.
+
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):
 

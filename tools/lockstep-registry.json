@@ -258,6 +258,18 @@
       "rev": "rev49",
       "model_locus": "a falsy value is not a missing one",
       "conformance_check": "R40 P1-02 (R1) every MALFORMED capAssurance ceiling (falsy scalar / non-record / array: false,0,\"\",NaN,[],1,\"x\",true) → ⊥ (projectTier NONE), never a preserved TOP"
+    },
+    {
+      "id": "R50-opts-snapshot-frozen",
+      "rev": "rev50",
+      "model_locus": "means the admitted value is IMMUTABLE, not merely a copy",
+      "conformance_check": "R41 P1-01 (R1) the admitted opts snapshot handed to a capability as `this` is FROZEN (inert) — a resolveRef cannot mutate policy (acceptConsumerOverride) to flip LIGHT→HIGH"
+    },
+    {
+      "id": "R50-selector-fails-closed",
+      "rev": "rev50",
+      "model_locus": "must fail CLOSED",
+      "conformance_check": "R41 P1-02 (R1) resolveAuthority with a PRESENT falsy/scalar/array genesis → E-GENESIS (falsy ≠ absent), never a silent self-asserted"
     }
   ]
 }

@@ -180,9 +180,9 @@ function admitOpts(v) {
       // verifier-MINTED branded token (anchor/served/fresh/handle) → preserved by admitDeep; everything else is frozen inert.
       const val = (typeof d.value === 'function') ? d.value : admitDeep(d.value);
       if (val === ADMIT_REJECT) return null;                                      // a nested non-inert value (accessor at depth, non-plain proto, cycle) → the whole opts record is a structured reject
-      Object.defineProperty(out, k, { value: val, writable: true, enumerable: true, configurable: true });   // defineProperty, never assignment through a legacy setter
+      Object.defineProperty(out, k, { value: val, writable: false, enumerable: true, configurable: false });   // read-only own data (round-41 P1-01 — the admitted snapshot is INERT: a preserved capability function is invoked with this record as `this`, so a writable field let a hostile resolveRef mutate `this.acceptConsumerOverride=true` and flip LIGHT→HIGH)
     }
-    return out;
+    return Object.freeze(out);   // round-41 P1-01 (R1) — the top-level opts snapshot is FROZEN, matching admitDeep's frozen nested values: "after 𝒜, x is DEAD" means IMMUTABLE, not merely copied — nothing can mutate x̂ during verification (a capability `this`-write is now a no-op / strict-mode throw, caught fail-closed)
   } catch { return null; }
 }
 // round-26 (rev24 Class C+D) — the ONE untrusted-input boundary. `admitDeep` takes a DEEP inert snapshot of a caller
@@ -645,10 +645,10 @@ function verifyCore(doc, opts = {}) {
     // proven upper bound and must never become the coordinate (it made a retired-key doc VALID:HIGH with a forged/absent
     // string while the honest late U rejected it). No proof ⇒ U is undefined ⇒ a closed key lifecycle fails closed.
     let identity;
-    if (opts.genesis) identity = resolveAuthority(doc, { ...opts, anchorTime: provenAnchorTime !== undefined ? provenAnchor(provenAnchorTime) : undefined });   // round-17 P0-02 — mint a proven-anchor TOKEN; a raw opts.anchorTime is dropped and can never reach K_n(t)
-    else if (opts.pinnedKeys) identity = opts.pinnedKeys.includes(st.id.key_id)
-      ? { strength: 'pinned', status: 'verified' }
-      : { error: 'E-KEY', detail: 'key_id not in the pinned set (§3.1 TOFU)' };
+    if (opts.genesis != null) identity = resolveAuthority(doc, { ...opts, anchorTime: provenAnchorTime !== undefined ? provenAnchor(provenAnchorTime) : undefined });   // round-41 P1-02 — a PRESENT genesis (incl. a falsy one) resolves authority; a malformed genesis returns E-GENESIS (propagated below), never a silent self-asserted (round-17 P0-02 — mint a proven-anchor TOKEN; a raw opts.anchorTime is dropped and can never reach K_n(t))
+    else if (opts.pinnedKeys != null) identity = Array.isArray(opts.pinnedKeys)
+      ? (opts.pinnedKeys.includes(st.id.key_id) ? { strength: 'pinned', status: 'verified' } : { error: 'E-KEY', detail: 'key_id not in the pinned set (§3.1 TOFU)' })
+      : { error: 'E-MALFORMED', detail: 'pinnedKeys must be an array of key_ids (round-41 P1-02 — a present non-array pin set is MALFORMED, not absent; a silently dropped pin restriction would accept any key as self-asserted)' };
     else identity = { strength: 'self-asserted', status: 'verified' };
     if (identity.error) return bad(identity.error, identity.detail);              // forked genesis / broken key-log / not pinned
     if (opts.requireAuthoritative && !(identity.strength === 'authoritative' && identity.status === 'verified'))
@@ -1220,10 +1220,10 @@ export function resolveAuthority(doc, opts = {}) {
   // then RE-READS the raw nested genesis for contentHash + max_partitions — a two-face Proxy served the signed face to
   // resolveKeys and an unsigned face carrying elevated capacity to the outer reads. Every nested untrusted DATA object a
   // resolver verifies must be DEEP-admitted ONCE and read only from the frozen snapshot (R3 across the WHOLE input graph).
-  if (genesis != null) { const G = admitDeep(genesis); if (G === ADMIT_REJECT) return { error: 'E-GENESIS', detail: 'genesis is not an inert record (round-31 R3 — a nested untrusted object is admitted once and read only from the snapshot)' }; genesis = G; }
+  if (genesis != null) { const G = admitDeep(genesis); if (G === ADMIT_REJECT || typeof G !== 'object' || Array.isArray(G)) return { error: 'E-GENESIS', detail: 'genesis must be an inert record (round-41 P1-02 — a PRESENT falsy/scalar/array genesis is MALFORMED, not absent; round-31 R3 — admitted once, read only from the snapshot)' }; genesis = G; }
   // round-17 P0-02 — U comes ONLY from a proven-anchor token (verify/verifyAsync mint it); a raw string never reaches K_n(t).
   const U = (anchorTime && typeof anchorTime === 'object' && VERIFIED_ANCHOR.has(anchorTime) && isRealRfc3339Z(anchorTime.anchorTime)) ? anchorTime.anchorTime : undefined;
-  if (!genesis) return { strength: 'self-asserted', status: 'verified' };         // LIGHT — nothing to resolve
+  if (genesis == null) return { strength: 'self-asserted', status: 'verified' };   // LIGHT — nothing to resolve (ONLY a genuinely ABSENT genesis; a present malformed genesis already returned E-GENESIS above — round-41 P1-02, falsy ≠ absent)
   if (genesis.state?.id?.domain_shard !== doc.state.id.domain_shard) return { error: 'E-GENESIS', detail: 'genesis domain mismatch' };
   const rk = resolveKeys(genesis, keylog);
   if (rk.error) return { error: rk.error, detail: rk.detail };
@@ -2284,8 +2284,8 @@ export function verifyStream(frames, config) {
   // rev38 R3 (round-31 P0-02) — admitOpts is SHALLOW: the NESTED `genesis` and `checkpoint` in config stay live caller objects.
   // verifyStream calls verify(checkpoint) but then re-reads the raw checkpoint's class/head/count (and reads raw genesis for
   // prevHash) — a two-face Proxy served the signed face to verify and an unsigned face to the reads. Admit both nested docs once.
-  if (genesis != null) { const G = admitDeep(genesis); if (G === ADMIT_REJECT) return { complete: 'none', detail: 'genesis is not an inert record (round-31 R3 — nested config docs are admitted once)' }; genesis = G; }
-  if (checkpoint != null) { const C = admitDeep(checkpoint); if (C === ADMIT_REJECT) return { complete: 'none', detail: 'checkpoint is not an inert record (round-31 R3 — nested config docs are admitted once)' }; checkpoint = C; }
+  if (genesis != null) { const G = admitDeep(genesis); if (G === ADMIT_REJECT || typeof G !== 'object' || Array.isArray(G)) return { complete: 'none', detail: 'genesis must be an inert record (round-41 P1-02 — a PRESENT falsy/scalar/array genesis is MALFORMED, not absent; round-31 R3 — nested config docs are admitted once)' }; genesis = G; }
+  if (checkpoint != null) { const C = admitDeep(checkpoint); if (C === ADMIT_REJECT || typeof C !== 'object' || Array.isArray(C)) return { complete: 'none', detail: 'checkpoint must be an inert record (round-41 P1-02 — a PRESENT falsy/scalar/array checkpoint is MALFORMED, not absent; round-31 R3 — nested config docs are admitted once)' }; checkpoint = C; }
   if (!Array.isArray(frames) || !frames.length) return { complete: 'none' };
   const authority = frames[0]?.state?.id?.domain_shard;                // §11.3: a stream belongs to ONE authority
   if (typeof authority !== 'string') return { complete: 'none', detail: 'malformed first frame — no stream authority (round-24 self-audit totality)' };   // round-24 (self-audit) — a malformed frame is a structured result, never a host throw
