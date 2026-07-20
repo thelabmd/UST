@@ -974,6 +974,23 @@ The lattice is now a total function into `AssuranceState ∪ {⊥}`, and R1/R4 a
 — a coded throw at a consumer boundary was the residual the recurring lattice findings (rev37, rev38, rev39) were tracing
 toward.
 
+**Realization (rev49 — the SYNC verify door admits `opts` (the last un-admitted public opts input), and `capAssurance`
+distinguishes ABSENT from MALFORMED — falsy ≠ absent).** rev48 made the lattice total, but the audit found two R1 admission
+gaps one level out. (P1-01, R1) the synchronous `verify(doc, opts)` admitted `doc` but forwarded the LIVE `opts` object to
+`verifyCore` — every OTHER public entry (`verifyAsync`, `verifyJson`, `resolveAuthority`, `forkChoice`, `resolveCadence`,
+`resolveByDiscovery`) already routed `opts` through `admitOpts`, but the most-used door did not. `verifyCore` reads
+`opts.maxSupportedBytes` more than once (compute the budget, then decide to enforce it), so a two-face `opts` Proxy showed a
+1-byte capability to the budget and `undefined` to the guard — a verifier-owned resource refusal became `VALID`. Fix:
+`verify` admits `opts` at the door with `admitOpts` (functions/capabilities preserved, scalars frozen ONCE) and passes only
+the inert snapshot to `verifyCore`, so every `opts` read is consistent — the two-face Proxy's `maxSupportedBytes` trap now
+fires zero times (*"R40 P1-01 (R1) sync verify admits opts ONCE — verifyCore never re-reads the live opts Proxy (a two-face maxSupportedBytes trap fires 0×)"*). (P1-02, R1 + F.5.0 gap 2) `capAssurance` guarded the ceiling with `if (!ceiling)
+return s` — so a FALSY ceiling (`0`/`''`/`NaN`/`false`) was read as ABSENT and returned the full proven state, and a truthy
+NON-record (`1`/`'x'`/`[]`) defaulted every axis to its MAX, both PRESERVING `TOP` where the rule requires ⊥. The footgun is
+the same `falsy = absent` conflation that `maxSupportedBytes && …` carried at rev48. Fix: only `undefined`/`null` are absent
+(identity); a rejected admission, a non-record (scalar/array), or an out-of-range axis caps to ⊥ (*"R40 P1-02 (R1) every MALFORMED capAssurance ceiling (falsy scalar / non-record / array: false,0,\"\",NaN,[],1,\"x\",true) → ⊥ (projectTier NONE), never a preserved TOP"*). Both findings are the SAME rule R1 realized incompletely: admission must happen at EVERY door
+(`opts`, not only `doc`), and an admission guard must distinguish ABSENT (`undefined`/`null`) from MALFORMED (a falsy or
+wrong-typed value) — a falsy value is not a missing one.
+
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):
 

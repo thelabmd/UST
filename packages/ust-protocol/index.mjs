@@ -455,7 +455,9 @@ function boundsOf(doc) {
 export function verify(doc, opts = {}) {
   const D = admitDeep(doc);
   if (D === ADMIT_REJECT) return bad('E-MALFORMED', 'document is not an inert record — an accessor/getter cannot sign one payload and disclose another (round-27: the ONE input boundary)');
-  const verdict = verifyCore(D, opts);
+  const O = admitOpts(opts);   // round-40 P1-01 (R1) — the SYNC verify door admits opts too (every OTHER public entry already does): verifyCore reads opts.maxSupportedBytes (and other scalars) more than once, so a two-face opts Proxy could show a 1-byte capability to the budget and `undefined` to the guard → a resource refusal turned into VALID. One admission → one inert snapshot → every opts read is consistent (functions preserved).
+  if (O === null) return bad('E-MALFORMED', 'opts must be an inert record (round-40 P1-01 — a two-face opts Proxy cannot show one maxSupportedBytes to the budget and another to the enforcement guard)');
+  const verdict = verifyCore(D, O);
   // rev32 R3 (non-bypass output) — EMIT id(x̂): the content hash of the ADMITTED snapshot the verdict is about. A consumer
   // addresses the transcript by THIS returned id (a projection of the admitted artifact), never by re-hashing the raw input
   // `doc` — so a live/mutable/Proxy object that shows one face to `verify` and another to a later `contentHash(doc)` cannot
@@ -2161,9 +2163,9 @@ export const TIER_RANK = { NONE: -1, LIGHT: 0, HIGH: 1, TOP: 2 };
 export function capAssurance(state, ceiling) {
   const s = assuranceState(state);
   if (s === ASSURANCE_REJECT) return { ...ASSURANCE_BOTTOM };                  // round-39 P1-02 — TOTAL: an un-admittable proven state caps to ⊥
-  if (!ceiling) return s;
+  if (ceiling === undefined || ceiling === null) return s;                     // round-40 P1-02 — ONLY a genuinely ABSENT ceiling is identity; a falsy `0`/`''`/`NaN`/`false` is MALFORMED, not absent (the `if (!ceiling)` footgun conflated them → preserved TOP)
   const C = admitDeep(ceiling);                                               // round-39 P1-02 (R1) — ADMIT the consumer ceiling ONCE (it is UNTRUSTED consumer config C, not a post-verification value): a hostile getter is a RETURNED ⊥ cap, never a host throw
-  if (C === ADMIT_REJECT) return { ...ASSURANCE_BOTTOM };
+  if (C === ADMIT_REJECT || typeof C !== 'object' || Array.isArray(C)) return { ...ASSURANCE_BOTTOM };   // round-40 P1-02 — a NON-RECORD ceiling (a scalar/array like 1/'x'/[]) is malformed → ⊥; the old code filled every missing axis to the axis MAX, so a non-record preserved TOP instead of capping to ⊥ (downgrade-resistance F.5 gap 2)
   const cap = assuranceState(Object.fromEntries(AXES.map((ax) => [ax, C[ax] ?? ASSURANCE_AXES[ax][ASSURANCE_AXES[ax].length - 1]])));
   if (cap === ASSURANCE_REJECT) return { ...ASSURANCE_BOTTOM };               // an out-of-range ceiling axis caps to ⊥ (never LIFTS the reported state)
   return meetAssurance(s, cap);

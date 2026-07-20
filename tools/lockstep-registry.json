@@ -246,6 +246,18 @@
       "rev": "rev48",
       "model_locus": "never coalesces to a default",
       "conformance_check": "R39 P1-01 (R4) refBudget:Infinity → E-MALFORMED (a refused budget FAILS CLOSED, never coalesces to the 256-node default)"
+    },
+    {
+      "id": "R49-sync-verify-admits-opts",
+      "rev": "rev49",
+      "model_locus": "admission must happen at EVERY door",
+      "conformance_check": "R40 P1-01 (R1) sync verify admits opts ONCE — verifyCore never re-reads the live opts Proxy (a two-face maxSupportedBytes trap fires 0×)"
+    },
+    {
+      "id": "R49-absent-not-malformed",
+      "rev": "rev49",
+      "model_locus": "a falsy value is not a missing one",
+      "conformance_check": "R40 P1-02 (R1) every MALFORMED capAssurance ceiling (falsy scalar / non-record / array: false,0,\"\",NaN,[],1,\"x\",true) → ⊥ (projectTier NONE), never a preserved TOP"
     }
   ]
 }

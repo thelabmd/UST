@@ -1393,6 +1393,19 @@ console.log('\n═════════════════════�
     check('R39 P1-02 (R1) checkBounds on a HOSTILE doc → RETURNS a bounds refusal string, never a host throw', typeof (() => { try { return P.checkBounds(H()); } catch { return null; } })() === 'string');
     check('R39 P1-02 (R1) axisRank on a non-axis key → -1 (total), never a `undefined.indexOf` throw', (() => { try { return P.axisRank('NOT_AN_AXIS', 'x') === -1; } catch { return false; } })());
     check('R38 P1-03 (R4) verifyJson maxInputBytes below the ceiling still applies (a valid tighten is honored)', P.verifyJson('{"a":1}', { maxInputBytes: 3 }).reason === 'resource_limit'); }
+  // round-40 P1-01/02 — the SYNC verify door admits opts (a two-face opts Proxy cannot show one maxSupportedBytes to the
+  // budget and another to the enforcement guard — R1, the last un-admitted public opts door), and capAssurance treats ONLY
+  // undefined/null as absent (a falsy or non-record ceiling is MALFORMED → ⊥, never a preserved TOP — R1 + F.5 gap-2).
+  { const kR40 = kp('40'.repeat(32));
+    const docR40 = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260720.14', key_id: kR40.key_id, class: 'observation' }, { generated_at: '2026-07-20T01:00:00Z', valid_from: '2026-07-20T01:00:00Z', valid_to: '2026-08-20T01:00:00Z' }, { r: { kind: 'captured', value: { v: 'A' } } }), kR40.priv, kR40.pubB64);
+    let reads = 0;
+    const twoFaceOpts = new Proxy({ context: 'data' }, { get(t, k, r) { if (k === 'maxSupportedBytes') { reads++; return reads === 1 ? 1 : undefined; } return Reflect.get(t, k, r); } });
+    const ex = P.verify(docR40, twoFaceOpts);
+    check('R40 P1-01 (R1) sync verify admits opts ONCE — verifyCore never re-reads the live opts Proxy (a two-face maxSupportedBytes trap fires 0×)', reads === 0 && typeof ex.result === 'string');
+    check('R40 P1-01 (R1) the two-face opts verdict is DETERMINISTIC (no compute-limit-then-skip; same input → same verdict)', P.verify(docR40, twoFaceOpts).result === ex.result);
+    const top = { integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored' };
+    check('R40 P1-02 (R1) every MALFORMED capAssurance ceiling (falsy scalar / non-record / array: false,0,"",NaN,[],1,"x",true) → ⊥ (projectTier NONE), never a preserved TOP', [false, 0, '', Number.NaN, [], 1, 'x', true].every((c) => P.projectTier(P.capAssurance(top, c)) === 'NONE'));
+    check('R40 P1-02 only a genuinely ABSENT ceiling (undefined/null) is identity; a partial record caps per axis', P.projectTier(P.capAssurance(top, undefined)) === 'TOP' && P.projectTier(P.capAssurance(top, null)) === 'TOP' && P.projectTier(P.capAssurance(top, { identity: 'self-asserted' })) === 'LIGHT'); }
   check('RECOVERY signer NOT in the genesis recovery set → not counted', VR([stmt(rf(KR), R1), stmt(rf(KR), RX)]).recovered === false);
   check('RECOVERY threshold-complete malformed replacement (BOTH signers agree on key_id ≠ keyId(pub)) → NOT recovered (admitAuthorityKey binds the pair; round-36 P1-01/P2-01 — the vacuous single-malformed vector could not see it)', (() => { const bad = { ...P.checkpointRecoveryClaim(rf(KR)), replacement_authority: { key_id: K1.key_id, pub: KR.pubB64 } }; const st = (W) => { const sg = sign(null, Buffer.from(P.canon(bad), 'utf8'), W.priv).toString('base64url'); return { claim: bad, issuer_id: W.key_id, sig: { alg: 'Ed25519', key_id: W.key_id, pub: W.pubB64, sig: sg } }; }; return VR([st(R1), st(R2)]).recovered === false; })());
   check('RECOVERY effective_sequence ≠ last+1 → not recovered (only the next checkpoint)', VR([stmt(rf(KR, '2'), R1), stmt(rf(KR, '2'), R2)]).recovered === false);
