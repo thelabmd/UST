@@ -198,6 +198,18 @@
       "rev": "rev43",
       "model_locus": "asserts the choke-point rejects EVERY sig-wrapper tampering class",
       "conformance_check": "R35 admitSigner gate: every sig-wrapper tampering on a genuine attestation → NOT attested; only the genuine wrapper passes"
+    },
+    {
+      "id": "R45-authority-key-pair",
+      "rev": "rev45",
+      "model_locus": "the nested authority KEY-PAIR admission at ONE primitive",
+      "conformance_check": "R36 P1-01 admitAuthorityKey rejects a contradictory { key_id of A, pub of B } pair (via transition destination) — usable only if key_id === keyId(pub)"
+    },
+    {
+      "id": "R45-canonical-leaf",
+      "rev": "rev45",
+      "model_locus": "canonical wire at the crypto LEAF",
+      "conformance_check": "R36 P1-02 edVerifyStrict REJECTS a non-canonical Sig64 alias (same 64 bytes, different wire) — canonical enforced at the crypto leaf"
     }
   ]
 }

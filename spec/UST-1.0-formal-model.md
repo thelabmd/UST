@@ -893,6 +893,25 @@ recovery tuple is `(domain, genesis_epoch, last_accepted, effective_sequence, re
 is not part of the signed authority claim. Meta: across rounds the audit P0 count ran 1→2→4→3; the fix that finally
 converges is a single choke-point + a gate, not another hand-mirror.
 
+**Realization (rev45 — the nested authority KEY-PAIR admission at ONE primitive, and canonical wire at the crypto LEAF —
+the first 0-P0 round).** rev43 closed the SIGNER wrapper at `admitSigner`, but the audit found the SAME shape one level
+down: a `{ key_id, pub }` authority PAIR was typed as two INDEPENDENT strings (`key_id` a hash, `pub` a Pub32) with no
+identity RELATION, so when both recovery signers agreed on a CONTRADICTORY pair (`key_id` of A, `pub` of B) the quorum
+carried it and `verifyCheckpointRecovery` returned a usable-looking authority with `key_id ≠ keyId(pub)` (P1, not P0:
+the built-in chain verifier then fails closed because no key can sign against the contradictory pair without a hash
+collision). Fix, the same shape as admitSigner: **`admitAuthorityKey({ key_id, pub })`** succeeds iff it is an EXACT pair,
+`pub` is canonical Pub32, and `key_id === keyId(pub)`; EVERY authority pair — recovery replacement, transition
+destination, genesis authority, pinned prior, checkpoint rotation, and each genesis recovery key — routes through it
+(*"R36 P1-01 admitAuthorityKey rejects a contradictory { key_id of A, pub of B } pair (via transition destination) — usable only if key_id === keyId(pub)"*). Separately, `edVerifyStrict` was MISNAMED: it delegated the sig bytes to Node's
+permissive base64url decoder, so the provenance `src_sig` path (outside the authority-witness class) authenticated a
+non-canonical alias that a strict implementation rejects — a raw-wire agreement split. Fix at the crypto LEAF, not the
+call site: `edVerifyStrict` now requires canonical Pub32/Sig64 before verifying, so a non-canonical alias never verifies
+and EVERY caller (present or future) is canonical-safe with no per-site guard (*"R36 P1-02 edVerifyStrict REJECTS a non-canonical Sig64 alias (same 64 bytes, different wire) — canonical enforced at the crypto leaf"*). The vacuous P2 regression
+vector (one malformed + one genuine statement → quorum-not-met for the WRONG reason) was replaced by a threshold-complete
+malformed quorum that exercises the actual property. Round-36 was the FIRST **0-P0** round (P0 count 1→2→4→3→0): the
+class converges when each recurring shape is closed at a single primitive (`admitSigner`, `admitAuthorityKey`) or the
+leaf, with a machine-check gate, rather than hand-mirrored per site.
+
 **Definition (VerifiedAuthorityContext).** For a genesis document `g` whose class and self-signature VERIFY
 (`resolveCheckpointRoots` — P0-2: verify-before-extract):
 
@@ -1259,7 +1278,7 @@ matched signer, normal or recovered, becomes the authority in force for the next
 **Conformance (math ⇒ code ⇒ green vector, `packages/ust-protocol/conformance.mjs`).**
 - threshold re-authorization: *"RECOVERY 2-of-3 (lost key K1) authorizes replacement KR → chain VALID"*, *"RECOVERY 1-of-3 (below threshold) → chain INVALID(E-AUTHORITY)"*, *"RECOVERY valid 2-of-3 → replacement_authority + threshold + 2 signers"*.
 - distinct signers / agreement on one replacement: *"RECOVERY same signer twice → counts once → quorum not met"*, *"RECOVERY conflicting replacements (non-identical claims) → no quorum (must agree on ONE)"*, *"RECOVERY signer NOT in the genesis recovery set → not counted"*.
-- well-formed + bound: *"RECOVERY replacement key_id ≠ keyId(pub) → not recovered"*, *"RECOVERY effective_sequence ≠ last+1 → not recovered (only the next checkpoint)"*, *"RECOVERY stale last_accepted_checkpoint → not recovered (bound to the prior)"*.
+- well-formed + bound: *"RECOVERY threshold-complete malformed replacement (BOTH signers agree on key_id ≠ keyId(pub)) → NOT recovered (admitAuthorityKey binds the pair; round-36 P1-01/P2-01 — the vacuous single-malformed vector could not see it)"*, *"RECOVERY effective_sequence ≠ last+1 → not recovered (only the next checkpoint)"*, *"RECOVERY stale last_accepted_checkpoint → not recovered (bound to the prior)"*.
 - non-bypass: *"RECOVERY does NOT bypass checkpoint validation (recovered signer, but malformed rotation → E-MALFORMED)"*.
 
 All green at REV 45 (conformance 293/0).

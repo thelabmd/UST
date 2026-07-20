@@ -86,6 +86,7 @@ function aeadDecrypt(enc, keyRawB64url) {
 // ─── crypto helpers (strict Ed25519 via node:crypto/OpenSSL) ─────────────────────────────────────────
 const pubKeyObj = (b64url) => createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(b64url, 'base64url')]), format: 'der', type: 'spki' });
 export function edVerifyStrict(pubB64url, msgUtf8, sigB64url) {
+  if (strictB64url(pubB64url, 32) === null || strictB64url(sigB64url, 64) === null) return false;   // round-36 P1-02 — canonical Pub32/Sig64 wire encoding IS part of "strict": Node's base64url decoder is permissive (a trailing-bit alias maps to the same bytes), so a non-canonical pub/sig would verify identically and split cross-language. Enforcing it at the crypto LEAF makes EVERY caller (incl. the provenance src_sig path) canonical-safe with no per-site guard.
   try { return edVerify(null, Buffer.from(msgUtf8, 'utf8'), pubKeyObj(pubB64url), Buffer.from(sigB64url, 'base64url')); }
   catch { return false; }
 }
@@ -312,11 +313,11 @@ export function resolveCheckpointRoots(genesis) {
   const gv = G?.state?.data?.genesis?.value; if (!gv) return null;
   const out = {};
   const ca = gv.checkpoint_authority;
-  if (ca && ca.key_id && ca.pub && strictPub(ca.pub) && keyId(ca.pub) === ca.key_id) out.genesisAuthority = { key_id: ca.key_id, pub: ca.pub };   // round-34 P0-01 — strict Pub32 before keyId (a non-canonical alias must not root the authority)
+  if (admitAuthorityKey(ca)) out.genesisAuthority = { key_id: ca.key_id, pub: ca.pub };   // round-36 — the ONE authority-key admission (exact { key_id, pub }, strict Pub32, key_id === keyId(pub))
   const rec = gv.recovery;
   if (rec && rec.keys && typeof rec.keys === 'object') {
     const keys = {}; let ok = true;
-    for (const [kid, pub] of Object.entries(rec.keys)) { if (typeof pub !== 'string' || !strictPub(pub) || keyId(pub) !== kid) ok = false; else keys[kid] = pub; }
+    for (const [kid, pub] of Object.entries(rec.keys)) { if (!admitAuthorityKey({ key_id: kid, pub })) ok = false; else keys[kid] = pub; }   // round-36 — each genesis recovery key is a usable { key_id === keyId(pub) } pair via the ONE primitive
     if (ok && Object.keys(keys).length) { const t = canonUint(rec.threshold); if (t !== undefined && t >= 1) { out.recoveryKeys = keys; out.recoveryThreshold = t; } }   // round-24 P0-02 — canonical decimal threshold ≥1 only; a coercible non-string (`["1"]`) no longer lowers the takeover threshold
   }
   return out;
@@ -1041,12 +1042,19 @@ const AUTH_SIG_SCHEMA = { alg: { t: (x) => x === 'Ed25519' }, key_id: { t: _evHa
 // redundant identity fields bound to ONE value (expectedKeyId === sig.key_id === keyId(pub)) + canonical Pub32/Sig64.
 // A foreign sig.key_id, an alg:RSA, an extra wrapper field, or a non-canonical pub/sig admits NOTHING. Returns the pub.
 const admitSigner = (sig, expectedKeyId) => (decodeExact(sig, AUTH_SIG_SCHEMA) && typeof expectedKeyId === 'string' && expectedKeyId === sig.key_id && keyId(sig.pub) === sig.key_id) ? sig.pub : null;
+// round-36 P1-01 — the ONE nested-authority-key admission: a { key_id, pub } authority record is usable ONLY if it is an
+// EXACT pair, `pub` is canonical Pub32, and the identity RELATION `key_id === keyId(pub)` holds. Typing the two fields
+// INDEPENDENTLY (rev44) admitted an internally-contradictory pair (key_id of A, pub of B) as a recovered authority.
+// Every { key_id, pub } authority pair — recovery replacement, transition destination, checkpoint rotation, genesis
+// authority, pinned prior — routes through this so a contradictory pair mints nothing.
+const AUTH_KEY_SCHEMA = { key_id: { t: _evHash }, pub: { t: strictPub } };
+const admitAuthorityKey = (a) => decodeExact(a, AUTH_KEY_SCHEMA) && keyId(a.pub) === a.key_id;
 const KEYLOG_COMMIT_SCHEMA = { root: { t: _evHash }, length: { t: _evSeq }, head: { t: _evHash } };
 const CHK_AUTHORITY_SCHEMA = { current_key_id: { t: _evHash }, next_key_id: { t: _evHash, opt: true }, next_pub: { t: strictPub, opt: true }, effective_sequence: { t: _evSeq, opt: true } };
 const CHECKPOINT_BODY_SCHEMA = { version: { t: (x) => x === '1' }, purpose: { t: (x) => x === 'ust:authority-checkpoint' }, domain_shard: { t: _evId }, genesis_epoch: { t: _evHash }, sequence: { t: _evSeq }, active_genesis: { t: _evHash }, checkpoint_authority: { t: _evRec(CHK_AUTHORITY_SCHEMA) }, keylog: { t: _evRec(KEYLOG_COMMIT_SCHEMA) }, previous_checkpoint: { t: _evHash, opt: true }, previous_epoch_final_checkpoint: { t: _evHash, opt: true } };
-const TRANSITION_CLAIM_SCHEMA = { purpose: { t: (x) => x === 'ust:genesis-epoch-transition' }, domain_shard: { t: _evId }, from_genesis_epoch: { t: _evHash }, from_final_checkpoint: { t: _evHash }, from_sequence: { t: _evSeq }, to_active_genesis: { t: _evHash }, to_initial_sequence: { t: _evSeq }, to_genesis_epoch: { t: _evHash }, to_checkpoint_authority: { t: _evRec({ key_id: { t: _evHash }, pub: { t: strictPub } }) } };
+const TRANSITION_CLAIM_SCHEMA = { purpose: { t: (x) => x === 'ust:genesis-epoch-transition' }, domain_shard: { t: _evId }, from_genesis_epoch: { t: _evHash }, from_final_checkpoint: { t: _evHash }, from_sequence: { t: _evSeq }, to_active_genesis: { t: _evHash }, to_initial_sequence: { t: _evSeq }, to_genesis_epoch: { t: _evHash }, to_checkpoint_authority: { t: admitAuthorityKey } };   // round-36 P1-01 — the destination authority is a usable { key_id === keyId(pub) } pair, not two independent strings
 const VOTE_CLAIM_SCHEMA = { purpose: { t: (x) => x === 'ust:checkpoint-uniqueness-attestation' }, domain_shard: { t: _evId }, genesis_epoch: { t: _evHash }, sequence: { t: _evSeq }, checkpoint: { t: _evHash } };
-const RECOVERY_CLAIM_SCHEMA = { purpose: { t: (x) => x === 'ust:checkpoint-authority-recovery' }, domain_shard: { t: _evId }, genesis_epoch: { t: _evHash }, last_accepted_checkpoint: { t: _evHash }, effective_sequence: { t: _evSeq }, replacement_authority: { t: _evRec({ key_id: { t: _evHash }, pub: { t: strictPub } }) } };   // round-35 P1-01 — the NORMATIVE recovery tuple (domain, epoch, last_accepted, effective_sequence, replacement_authority); a human annotation is NOT part of the signed authority claim
+const RECOVERY_CLAIM_SCHEMA = { purpose: { t: (x) => x === 'ust:checkpoint-authority-recovery' }, domain_shard: { t: _evId }, genesis_epoch: { t: _evHash }, last_accepted_checkpoint: { t: _evHash }, effective_sequence: { t: _evSeq }, replacement_authority: { t: admitAuthorityKey } };   // round-36 P1-01 — the replacement authority is a usable { key_id === keyId(pub) } pair, not two independent strings; round-35 tuple (no human `reason`)
 const NOFORK_CLAIM_SCHEMA = { purpose: { t: (x) => x === 'ust:name-no-fork' }, domain_shard: { t: _evId }, active_genesis: { t: _evHash }, map_checkpoint: { t: _evHash, opt: true }, map_sequence: { t: _evSeq, opt: true } };   // round-35 — no self-declared time (valid_as_of removed): a signer-declared instant is not part of the signed authority claim
 // closed-witness decoders — exact envelope + the ONE admitSigner signer-admission + exact+typed body/claim. Every witness
 // that carries its own issuer_id binds the signer HERE (round-35 P0-01/02/03); checkpoint/transition bind against the
@@ -1645,7 +1653,7 @@ export function verifyEpochTransition(statement, config) {
   // to_active_genesis, and to_genesis_epoch MUST be canonical to it (the M2 hygiene, uniform).
   if (!isHashStr(claim.to_active_genesis) || claim.to_genesis_epoch !== genesisEpoch(claim.to_active_genesis)) return { ok: false, detail: 'transition does not bind a verified destination genesis (to_active_genesis missing or to_genesis_epoch non-canonical, M4.4)' };
   const ta = claim.to_checkpoint_authority;
-  if (!ta || !ta.key_id || !ta.pub || keyId(ta.pub) !== ta.key_id) return { ok: false, detail: 'to_checkpoint_authority malformed' };
+  if (!admitAuthorityKey(ta)) return { ok: false, detail: 'to_checkpoint_authority not a usable { key_id === keyId(pub) } pair (round-36 admitAuthorityKey; also bound by the closed transition claim schema)' };
   const tpub = admitSigner(sig, fromAuthority.key_id);   // round-35 — key_id === fromAuthority.key_id === keyId(pub), exact Ed25519 wrapper
   if (tpub === null || tpub !== fromAuthority.pub) return { ok: false, detail: 'transition not signed by epoch A checkpoint authority (round-35 admitSigner)' };
   if (!edVerifyStrict(tpub, canon(claim), sig.sig)) return { ok: false, detail: 'Ed25519 verify failed' };
@@ -1701,7 +1709,7 @@ export function verifyAuthorityCheckpointChain(chain, config) {
     const pp = pinnedPrior, a = pp?.authority_for_next;
     const full = isHandle('chain', pp) || (pp && typeof pp === 'object'
       && isHashStr(pp.scope_id) && isHashStr(pp.checkpoint_id) && isSeq(pp.sequence)
-      && a && typeof a.key_id === 'string' && typeof a.pub === 'string' && strictPub(a.pub) && keyId(a.pub) === a.key_id   // round-34 P0-01 sweep — strict Pub32 on a raw pinnedPrior authority pub
+      && admitAuthorityKey(a)   // round-36 — the ONE authority-key admission on a raw pinnedPrior authority (exact { key_id, pub }, strict Pub32, key_id === keyId(pub))
       && isSeq(pp.keylog_size) && isHashStr(pp.keylog_root) && isHashStr(pp.keylog_head));
     if (!full) return { result: 'INVALID', error: 'E-AUTHORITY', detail: 'pinnedPrior must be a branded CheckpointChainHandle or a full PinnedCheckpointState {scope_id, checkpoint_id, sequence, authority_for_next, keylog_size, keylog_root, keylog_head} — a scope-free pin is rejected (round-3 P0-2)' };
     prev = { id: pp.checkpoint_id, authority: a, sequence: pp.sequence, pinScope: pp.scope_id,
@@ -1804,7 +1812,7 @@ export function verifyAuthorityCheckpointChain(chain, config) {
     const rot = [ca.next_key_id, ca.next_pub, ca.effective_sequence].filter((x) => x !== undefined).length;
     if (rot !== 0 && rot !== 3) return { result: 'INVALID', error: 'E-MALFORMED', detail: 'checkpoint_authority rotation fields must be all-present or all-absent' };
     if (rot === 3) {
-      if (keyId(ca.next_pub) !== ca.next_key_id) return { result: 'INVALID', error: 'E-KEY', detail: 'keyId(next_pub) ≠ next_key_id' };
+      if (!admitAuthorityKey({ key_id: ca.next_key_id, pub: ca.next_pub })) return { result: 'INVALID', error: 'E-KEY', detail: 'rotation next authority not a usable { key_id === keyId(pub) } pair' };   // round-36 — the ONE authority-key admission
       if (ca.effective_sequence !== String(BigInt(b.sequence) + 1n)) return { result: 'INVALID', error: 'E-SEQ', detail: 'effective_sequence ≠ sequence+1' };
     }
     prev = { id: authorityCheckpointId(cp), authority: matched, sequence: b.sequence, body: b };
