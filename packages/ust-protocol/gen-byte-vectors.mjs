@@ -249,6 +249,12 @@ const txWDead = { claim: txDead, sig: { alg: 'Ed25519', key_id: G.key_id, pub: G
 const klB12 = P.buildKeylogCommitment(['sha256:' + 'bc'.repeat(32)]);
 const c0B12 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: 'good.example', genesis_epoch: EPB12, sequence: '0', previous_epoch_final_checkpoint: head, active_genesis: AGB12, current_key_id: WB12.key_id, keylog: { root: klB12.root, length: klB12.length, head: klB12.head } }), WB12.priv, WB12.pub);
 add('transition.dead-authority', 'a transition signing destination authority WX while Genesis B is WB (round-12 P0-03)', b64u(canonPkg(N('ActivateGenesis', [N('FutureGenesisCommitment', [πChain], [put(txWDead)]), N('Genesis', [], [put(genB12)])], [put(c0B12)]))), {}, { result: 'INVALID', code: 'transition-committed destination authority' });
+// positive epoch transition — the VALID counterpart to transition.dead-authority (the ONLY difference is the committed
+// destination authority MATCHES Genesis B, WB12). round-48 P1-02: the corpus held only INVALID transition vectors, so the BMC
+// child-algebra had no EpochActivated/FutureCommitted witness → ActivateGenesis[1] was a declared residual. This populates both.
+const txLive = { ...txDead, to_checkpoint_authority: { key_id: WB12.key_id, pub: WB12.pub } };
+const txWLive = { claim: txLive, sig: { alg: 'Ed25519', key_id: G.key_id, pub: G.pub, sig: edSign(null, Buffer.from(P.canon(txLive), 'utf8'), G.priv).toString('base64url') } };
+add('accept.epoch-transition', 'a genuine genesis-epoch transition whose committed destination authority matches Genesis B (the VALID counterpart to transition.dead-authority)', b64u(canonPkg(N('ActivateGenesis', [N('FutureGenesisCommitment', [πChain], [put(txWLive)]), N('Genesis', [], [put(genB12)])], [put(c0B12)]))), {}, { result: 'VALID', judgment_kind: 'EpochActivated' });
 
 // ── rev10 round-13 — byte injectivity (BOM/surrogate), real-calendar facts, vote key binding, reference budget ──
 const BOM = Buffer.from([0xEF, 0xBB, 0xBF]);

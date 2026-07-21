@@ -151,7 +151,12 @@ for (const vv of valids) {
       }
     }
   }
-  console.log(`bmc Phase 3 coverage: ${coveredPositions}/${totalPositions} interpreter child-positions exercised (denominator SOURCE-VERIFIED against the rule interpreter — round-48 P1-02) over ${Object.keys(wk).length} witness kinds (${Object.keys(wk).sort().join(', ')}); ${residual.length ? 'DECLARED residual (corpus lacks the kind — explicit + counted, not a silent subset): ' + residual.join('; ') : 'ALL positions covered'}`);
+  // The only residual now is ProjectAssurance's Identity/Time positions: `NameBound` caps Identity at `corroborated` and
+  // `Anchored` caps Time at `unproven`, and a VALID ProjectAssurance needs the subject-bound AUTHORITATIVE identity — that is
+  // exactly the reserved TOP-tier realization (epic UST-48p, deferred). Until the two rungs are wired to external substrates,
+  // no honest Identity/Time witness exists, so these 3 stay declared (never a silent subset). Everything BUILDABLE is covered.
+  const topTier = residual.length && residual.every((r) => r.startsWith('ProjectAssurance'));
+  console.log(`bmc Phase 3 coverage: ${coveredPositions}/${totalPositions} interpreter child-positions exercised (denominator SOURCE-VERIFIED against the rule interpreter — round-48 P1-02) over ${Object.keys(wk).length} witness kinds (${Object.keys(wk).sort().join(', ')}); ${residual.length ? 'DECLARED residual (corpus lacks the kind — explicit + counted, not a silent subset): ' + residual.join('; ') + (topTier ? ' — these are the reserved TOP-tier rungs (authoritative identity + anchored time), unbuilt pending epic UST-48p; no honest witness exists yet' : '') : 'ALL positions covered'}`);
 }
 
 console.log(`bmc: Phase 1 (per-rule inductive step) ${phase1} probes; Phase 2 (exhaustive single-mutation) ${phase2} tampers over ${baselines} VALID baselines; Phase 3 (child-judgment algebra) ${phase3} wrong-kind-child probes`);
