@@ -1447,6 +1447,22 @@ console.log('\n═════════════════════�
   // because each fix was per-SITE). A FROM-CODE gate: (a) NO authority selector may use the `Array.isArray(X) ? X : []` coalesce
   // (it silently empties a present malformed selector); (b) every require*/allow*/acceptConsumerOverride grant boolean is
   // REGISTERED (a new one fails until admitted + probed); (c) each grant boolean + selector has an adversarial probe.
+  // round-49 P1-02 (STRUCTURAL guard) — FROM-CODE byte-door inventory. The verifyJson budget bypass (and the rev74 resolver
+  // getter hazard before it) both slipped in because a NEW raw-byte read was added WITHOUT routing through the intrinsic door.
+  // Scan index.mjs for the byte-admission-hazard patterns — `Buffer.from(<obj>)` / `Uint8Array.from(<obj>)` with NO encoding (an
+  // array-like runs its indexed getters) and a caller-object `.byteLength` read (overridable) — and require EACH to be an
+  // ALLOWLISTED post-door (snapshotBytes/snapshotBinary immutable copy) or genuine-source form. A new occurrence FAILS until
+  // reviewed, so the class cannot recur silently — the exact `rawBytes.byteLength ?? Buffer.from(rawBytes)` shape fires HERE.
+  { const idxLines = readFileSync(new URL('../../packages/ust-protocol/index.mjs', import.meta.url), 'utf8').split('\n').map((l) => l.replace(/\/\/.*$/, ''));
+    const SAFE_FROM = new Set(['Buffer.from(gS.bytes)', 'Buffer.from(kCopy)', 'Buffer.from(cS.bytes)']);   // resolveKeysBytes/resolveCadenceBytes — snapshotBytes output, immutable
+    const SAFE_BYTELEN = new Set(['buf.byteLength']);   // buf = Buffer.from(await r.arrayBuffer()) — a genuine materialized Buffer (§13 discovery cap, line ~2666)
+    const unaccounted = [];
+    idxLines.forEach((l, i) => {
+      for (const m of l.matchAll(/(?:Buffer|Uint8Array)\.from\(([a-zA-Z_][\w.]*)\)/g)) if (!SAFE_FROM.has(m[0])) unaccounted.push(`index.mjs:${i + 1} ${m[0]}`);
+      for (const m of l.matchAll(/\b([a-zA-Z_]\w*)\.byteLength\b/g)) { if (m[1] === 'Buffer') continue; if (!SAFE_BYTELEN.has(m[0])) unaccounted.push(`index.mjs:${i + 1} ${m[0]}`); }
+    });
+    check('FROM-CODE BYTE-DOOR INVENTORY: every raw-byte read in index.mjs is post-door (snapshotBytes/snapshotBinary immutable copy) or an allowlisted genuine source — a NEW Buffer.from(<obj>) / Uint8Array.from(<obj>) / caller-object .byteLength fails until routed through the door (round-49 P1-02 structural guard; the verifyJson budget bypass cannot recur silently)' + (unaccounted.length ? ' — UNACCOUNTED: ' + unaccounted.join('; ') : ''), unaccounted.length === 0);
+  }
   { const idxSrc = readFileSync(new URL('../../packages/ust-protocol/index.mjs', import.meta.url), 'utf8');
     const refSrc = readFileSync(new URL('../../packages/ust-protocol/reference-checker.mjs', import.meta.url), 'utf8');
     const src = idxSrc + '\n' + refSrc;   // round-44 P1-01 — the gate scans BOTH the resolver surface AND the byte-adapter (verifyAuthorityBundle lives in reference-checker.mjs; the rev52 gate scanned only index.mjs and missed it)

@@ -80,6 +80,19 @@ ok('round-49 P0-01 differential: lite VALID ⇒ core VALID (no lite-only accept 
 ok('round-49 P0-01 pin: absent class → lite INVALID (was VALID:LIGHT)', lite.verify(corpus[0][1]).error === 'E-MALFORMED');
 ok('round-49 P0-01 pin: 2026-02-31 generated_at → lite INVALID (was VALID:LIGHT)', lite.verify(corpus[2][1]).error === 'E-MALFORMED');
 
+// build-based sweep — domain_shard / ust_id / a valid_to all enter the partition hash or signed content, so a post-build
+// mutation would break the hash and mask the SHAPE check; build each from the start and pin the same invariant across a wider
+// surface (these AGREE today — lite VALID ⇒ core VALID — the sweep catches a FUTURE drift, GPT round-49 fix #3 "generated corpus").
+const buildWith = (idOver = {}, timeOver = {}) => { try { return { doc: lite.seal(lite.buildState({ ...id, ...idOver }, { ...time, ...timeOver }, data), kp.privateKey, kp.pub) }; } catch (e) { return { buildErr: e.code || 'err' }; } };
+const sweep = [
+  { ust_id: 'ust:20260231.12' }, { ust_id: 'ust:20260229.12' }, { ust_id: 'ust:20261301.12' }, { ust_id: 'ust:20260721.24' },
+  { domain_shard: 'bad name' }, { domain_shard: '' }, { domain_shard: '192.168.1.1' }, { domain_shard: 'sha256:' + '00'.repeat(32) },
+].map((o) => buildWith(o))
+  .concat([{ valid_to: '2026-13-01T00:00:00Z' }, { generated_at: '2026-02-30T00:00:00Z' }, { valid_from: '2026-07-21T25:00:00Z' }].map((o) => buildWith({}, o)));
+let sweepOk = true;
+for (const b of sweep) { if (b.buildErr) continue; if (lite.verify(b.doc).result === 'VALID:LIGHT' && !full.isValid(full.verify(b.doc))) { sweepOk = false; F.push('P0-01 SWEEP lite-VALID/core-INVALID'); } }
+ok('round-49 P0-01 build-sweep: lite VALID ⇒ core VALID across domain_shard / ust_id / time shape values (wider differential surface)', sweepOk);
+
 console.log(`\n  ust-lite validity vs full ust-protocol   PASS ${pass}   FAIL ${fail}`);
 if (F.length) { F.forEach((f) => console.log('    ✗ ' + f)); process.exit(1); }
 console.log('  ✓ a ust-lite document IS a valid UST document — byte-identical, cross-verified both ways, AND lite VALID ⇒ core VALID over adversarial shapes (round-49 P0-01 differential)');
