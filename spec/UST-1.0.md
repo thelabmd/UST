@@ -1478,7 +1478,7 @@ rule is: **verify in the control flow, not as an advisory field.**
 **Canonical INVALID error-code set** (generated from `index.mjs` `REGISTRY` by `tools/gen-spec-registry.mjs` — do
 not edit by hand; the `spec-code-sync` gate keeps it == the codes the implementation actually emits):
 <!-- BEGIN spec-sync:error-codes -->
-`E-MALFORMED`, `E-CANON`, `E-BOUNDS`, `E-CYCLE`, `E-SIG`, `E-KEY`, `E-GENESIS`, `E-ANCHOR`, `E-COMMIT`, `E-ROOT`, `E-SEED`, `E-PREV`, `E-AUTHORITY`, `E-SEQ`, `E-EVIDENCE`, `E-ASSURANCE`
+`E-MALFORMED`, `E-CANON`, `E-BOUNDS`, `E-CYCLE`, `E-SIG`, `E-KEY`, `E-GENESIS`, `E-ANCHOR`, `E-COMMIT`, `E-ROOT`, `E-SEED`, `E-PREV`, `E-AUTHORITY`, `E-SEQ`, `E-EVIDENCE`, `E-ASSURANCE`, `E-BYTES`
 <!-- END spec-sync:error-codes -->
 
 ---
