@@ -6,6 +6,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createPrivateKey, createPublicKey, createHash, sign } from 'node:crypto';
 import { __setWitnessClockForConformance, witnessNow } from './_clock.mjs';   // rev33/36 R4 — the witness clock is verifier-owned in an INTERNAL module; the harness drives it deterministically HERE (not through public opts), then restores
 const withWitnessClock = async (clock, body) => { __setWitnessClockForConformance(clock); try { return await body(); } finally { __setWitnessClockForConformance(); } };
+// round-51 (owner sweep: eliminate drift-prone hand-lists) — the R47 roster's MAY-THROW exemption was a SECOND hand-list beside
+// the R31 CLASS map (surface|exempt). They agreed, but nothing LOCKED them: a future drift could exempt a real surface from the
+// runtime-namespace totality net. Define it ONCE here (used by R47) and cross-check it below against CLASS — MAY_THROW(n) ⟺
+// CLASS[n] !== 'surface', so the two can no longer diverge. (Totality itself is already guaranteed by R34's surface×BATTERY.)
+const MAY_THROW_TOTALITY = (n) => /^(build|seal|make)/.test(n) || /(Claim|Leaf|Id|Epoch)$/.test(n) || /^Ust[A-Z]/.test(n)
+  || ['canon', 'H', 'Hbytes', 'keyId', 'merkleRoot', 'partitionHash', 'contentHash', 'signedContent', 'admitUtf8', 'anyLoneSurrogate', 'ustGrid', 'blindPartition', 'blindedCommit', 'seed', 'axisRank', 'evidenceCaps', 'admitDeep', 'isValid', 'verifiedEvidence'].includes(n)
+  || ['verifyOrThrow', 'assertValid'].includes(n);
 
 const V = JSON.parse(readFileSync(new URL('../../vectors/conformance-vectors.json', import.meta.url)));
 function kp(seedHex) {
@@ -1654,9 +1661,7 @@ console.log('\n═════════════════════�
     // prover data from TRUSTED args; a byte/string PRIMITIVE (a Proxy is not a valid input); a verdict CLASS (Ust*, invoked with
     // `new`); the reduction primitive `admitDeep` (its 2nd arg is an internal `seen` set) + `isValid`/`verifiedEvidence` helpers;
     // `assertValid`/`verifyOrThrow` throw BY CONTRACT. Everything else — every verifier/resolver/combinator/algebra op — MUST be total.
-    const MAY_THROW = (n) => /^(build|seal|make)/.test(n) || /(Claim|Leaf|Id|Epoch)$/.test(n) || /^Ust[A-Z]/.test(n)
-      || ['canon', 'H', 'Hbytes', 'keyId', 'merkleRoot', 'partitionHash', 'contentHash', 'signedContent', 'admitUtf8', 'anyLoneSurrogate', 'ustGrid', 'blindPartition', 'blindedCommit', 'seed', 'axisRank', 'evidenceCaps', 'admitDeep', 'isValid', 'verifiedEvidence'].includes(n)
-      || ['verifyOrThrow', 'assertValid'].includes(n);
+    const MAY_THROW = MAY_THROW_TOTALITY;   // round-51 — ONE definition (module scope), cross-checked against R31 CLASS below
     // round-51 (owner: "структурно невозможное повторение из-за неполного покрытия") — the hostile fixture was ONE shape (a
     // throwing-trap Proxy), so a REVOKED Proxy (which throws on `Array.isArray`/`instanceof` ITSELF, before any trap) escaped
     // admitArray/reducePackage. The fixture is now a BATTERY of every escape shape × every export: a non-total function on ANY
@@ -2052,6 +2057,11 @@ console.log('\n═════════════════════�
     (() => { const o = { length: 4 }; for (let i = 0; i < 4; i++) Object.defineProperty(o, i, { enumerable: true, get() { throw new Error('idx'); } }); return o; })(),   // throwing-index array-like
   ];
   const surface = allFns.filter((k) => CLASS[k] === 'surface');
+  // round-51 (owner sweep) — LOCK the two totality lists in the load-bearing direction: a R31 SURFACE must NEVER be R47-roster
+  // MAY-THROW-exempt (that would let a real untrusted-input boundary escape the runtime-namespace net). The reverse — an EXEMPT
+  // that is also total, so R47 harmlessly tests it — is fine. A surface drifting into the exemption fails HERE; no second hand-list.
+  { const escaped = allFns.filter((n) => CLASS[n] === 'surface' && MAY_THROW_TOTALITY(n));
+    check('MAY_THROW ⊥ SURFACE: no R31 consumer-surface export is R47-roster MAY-THROW-exempt — a surface can never escape the runtime-namespace totality net via the exemption list (round-51 hand-list sweep: the two lists are locked in the load-bearing direction)' + (escaped.length ? ' — SURFACE EXEMPTED: ' + escaped.join(',') : ''), escaped.length === 0); }
   // rev34 R1 (round-29 P1-01) — TOTALITY by a machine SIGNATURE REGISTRY, not `fn.length` + `{}`-fill. `fn.length` stops at
   //   the first DEFAULT parameter (resolveCadence.length === 1 though it takes 4 args → the 4th never tested), and `{}`-fill
   //   short-circuits many verifiers before they read the hostile position (verifyAnchor returns early on a malformed proof,
