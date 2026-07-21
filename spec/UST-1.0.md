@@ -456,7 +456,12 @@ nothing meaningful is unsigned. Frame-level cross-engine matching is the per-par
 
 ---
 
-## 8. Addressing — `ust:`
+## 8. Addressing — `ust:` (the `ust_id` frame identifier)
+
+> This section is the reference for the IANA-registered **`ust`** URI scheme (provisional, registered
+> 2026-07-20; change controller THE LAB). The scheme is an *identifier*, not a locator — a `ust:` URI does not
+> by itself dereference to a network resource; a frame is resolved to a signed record out of band by this
+> protocol. Security considerations for the scheme are consolidated in **§18** (threat → invariant map).
 
 ```
 ust_id = "ust:" YYYYMMDD "." HH [ MM [ SS ] ]        (UTC; tiers: hour ⊃ minute ⊃ second)
