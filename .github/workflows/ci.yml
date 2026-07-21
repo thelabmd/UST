@@ -44,6 +44,8 @@ jobs:
         run: npm run test:security
       - name: SSRF guards (core + MCP)
         run: npm run test:ssrf
+      - name: drift-guards (meta — every from-code gate is fail-closed; injects a fake drift, asserts the gate rejects it, restores)
+        run: npm run test:drift-guards
       - name: connector receipts (OTS + Rekor)
         run: npm run test:connectors
       - name: web-signer cross-verification
