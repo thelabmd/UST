@@ -184,6 +184,33 @@ add('map.proof-extra', 'an authenticated-map proof with an extra interior field 
 // valid set never drove these two rules, so the BMC Phase-3 child-algebra had no MapUnique witness → ReinforceMap[0] was
 // silently skipped). This closes that hole AND gives the checker positive conformance coverage for a rule it accepts.
 add('accept.reinforce-map', 'a corroborated basis reinforced by a genuine map-uniqueness proof', b64u(canonPkg(N('ReinforceMap', [πCorr, N('MapUnique', [πChain], [put({ proof: r11map.prove(r11leaf.key), mapRoot: r11map.root })])]))), { ...CFG, mapRoots: [r11map.root] }, { result: 'VALID', judgment_kind: 'Freshness' });
+// round-47 residual — the THREE cross-child COORDINATE-UNIFICATION gates (ReinforceMap `does not unify`, ReinforceQuorum
+// `does not unify`, Corroborated `cross-scope` in reference-checker.mjs) had NO negative vector: nothing proved they FIRE.
+// A right-KIND child proven at a DIFFERENT (s,n,h) must NOT reinforce this freshness — an attacker cannot borrow another
+// state's map/quorum reinforcement. Build a fully independent SECOND coordinate-space (distinct genesis+domain → distinct
+// (s,n,h)) and staple its judgments onto the coordinate-A Freshness. Coverage is BY CONSTRUCTION: unforgeable-judgment (a
+// child verdict is re-verified from its own sub-proof, never injected) makes a lighter "injectable-verdict" harness unsound.
+const G2 = kp('c0'.repeat(32));
+const gen2 = P.seal(P.buildGenesis({ domain_shard: 'other.example', ust_id: 'ust:20260716.00', key_id: G2.key_id }, T, G2.pub, undefined, undefined, undefined, { key_id: G2.key_id, pub: G2.pub }), G2.priv, G2.pub);
+const AG2 = P.contentHash(gen2), EP2 = P.genesisEpoch(AG2);
+const kl2 = P.buildKeylogCommitment(['sha256:' + 'cd'.repeat(32)]);
+const C0_2 = P.sealAuthorityCheckpoint(P.buildAuthorityCheckpoint({ domain_shard: 'other.example', genesis_epoch: EP2, sequence: '0', active_genesis: AG2, current_key_id: G2.key_id, keylog: { root: kl2.root, length: kl2.length, head: kl2.head } }), G2.priv, G2.pub);
+const head2 = P.authorityCheckpointId(C0_2);
+const πChain2 = N('CheckpointZero', [N('Genesis', [], [put(gen2)])], [put(C0_2)]);
+const leaf2 = P.checkpointMapLeaf({ domain_shard: 'other.example', genesis_epoch: EP2, sequence: '0', checkpoint: head2 });
+const map2 = P.buildVerifiableMap([leaf2]);
+const mapU_B = N('MapUnique', [πChain2], [put({ proof: map2.prove(leaf2.key), mapRoot: map2.root })]);
+const ua2 = (W) => P.buildUniquenessAttestation({ domain_shard: 'other.example', genesis_epoch: EP2, sequence: '0', checkpoint: head2 }, W.priv, W.pub);
+const quorum_B = N('QuorumAgreement', [πChain2], [put(ua2(Wa)), put(ua2(Wb))]);
+add('unify.reinforce-map-cross-coordinate', 'a MapUnique proven at a DIFFERENT (s,n,h) coordinate cannot reinforce this freshness — ReinforceMap cross-child unify gate (round-47 residual)', b64u(canonPkg(N('ReinforceMap', [πCorr, mapU_B]))), { ...CFG, mapRoots: [map2.root] }, { result: 'INVALID', code: 'does not unify' });
+add('unify.reinforce-quorum-cross-coordinate', 'a QuorumAgreement proven at a DIFFERENT (s,n,h) coordinate cannot reinforce this freshness — ReinforceQuorum cross-child unify gate (round-47 residual)', b64u(canonPkg(N('ReinforceQuorum', [πCorr, quorum_B]))), CFG, { result: 'INVALID', code: 'does not unify' });
+// third gate — Corroborated requires ALL freshness premises to share the CHAIN's scope: build the commitment/target/After
+// premises at coordinate B while the chain (+ terminality) stay at A → the cross-scope gate must fire.
+const rc2 = (subj, pos) => P.buildEvidenceReceipt({ domain_shard: 'other.example', active_genesis: AG2, subject: subj, proof_kind: 'pow-header-chain', facts: { substrate: 'bitcoin', position: String(pos) }, issued_at: '2026-01-01T00:00:00Z' }, KC.priv, KC.pub);
+const πG2b = N('Genesis', [], [put(gen2)]);
+const πC2 = N('ConnectorEvidence', [πG2b], [put(rc2(head2, 900))], { subject: head2 });
+const πT2 = N('ConnectorEvidence', [πG2b], [put(rc2('ust:target', 800))], { subject: 'ust:target' });
+add('unify.corroborated-cross-scope', 'a Corroborated whose commitment/target premises are proven at a DIFFERENT scope than the chain must be rejected — Corroborated cross-scope gate (round-47 residual)', b64u(canonPkg(N('Corroborated', [πChain, πC2, πT2, N('AfterOrder', [πC2, πT2])], [put(term)]))), CFG, { result: 'INVALID', code: 'cross-scope' });
 const voteX = (() => { const v = JSON.parse(JSON.stringify(ua(Wa))); v.sig.extension = 'ignored'; return v; })();
 add('vote.sig-extra', 'a uniqueness vote whose sig wrapper carries an extra field → not counted (round-11 P1-04)', b64u(canonPkg(N('QuorumAgreement', [πChain], [put(voteX)]))), { witnesses: { [Wa.key_id]: Wa.pub }, domains: { [Wa.key_id]: 'op-a' }, policy: { uniqueness_threshold: 1 } }, { result: 'INDETERMINATE', code: 'quorum not met' });
 // P0-04 epoch-transition claim is closed+typed (an extra signed field is rejected).
@@ -272,6 +299,9 @@ const MANIFEST = {
     { id: 'KEY-STRICT-PUB32', rule: 'Genesis/sigOk/ConnectorEvidence/QuorumAgreement', negative_vectors: ['key.padded-pub'] },
     { id: 'CONFIG-KEY-BINDING', rule: 'normalizeConfig', negative_vectors: ['config.pub-swap'] },
     { id: 'AFTER-RELATES-ITS-EVIDENCES', rule: 'Corroborated', negative_vectors: ['rel.detached-after'] },
+    { id: 'REINFORCE-MAP-COORDINATE-UNIFY', rule: 'ReinforceMap', negative_vectors: ['unify.reinforce-map-cross-coordinate'] },
+    { id: 'REINFORCE-QUORUM-COORDINATE-UNIFY', rule: 'ReinforceQuorum', negative_vectors: ['unify.reinforce-quorum-cross-coordinate'] },
+    { id: 'CORROBORATED-CROSS-SCOPE', rule: 'Corroborated', negative_vectors: ['unify.corroborated-cross-scope'] },
     { id: 'SCOPE-DOMAIN-AGREEMENT', rule: 'CheckpointZero/CheckpointStep', negative_vectors: ['scope.foreign-domain'] },
     { id: 'KEYLOG-CEILING', rule: 'CheckpointZero/CheckpointStep', negative_vectors: ['keylog.over-ceiling'] },
     { id: 'QUORUM-DOMAIN-BINDING', rule: 'QuorumAgreement', negative_vectors: ['quorum.foreign-domain'] },

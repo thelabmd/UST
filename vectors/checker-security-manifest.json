@@ -64,6 +64,27 @@
       ]
     },
     {
+      "id": "REINFORCE-MAP-COORDINATE-UNIFY",
+      "rule": "ReinforceMap",
+      "negative_vectors": [
+        "unify.reinforce-map-cross-coordinate"
+      ]
+    },
+    {
+      "id": "REINFORCE-QUORUM-COORDINATE-UNIFY",
+      "rule": "ReinforceQuorum",
+      "negative_vectors": [
+        "unify.reinforce-quorum-cross-coordinate"
+      ]
+    },
+    {
+      "id": "CORROBORATED-CROSS-SCOPE",
+      "rule": "Corroborated",
+      "negative_vectors": [
+        "unify.corroborated-cross-scope"
+      ]
+    },
+    {
       "id": "SCOPE-DOMAIN-AGREEMENT",
       "rule": "CheckpointZero/CheckpointStep",
       "negative_vectors": [
