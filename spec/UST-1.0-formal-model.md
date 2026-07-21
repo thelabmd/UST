@@ -1185,6 +1185,17 @@ DECODE as `E-TERM-*`, never interpreted to VALID). Phase 2 takes each VALID byte
 position (the whole 1-edit neighbourhood, not a sample), asserting no single edit is accepted — bounded-exhaustive soundness.
 The byte kernel `checkAuthorityProofBytes` (the realization of `A`) passes both. (A machine-checked mechanization in a proof
 assistant is the tier beyond this; the bounded-exhaustive check is the executable, regression-gated approximation.)
+**Correction (rev67 — round-47 P1-01: Phase 1's "representative children" did NOT span the child-judgment algebra).** The GPT
+audit refuted "`bmc.mjs` does exactly this": Phase 1 filled child positions with syntactic TEMPLATES that mostly FAIL before
+producing a judgment, so a parent rule's handling of a specific child JUDGMENT KIND was never exercised — a fault-injected
+`ReinforceMap` that returns child 0's Freshness WITHOUT checking child 1 PASSED Phase 1+2 yet false-accepted a Corroborated
+wrapped with a non-MapUnique child 1 (a reachable false accept at depth > 1). The induction step actually needs: for EVERY
+child-judgment tuple, the parent is SOUND. **Phase 3 (added rev67)** extracts a witness sub-term for each judgment KIND from the
+VALID baselines (rule → concluded kind), then drives every composite rule with a WRONG-kind child at each position (correct
+kinds elsewhere, so the rejection ISOLATES the perturbed position) and asserts the parent does NOT yield a VALID conclusion —
+verified to CATCH the fault-injected mutant (`ReinforceMap[Freshness, QuorumAgreement]` is flagged). The all-depths claim now
+rests on an induction step verified over the child-judgment ALGEBRA, not just child syntax; a fuller property-based interpreter
+with injectable child results (and, beyond, a proof-assistant mechanization) remains the next tier.
 
 **Verification (rev64 — TEMPORAL model check of the key-log state machine, the time dimension the automaton BMC does not
 reach).** `bmc.mjs` covers the STRUCTURAL dimension (the proof term); the key-log (§12.2 #75 ROOT 2) is a TEMPORAL state

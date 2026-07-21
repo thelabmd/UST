@@ -73,7 +73,7 @@ const strLeaves = (o, path = [], acc = []) => { if (typeof o === 'string') acc.p
 const getp = (o, p) => p.reduce((x, k) => x && x[k], o);
 const setp = (o, p, v) => { const par = p.slice(0, -1).reduce((x, k) => x[k], o); par[p[p.length - 1]] = v; };
 const MUT = (s) => [s.length ? '0' + s.slice(1) : 'x', s.length ? s.slice(0, -1) + '0' : 'x0', s + 'x', s.slice(0, Math.max(0, s.length - 1))];   // 4 deterministic single edits per leaf
-let phase2 = 0, baselines = 0;
+let phase2 = 0, baselines = 0, phase3 = 0;
 for (const vv of valids) {
   const pkgObj = JSON.parse(Buffer.from(vv.package_b64url, 'base64url').toString('utf8'));
   const cfgBytes = new Uint8Array(Buffer.from(vv.config_b64url, 'base64url'));
@@ -94,6 +94,36 @@ for (const vv of valids) {
   }
 }
 
-console.log(`bmc: Phase 1 (per-rule inductive step) ${phase1} probes over ${Object.keys(RULE_CONTRACTS).length} rules; Phase 2 (exhaustive single-mutation) ${phase2} tampers over ${baselines} VALID baselines`);
+// ─── Phase 3: the INDUCTION STEP over the CHILD-JUDGMENT ALGEBRA (round-47 P1-01) ──────────────────────────────────
+// Phase 1 drives rules with syntactic child TEMPLATES that mostly FAIL before producing a judgment — so a parent's handling
+// of a specific child JUDGMENT KIND is never exercised (GPT round-47: a fault-injected ReinforceMap that returns child 0's
+// Freshness WITHOUT checking child 1 PASSES Phase 1+2 yet false-accepts a Corroborated wrapped with a non-MapUnique child 1
+// at depth>1). The induction step actually needs: for every child-judgment tuple, the parent is SOUND. This phase extracts a
+// witness SUB-TERM for each judgment KIND from the VALID baselines (rule → the kind it concludes), then drives each composite
+// rule with a WRONG-kind child at each position (correct kinds elsewhere, so the rejection ISOLATES the perturbed position)
+// and asserts the parent does NOT yield a VALID conclusion. A parent that ignores a required child kind is caught HERE
+// (verified against GPT's fault-injected mutant: it catches ReinforceMap[Freshness, QuorumAgreement] → VALID).
+{
+  const RULE_KIND = { Genesis: 'Genesis', CheckpointZero: 'Chain', CheckpointStep: 'Chain', ConnectorEvidence: 'Evidence', AfterOrder: 'After', Corroborated: 'Freshness', MapUnique: 'MapUnique', QuorumAgreement: 'QuorumAgreement', ReinforceMap: 'Freshness', ReinforceQuorum: 'Freshness', FutureGenesisCommitment: 'FutureCommitted', ActivateGenesis: 'EpochActivated', NameBound: 'Identity', Anchored: 'Time', ProjectAssurance: 'Assurance' };
+  // required child-KIND per position, per composite rule (from the interpreter's `sub(i).j.kind !== 'K'` gates)
+  const CHILD_SIG = { CheckpointZero: ['Genesis'], CheckpointStep: ['Chain'], ConnectorEvidence: ['Genesis'], AfterOrder: ['Evidence', 'Evidence'], MapUnique: ['Chain'], QuorumAgreement: ['Chain'], ReinforceMap: ['Freshness', 'MapUnique'], ReinforceQuorum: ['Freshness', 'QuorumAgreement'], FutureGenesisCommitment: ['Chain'], NameBound: ['Genesis'] };
+  const wk = {}, allWit = {};
+  for (const vv of valids) { const pkg = JSON.parse(Buffer.from(vv.package_b64url, 'base64url').toString('utf8')); Object.assign(allWit, pkg.witnesses || {}); (function walk(n) { if (!n || typeof n !== 'object' || !n.rule) return; const k = RULE_KIND[n.rule]; if (k && !wk[k]) wk[k] = n; for (const c of n.children || []) walk(c); })(pkg.term); }
+  const cfg3 = new Uint8Array(Buffer.from(valids[0].config_b64url, 'base64url'));
+  const runT = (term) => { try { return P.checkAuthorityProofBytes(new Uint8Array(Buffer.from(P.canon({ term, witnesses: allWit }), 'utf8')), cfg3); } catch { return { result: 'INVALID' }; } };
+  for (const [rule, sig] of Object.entries(CHILD_SIG)) {
+    for (let i = 0; i < sig.length; i++) {
+      if (!sig.every((k, j) => j === i || wk[k])) continue;   // need correct witnesses for the OTHER positions to isolate position i
+      for (const [wrongKind, wrongTerm] of Object.entries(wk)) {
+        if (wrongKind === sig[i]) continue;                   // that would be the CORRECT kind
+        phase3++;
+        const r = runT({ rule, children: sig.map((k, j) => (j === i ? wrongTerm : wk[k])), witnesses: [] });
+        if (r.result === 'VALID') fails.push(`P3 CHILD-ALGEBRA: ${rule} accepted a ${wrongKind} judgment at child ${i} (required ${sig[i]}) → VALID — the parent ignores a required child kind (round-47 P1-01)`);
+      }
+    }
+  }
+}
+
+console.log(`bmc: Phase 1 (per-rule inductive step) ${phase1} probes; Phase 2 (exhaustive single-mutation) ${phase2} tampers over ${baselines} VALID baselines; Phase 3 (child-judgment algebra) ${phase3} wrong-kind-child probes`);
 if (fails.length) { console.error('✗ BMC FAILED — a totality/determinism/soundness counterexample:'); for (const f of fails.slice(0, 20)) console.error('   • ' + f); process.exit(1); }
-console.log('✓ BMC: every rule is TOTAL + DETERMINISTIC + CONTRACT-GATED over its immediate-shape space (structural induction ⇒ all depths), and NO single-edit mutation of a VALID proof is accepted (bounded-exhaustive soundness)');
+console.log('✓ BMC: every rule is TOTAL + DETERMINISTIC + CONTRACT-GATED over its immediate-shape space; NO single-edit mutation of a VALID proof is accepted; and every composite rule REJECTS a wrong-kind child judgment (the induction step over the child-judgment algebra, not just syntax) — structural induction ⇒ all depths');
