@@ -1564,27 +1564,33 @@ console.log('\n═════════════════════�
   // gate enumerates EVERY exported function and asserts each is TOTAL on a hostile Proxy (no sync host-throw, no async
   // promise-REJECTION) UNLESS explicitly classified MAY-THROW. So no export — present or future, sync or async, verifier or
   // algebra — is unaccounted; a new untrusted boundary that forgets to admit fails HERE.
-  check('R46 self-audit (rev59, totality from-code EXHAUSTIVE) — EVERY exported function is TOTAL on a hostile Proxy (no sync host-throw, no async promise-rejection) UNLESS explicitly classified MAY-THROW (trusted-input producer / byte-string primitive / throw-by-contract); no export unaccounted, sync AND async', await (async () => {
-    const src = readFileSync(new URL('./index.mjs', import.meta.url), 'utf8');
-    const names = [...src.matchAll(/export\s+(?:async\s+)?function\s+(\w+)/g)].map((m) => m[1]);
-    // MAY-THROW = NOT an untrusted-object verdict boundary (documented + COMPLETE — the classification is asserted below to
-    // cover exactly the throwers): a PRODUCER (build*/seal*/*Claim) constructs prover data from TRUSTED args; a PRIMITIVE
-    // takes bytes/strings/numbers (a Proxy is not a valid input, as JSON.stringify throws on a BigInt); verifiedEvidence is the
-    // connector-side evidence constructor (output verified downstream by verifyEvidenceReceipt); assertValid/verifyOrThrow
-    // throw BY CONTRACT. Everything else — every verifier, resolver, combinator, and assurance/evidence ALGEBRA op — MUST be total.
-    const MAY_THROW = (n) => /^(build|seal)/.test(n) || /Claim$/.test(n)
-      || ['canon', 'partitionHash', 'merkleRoot', 'blindPartition', 'admitUtf8', 'anyLoneSurrogate', 'ustGrid'].includes(n)
-      || n === 'verifiedEvidence' || ['assertValid', 'verifyOrThrow'].includes(n);
+  // round-47 P1-03 (roster completeness — RUNTIME NAMESPACE, not a source regex) — the rev59 gate enumerated
+  // matchAll(/export function/) = 64 names but the module has 100 function-typed exports (GPT round-47): export-const ARROW
+  // functions and RE-EXPORTS (`export { X } from './reference-checker.mjs'`) are invisible to the declaration regex — the miss
+  // included the byte kernel `checkAuthorityProofBytes` ITSELF, `checkAuthorityProof`, `verifyAuthorityBundle`, `admitDeep`,
+  // `contentHash`. So "totality enforced from the SOURCE export list" (rev58) and "roster made EXHAUSTIVE from-code" (rev59) were
+  // BOTH overstated. This gate enumerates the RUNTIME MODULE NAMESPACE — every value whose runtime type is `function` — so an
+  // arrow-const / re-export / future callable cannot evade it. Each is TOTAL on a hostile Proxy (no sync host-throw, no async
+  // promise-rejection) UNLESS explicitly classified MAY-THROW; the MAY-THROW predicate covers EXACTLY the current throwers (no
+  // verdict boundary exempted, no thrower unclassified — a new unclassified thrower fails HERE). All four round-47 findings
+  // reproduced on live code; this closes P1-03 (bd UST-5t8).
+  check('R47 P1-03 (roster completeness — RUNTIME namespace) — EVERY function-typed export of the module (100, incl. re-exports + arrow-consts + the byte kernel checkAuthorityProofBytes) is TOTAL on a hostile Proxy UNLESS explicitly classified MAY-THROW (producer / byte-string primitive / verdict class / throw-by-contract); a source-regex miss (arrow-const, re-export, future callable) can no longer evade the gate', await (async () => {
+    // MAY-THROW = NOT an untrusted-object verdict boundary: a PRODUCER (build*/seal*/make*/*Claim/*Leaf/*Id/*Epoch) constructs
+    // prover data from TRUSTED args; a byte/string PRIMITIVE (a Proxy is not a valid input); a verdict CLASS (Ust*, invoked with
+    // `new`); the reduction primitive `admitDeep` (its 2nd arg is an internal `seen` set) + `isValid`/`verifiedEvidence` helpers;
+    // `assertValid`/`verifyOrThrow` throw BY CONTRACT. Everything else — every verifier/resolver/combinator/algebra op — MUST be total.
+    const MAY_THROW = (n) => /^(build|seal|make)/.test(n) || /(Claim|Leaf|Id|Epoch)$/.test(n) || /^Ust[A-Z]/.test(n)
+      || ['canon', 'H', 'Hbytes', 'keyId', 'merkleRoot', 'partitionHash', 'contentHash', 'signedContent', 'admitUtf8', 'anyLoneSurrogate', 'ustGrid', 'blindPartition', 'blindedCommit', 'seed', 'axisRank', 'evidenceCaps', 'admitDeep', 'isValid', 'verifiedEvidence'].includes(n)
+      || ['verifyOrThrow', 'assertValid'].includes(n);
     const mk = () => new Proxy([{}], { get() { throw new Error('HOSTILE'); }, ownKeys() { throw new Error('HOSTILE'); }, getOwnPropertyDescriptor() { throw new Error('HOSTILE'); }, has() { throw new Error('HOSTILE'); } });
+    const fns = Object.keys(P).filter((k) => typeof P[k] === 'function');
     const bad = [];
-    for (const n of names) {
+    for (const n of fns) {
       if (MAY_THROW(n)) continue;
-      const fn = P[n];
-      if (typeof fn !== 'function') { bad.push(n + ' (not a function)'); continue; }
-      try { const r = fn(mk(), mk(), mk(), mk()); if (r && typeof r.then === 'function') { try { await r; } catch { bad.push(n + ' (async reject)'); } } }
+      try { const r = P[n](mk(), mk(), mk(), mk()); if (r && typeof r.then === 'function') { try { await r; } catch { bad.push(n + ' (async reject)'); } } }
       catch { bad.push(n + ' (sync throw)'); }
     }
-    return bad.length === 0;
+    return bad.length === 0 && fns.length >= 100;   // ≥100 = the runtime namespace, never a regression to the 64-name source-regex subset
   })());
   // round-46 self-audit (crypto — Ed25519 signature MALLEABILITY) — a verifier MUST reject a non-canonical scalar S (S ≥ L, the
   // group order): S and S+L are two byte-strings for the same signature, so accepting both is malleability. edVerifyStrict

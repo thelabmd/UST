@@ -1162,8 +1162,17 @@ async promise-REJECTION — UNLESS it is explicitly classified MAY-THROW (a trus
 byte/string PRIMITIVE, the connector-side `verifiedEvidence`, or the throw-by-contract `assertValid`/`verifyOrThrow`). The one
 residual boundary that host-threw — `provePredicates` on a hostile Proxy (a getter fired on destructuring; the round-25 null
 tolerance did not reach a Proxy) — is now reduced by `admitDeep` and floors instead of throwing (its output is unbranded, sealed
-only by `verify`, so a hostile input floors to LIGHT, never a host throw). No export — present or future, sync or async, verifier
-or algebra — is unaccounted (*"R46 self-audit (rev59, totality from-code EXHAUSTIVE) — EVERY exported function is TOTAL on a hostile Proxy (no sync host-throw, no async promise-rejection) UNLESS explicitly classified MAY-THROW (trusted-input producer / byte-string primitive / throw-by-contract); no export unaccounted, sync AND async"*).
+only by `verify`, so a hostile input floors to LIGHT, never a host throw).
+**Correction (rev66 — round-47 P1-03 refuted "from-code EXHAUSTIVE": the SOURCE regex missed 36 of 100 exports).** The rev58/rev59
+gates enumerated `matchAll(/export function/)` — which sees only `export function` DECLARATIONS, NOT export-const ARROW functions
+or RE-EXPORTS (`export { X } from './reference-checker.mjs'`). The miss was 36 of the 100 function-typed exports, INCLUDING the
+byte kernel `checkAuthorityProofBytes` itself, `checkAuthorityProof`, `verifyAuthorityBundle`, `admitDeep`, `contentHash` — so
+"totality enforced from the SOURCE export list" (rev58) and "roster made EXHAUSTIVE" (rev59) were overstated. The exhaustive
+roster is now the RUNTIME MODULE NAMESPACE — every value whose runtime type is `function` — so an arrow-const / re-export /
+future callable cannot evade it; each is TOTAL on a hostile Proxy unless explicitly classified MAY-THROW, and the classification
+covers EXACTLY the current throwers (no verdict boundary exempted, no thrower unclassified). No live totality hole hid among the
+36 (they are all producers/primitives/classes/helpers) — the miss was a GATE-completeness gap, now closed at its root
+(*"R47 P1-03 (roster completeness — RUNTIME namespace) — EVERY function-typed export of the module (100, incl. re-exports + arrow-consts + the byte kernel checkAuthorityProofBytes) is TOTAL on a hostile Proxy UNLESS explicitly classified MAY-THROW (producer / byte-string primitive / verdict class / throw-by-contract); a source-regex miss (arrow-const, re-export, future callable) can no longer evade the gate"*).
 
 **Verification (rev63 — BOUNDED-EXHAUSTIVE model check of the automaton `A`, beyond sampled fuzz).** The Checker Soundness
 theorem is proved BY STRUCTURAL INDUCTION on the proof term `π`. Because totality and determinism are COMPOSITIONAL over a
