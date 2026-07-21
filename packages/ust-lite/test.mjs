@@ -93,6 +93,23 @@ let sweepOk = true;
 for (const b of sweep) { if (b.buildErr) continue; if (lite.verify(b.doc).result === 'VALID:LIGHT' && !full.isValid(full.verify(b.doc))) { sweepOk = false; F.push('P0-01 SWEEP lite-VALID/core-INVALID'); } }
 ok('round-49 P0-01 build-sweep: lite VALID ⇒ core VALID across domain_shard / ust_id / time shape values (wider differential surface)', sweepOk);
 
+// round-50 P0-01 — the EXHAUSTIVE LIGHT-obligation differential. The rev77 sweep varied only id/time and MISSED the §4.4 closed
+// envelope XOR + the §4.3a A-label homograph guard + the encrypted-enc obligation, so THREE more lite-VALID/core-INVALID docs
+// shipped. Build a doc for EACH core LIGHT SEMANTIC obligation violation and assert lite VALID ⇒ core VALID (lite must reject each).
+const H32 = 'sha256:' + 'ab'.repeat(32);
+const buildData = (d) => { try { return { doc: lite.seal(lite.buildState(id, time, d), kp.privateKey, kp.pub) }; } catch (e) { return { buildErr: e.code || 'err' }; } };
+const obligations = [
+  { p: { kind: 'captured', value: { x: '1' }, commit: H32 } },                                   // public carrying commit — "what you see ≠ what is signed"
+  { p: { kind: 'captured', value: { x: '1' }, enc: { alg: 'AES-256-GCM', key_id: 'k', ct: 'AA' } } },   // public carrying enc
+  { p: { kind: 'captured', privacy: 'blinded', value: { x: '1' }, commit: H32 } },                // private carrying a plaintext value
+  { p: { kind: 'captured', privacy: 'blinded' } },                                               // private without commit
+  { p: { kind: 'captured', privacy: 'encrypted', commit: H32 } },                                // encrypted without an enc block
+  { p: { kind: 'captured', privacy: 'encrypted', commit: H32, enc: { alg: 'ROT13', key_id: 'k', ct: 'AA' } } },   // encrypted with a non-AEAD alg
+].map((d) => buildData(d)).concat([buildWith({ domain_shard: 'аpple.com' })]);   // + §4.3a Cyrillic-homograph domain
+let obligOk = true;
+for (const b of obligations) { if (b.buildErr) continue; if (lite.verify(b.doc).result === 'VALID:LIGHT' && !full.isValid(full.verify(b.doc))) { obligOk = false; F.push('P0-01 OBLIGATION lite-VALID/core-INVALID'); } }
+ok('round-50 P0-01 exhaustive LIGHT-obligation differential: lite VALID ⇒ core VALID over §4.4 envelope XOR (public+commit/enc, private-no-commit/plaintext, encrypted-enc) + §4.3a A-label homograph', obligOk);
+
 console.log(`\n  ust-lite validity vs full ust-protocol   PASS ${pass}   FAIL ${fail}`);
 if (F.length) { F.forEach((f) => console.log('    ✗ ' + f)); process.exit(1); }
 console.log('  ✓ a ust-lite document IS a valid UST document — byte-identical, cross-verified both ways, AND lite VALID ⇒ core VALID over adversarial shapes (round-49 P0-01 differential)');

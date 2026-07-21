@@ -130,8 +130,11 @@ const canonUint = (s) => { if (typeof s !== 'string' || !/^(0|[1-9][0-9]*)$/.tes
 const TA_BYTELENGTH = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteLength').get;
 const TA_BUFFER = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'buffer').get;
 export function snapshotBytes(input, maxBytes, sizeErr) {
-  if (!(input instanceof Uint8Array) || Object.getPrototypeOf(input) !== Uint8Array.prototype) return { error: 'E-BYTES-TYPE' };   // EXACT native Uint8Array — a subclass (Buffer/its proto differs) or Proxy is rejected
-  let len, buf; try { len = TA_BYTELENGTH.call(input); buf = TA_BUFFER.call(input); } catch { return { error: 'E-BYTES-TYPE' }; }   // intrinsic getters, never an overridden accessor
+  let len, buf;
+  try {   // round-50 P1-02 — `instanceof` / `Object.getPrototypeOf` RUN a Proxy's getPrototypeOf trap; keep them INSIDE the try so a throwing trap → structured reject, never a host throw escaping the door
+    if (!(input instanceof Uint8Array) || Object.getPrototypeOf(input) !== Uint8Array.prototype) return { error: 'E-BYTES-TYPE' };   // EXACT native Uint8Array — a subclass (Buffer/its proto differs) or Proxy is rejected
+    len = TA_BYTELENGTH.call(input); buf = TA_BUFFER.call(input);   // intrinsic getters throw on a lying Proxy (no internal slot) — never an overridden accessor
+  } catch { return { error: 'E-BYTES-TYPE' }; }
   if (typeof SharedArrayBuffer !== 'undefined' && buf instanceof SharedArrayBuffer) return { error: 'E-BYTES-SHARED' };
   if (maxBytes !== undefined && len > maxBytes) return { error: sizeErr || 'E-BYTES-SIZE' };
   const copy = new Uint8Array(len); copy.set(input); return { bytes: copy };   // fresh immutable copy via the intrinsic set — no caller getter runs
@@ -148,15 +151,15 @@ const DV_BYTEOFFSET = DV ? Object.getOwnPropertyDescriptor(DV, 'byteOffset').get
 const DV_BYTELENGTH = DV ? Object.getOwnPropertyDescriptor(DV, 'byteLength').get : null;
 function snapshotBinary(input) {
   const fromBuf = (buf, off, len) => { if (typeof SharedArrayBuffer !== 'undefined' && buf instanceof SharedArrayBuffer) return null; const c = new Uint8Array(len); c.set(new Uint8Array(buf, off, len)); return c; };
-  if (input instanceof ArrayBuffer) { let n; try { n = AB_BYTELENGTH.call(input); } catch { return null; } const c = new Uint8Array(n); c.set(new Uint8Array(input, 0, n)); return c; }
-  try { return fromBuf(TA_BUFFER.call(input), TA_BYTEOFFSET.call(input), TA_BYTELENGTH.call(input)); } catch { /* not a TypedArray */ }
+  try { if (input instanceof ArrayBuffer) { const n = AB_BYTELENGTH.call(input); const c = new Uint8Array(n); c.set(new Uint8Array(input, 0, n)); return c; } } catch { return null; }   // round-50 P1-02 — `instanceof` runs a Proxy trap; guard it (a throwing trap → null, never a host throw)
+  try { return fromBuf(TA_BUFFER.call(input), TA_BYTEOFFSET.call(input), TA_BYTELENGTH.call(input)); } catch { /* not a TypedArray (intrinsic getter threw — no trap invoked) */ }
   try { if (DV_BUFFER) return fromBuf(DV_BUFFER.call(input), DV_BYTEOFFSET.call(input), DV_BYTELENGTH.call(input)); } catch { /* not a DataView */ }
   return null;
 }
 // Strict UTF-8 decode: Node's Buffer.toString('utf8') silently maps invalid bytes to U+FFFD, so 0xFF and the real
 // 3-byte U+FFFD collapse to one string. fatal:true rejects invalid UTF-8 instead (P1-01). → string | null.
 function strictUtf8(bytes) {
-  const b = bytes instanceof Uint8Array ? bytes : snapshotBinary(bytes);   // round-49 P1-02 sweep — intrinsic admit; a plain array-like → null (never Uint8Array.from, which runs its getters)
+  const b = snapshotBinary(bytes);   // round-50 P1-02 — ALWAYS through the total intrinsic door; NO `instanceof` on untrusted input (it runs a Proxy trap that would escape)
   if (b === null) return null;
   try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(b); }
   catch { return null; }
@@ -166,7 +169,7 @@ function strictUtf8(bytes) {
 // a document via discovery). (1) a leading UTF-8 BOM (EF BB BF) is REJECTED, not silently stripped — TextDecoder would
 // alias two distinct byte-strings to one decoded object (M-BYTE injectivity). → { text } | { err:'BOM' } | { err:'UTF8' }.
 export function admitUtf8(bytes) {
-  const b = bytes instanceof Uint8Array ? bytes : snapshotBinary(bytes);   // round-49 P1-02 sweep — intrinsic admit; array-like → null → structured UTF8 error, no getter runs
+  const b = snapshotBinary(bytes);   // round-50 P1-02 — ALWAYS through the total intrinsic door; no `instanceof` fast-path (a Proxy trap would escape)
   if (b === null) return { err: 'UTF8' };
   if (b.length >= 3 && b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) return { err: 'BOM' };
   const t = strictUtf8(b);
@@ -2558,16 +2561,13 @@ export function verifyJson(rawBytes, opts = {}) {
   // The default input budget equals the protocol ABS; raw whitespace/base64 padding never flips a
   // verdict because the NORMATIVE size is measured on the canonical signed content inside verify.
   const isStr = typeof rawBytes === 'string';
-  // round-25 P1-02 — TYPED input admission BEFORE any measurement: verifyJson accepts a UTF-8 string or a byte container
-  // (ArrayBuffer / TypedArray / Buffer). A plain object or other non-binary reached `Buffer.from(rawBytes)` and threw a
-  // host TypeError (ERR_INVALID_ARG_TYPE) instead of a structured verdict — I4 totality demands a structured result.
-  if (!isStr && !(rawBytes instanceof ArrayBuffer || ArrayBuffer.isView(rawBytes)))
-    return bad('E-MALFORMED', 'raw input must be a UTF-8 string or a byte buffer (ArrayBuffer/TypedArray/Buffer) — a non-binary argument returns structured, never a host TypeError (round-25 P1-02)');
-  // round-49 P1-02 — admit the binary input through the INTRINSIC-based door BEFORE measuring: a Uint8Array subclass with an
-  // OWN `byteLength` getter returning 1 (intrinsic 2008) forged the transport size and bypassed maxInputBytes. Measure + decode
-  // the immutable intrinsic snapshot, never a caller-overridable property or the original object (closes the single-door gap d1).
+  // round-25/49/50 P1-02 — TYPED input admission BEFORE any measurement, through the TOTAL intrinsic door ONLY. A UTF-8 string
+  // OR a byte container (ArrayBuffer/TypedArray/Buffer/DataView); anything else → structured E-MALFORMED. round-50: NO `instanceof`
+  // pre-check on the untrusted input (it runs a Proxy's getPrototypeOf trap → a host throw escaping verifyJson); snapshotBinary is
+  // total (all instanceof inside try, intrinsic getters throw without a trap) and returns null for a Proxy / non-binary. Measure +
+  // decode the immutable snapshot, never a caller-overridable property (a subclass forged byteLength:1 to bypass maxInputBytes).
   const snap = isStr ? null : snapshotBinary(rawBytes);
-  if (!isStr && snap === null) return bad('E-MALFORMED', 'raw byte input must be a genuine ArrayBuffer/TypedArray/Buffer/DataView read through intrinsic getters (round-49 P1-02 — no caller-overridable byteLength)');
+  if (!isStr && snap === null) return bad('E-MALFORMED', 'raw input must be a UTF-8 string or a genuine ArrayBuffer/TypedArray/Buffer/DataView (a Proxy/array-like/non-binary returns structured, never a host throw — round-50 P1-02)');
   const byteLen = isStr ? Buffer.byteLength(rawBytes, 'utf8') : snap.length;
   const inputBudget = admitBudget(opts.maxInputBytes, BOUNDS.sizeBytes); if (inputBudget === null) return bad('E-MALFORMED', 'maxInputBytes must be a finite positive integer of bytes (round-38 P1-03/R4 — a caller resource scalar may only TIGHTEN the 64 MiB ceiling, never expand or disable it via Infinity/NaN)');
   if (byteLen > inputBudget)

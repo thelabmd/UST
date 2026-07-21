@@ -5,10 +5,14 @@
 // not registered), the VerifiedEvidence field list, and the compareEvidenceOrder return enum.
 import { readFileSync } from 'node:fs';
 import { REGISTRY } from '../packages/ust-protocol/index.mjs';
+import { REFERENCE_CHECKER_ERROR_CODES } from '../packages/ust-protocol/reference-checker.mjs';   // round-50 P1-04 — the L1 checker's OWN error namespace
 
 // Strip the REGISTRY declaration itself, else its own array literals ('E-…', 'ust:…') read as "usage".
 const full = readFileSync(new URL('../packages/ust-protocol/index.mjs', import.meta.url), 'utf8');
 const src = full.replace(/export const REGISTRY = \{[\s\S]*?\n\};/, '');
+// round-50 P1-04 — the gate scanned ONLY index.mjs, so the L1 proof-checker's 54 error codes were unregistered while the gate
+// claimed "spec == registry == code" over the TCB. Scan reference-checker.mjs's error literals against its OWN registered set.
+const refSrc = readFileSync(new URL('../packages/ust-protocol/reference-checker.mjs', import.meta.url), 'utf8').replace(/export const REFERENCE_CHECKER_ERROR_CODES = \[[\s\S]*?\n\];/, '');
 
 const uniq = (a) => [...new Set(a)].sort();
 let fail = 0; const report = [];
@@ -35,6 +39,9 @@ check('evidenceOrder', [...ceo.matchAll(/return\s+['"`]([a-z-]+)['"`]/g)].map((m
 const veSig = (src.match(/function verifiedEvidence\(\{([\s\S]*?)\}\s*\)/) || [null, ''])[1];
 const veFields = veSig.split(',').map((s) => s.trim().split(/[=:\s]/)[0]).filter(Boolean);
 check('verifiedEvidenceFields', veFields, [...REGISTRY.verifiedEvidenceFields.required, ...REGISTRY.verifiedEvidenceFields.optional]);
+// round-50 P1-04 — the L1 checker's FULL error codes (E-CONFIG-*, E-TERM-*, E-WITNESS-* …, not the `E-[A-Z]+` prefixes) vs its
+// own registered set: a new/typo checker code fails until registered. Closes the "index-only" blind spot over the TCB.
+check('checkerErrorCodes', [...refSrc.matchAll(/['"`](E-[A-Z][A-Z0-9-]*)/g)].map((m) => m[1]), REFERENCE_CHECKER_ERROR_CODES);
 
 console.log('\n  spec-code-sync (LAYER 2 — REGISTRY == code usage):');
 report.forEach((r) => console.log(r));

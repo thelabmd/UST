@@ -14,10 +14,12 @@ test('isPrivateIp classifies v4 ranges', () => {
 test('isPrivateIp classifies v6 ranges', () => {
   for (const ip of ['::1', '::', 'fc00::1', 'fd12:3456::1', 'fe80::1', '::ffff:127.0.0.1', '::ffff:10.0.0.1',
     // round-49 P1-01 — the mapped range must be caught in EVERY spelling, not only dotted-decimal:
-    '::ffff:7f00:1', '::ffff:0a00:1', '::ffff:a9fe:a9fe', '::ffff:169.254.169.254', '::127.0.0.1', '64:ff9b::7f00:1'])
+    '::ffff:7f00:1', '::ffff:0a00:1', '::ffff:a9fe:a9fe', '::ffff:169.254.169.254', '::127.0.0.1', '64:ff9b::7f00:1',
+    // round-50 P1-01 — the special-use PREFIX TABLE: local-use NAT64 (64:ff9b:1::/48), 6to4-to-private, documentation, discard, multicast:
+    '64:ff9b:1::7f00:1', '64:ff9b:1::a00:1', '2002:c0a8:0101::1', '2001:db8::1', '100::1', 'ff02::1'])
     assert.equal(isPrivateIp(ip), true, ip + ' should be private');
-  for (const ip of ['2606:4700:4700::1111', '2001:4860:4860::8888', '::ffff:8.8.8.8', '::ffff:808:808'])
-    assert.equal(isPrivateIp(ip), false, ip + ' should be public');
+  for (const ip of ['2606:4700:4700::1111', '2001:4860:4860::8888', '::ffff:8.8.8.8', '::ffff:808:808', '2002:5db8:d877::1'])
+    assert.equal(isPrivateIp(ip), false, ip + ' should be public');   // round-50 — 6to4 with a PUBLIC embedded IPv4 stays public
 });
 
 test('public name → public IP: fetch proceeds', async () => {

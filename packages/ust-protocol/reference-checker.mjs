@@ -17,7 +17,23 @@ import { canon, H, keyId, edVerifyStrict, contentHash, verify, isValid, verifyKe
   resolveKeys, buildKeylogCommitment, authorityCheckpointId, strictB64url, isPublicDnsShard,
   admitUtf8, anyLoneSurrogate, admitDeep, snapshotBytes } from './index.mjs';   // round-19 P1-01 — ONE Unicode byte-admission, shared with the discovery resolver. round-46 — admitDeep is the proven canon-transparent side-effect-free reduction for the PACKAGE domain (canon: string leaves); admitInert (below) is its canonJSON-domain sibling for the CONFIG (numeric leaves). Both read DATA descriptors and never execute a getter/toJSON. round-48 P0-01 — snapshotBytes is the ONE byte-admission door (was defined here; moved to index.mjs so the two resolvers admit through the SAME door — no drift).
 
-export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev77';
+export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev78';
+// round-50 P1-04 — the L1 proof-checker's OWN error namespace (distinct from the §15 document-verifier codes in index.mjs's
+// REGISTRY). spec-code-sync scans index.mjs against REGISTRY but NOT this module, so 54 checker codes were unregistered and its
+// "spec == registry == code" claim was false over the TCB. This is the checker's registered code set; spec-code-sync now diffs
+// reference-checker.mjs's E-* literals against it — a new/typo checker code FAILS until registered (no silent string drift).
+export const REFERENCE_CHECKER_ERROR_CODES = [
+  'E-BOM', 'E-JSON', 'E-MALFORMED', 'E-NONCANONICAL', 'E-NUM', 'E-ENCODE', 'E-TYPE', 'E-UTF8', 'E-SURROGATE',
+  'E-REC-SHAPE', 'E-QUORUM-AMBIGUOUS', 'E-PACKAGE-SHAPE', 'E-PACKAGE-SIZE',
+  'E-CONFIG-APK', 'E-CONFIG-BOM', 'E-CONFIG-CONNECTOR', 'E-CONFIG-CONNECTOR-FIELD', 'E-CONFIG-CONNECTOR-KEY',
+  'E-CONFIG-CONNECTOR-PUB', 'E-CONFIG-CONNECTORS', 'E-CONFIG-DOMAIN', 'E-CONFIG-DOMAIN-UNADMITTED', 'E-CONFIG-DOMAINS',
+  'E-CONFIG-FIELD', 'E-CONFIG-MAPROOTS', 'E-CONFIG-NONCANONICAL', 'E-CONFIG-POLICY', 'E-CONFIG-POLICY-FIELD',
+  'E-CONFIG-POLICY-FLAG', 'E-CONFIG-SHAPE', 'E-CONFIG-SIZE', 'E-CONFIG-SURROGATE', 'E-CONFIG-THRESHOLD',
+  'E-CONFIG-TRUST-DOMAIN', 'E-CONFIG-WITNESS', 'E-CONFIG-WITNESS-KEY', 'E-CONFIG-WITNESSES',
+  'E-TERM-ARITY', 'E-TERM-DEPTH', 'E-TERM-FIELD', 'E-TERM-NODE', 'E-TERM-NODES', 'E-TERM-PARAM', 'E-TERM-PARAM-MISSING',
+  'E-TERM-PARAM-TYPE', 'E-TERM-PARAMS', 'E-TERM-REFS', 'E-TERM-RULE', 'E-TERM-WITNESS', 'E-TERM-WITNESS-TYPE',
+  'E-WITNESS-ADDRESS', 'E-WITNESS-COUNT', 'E-WITNESS-NONCANONICAL', 'E-WITNESS-SIZE', 'E-WITNESS-UNREFERENCED',
+];
 // RULE_CONTRACTS (§2b) — the STRUCTURAL source of truth: exactly one inference rule per name, one switch branch per
 // name, and a fixed (children arity, witness count, allowed params, conclusion kind). DecodeTerm enforces these on
 // decode; a term with an extra child / extra witness / free param / unknown field / stored conclusion is rejected

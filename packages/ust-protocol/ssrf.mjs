@@ -29,19 +29,24 @@ export function isPrivateIp(ip) {
     );
   }
   if (v === 6) {
-    // round-49 P1-01 — classify by BYTE RANGE, not textual spelling: the old `^::ffff:(dotted-decimal)$` regex missed the
-    // equivalent HEX form (`::ffff:7f00:1` = 127.0.0.1) and every compressed variant, so a mapped-loopback SSRF slipped through.
+    // round-49/50 P1-01 — classify by BYTE RANGE from a special-use PREFIX TABLE (IANA IPv6 Special-Purpose registry subset), not
+    // a short hand list: a hand list missed the hex form ::ffff:7f00:1 (round-49) AND the local-use NAT64 64:ff9b:1::/48 (round-50).
+    // A prefix that EMBEDS an IPv4 is classified via the v4 policy; every other non-globally-reachable prefix is refused outright.
     const b = ipv6ToBytes(ip.toLowerCase().split('%')[0]);
     if (!b) return true;                                                        // unparseable (net.isIP said v6, but be safe) → refuse
-    if (b.every((x) => x === 0)) return true;                                   // :: unspecified
-    if (b.slice(0, 15).every((x) => x === 0) && b[15] === 1) return true;       // ::1 loopback
-    const mapped = b.slice(0, 10).every((x) => x === 0) && b[10] === 0xff && b[11] === 0xff;   // ::ffff:0:0/96 IPv4-mapped
-    const compat = b.slice(0, 12).every((x) => x === 0);                        // ::/96 IPv4-compatible (deprecated)
-    const nat64 = b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && b.slice(4, 12).every((x) => x === 0);   // 64:ff9b::/96 NAT64
-    if (mapped || compat || nat64) return isPrivateIp(b.slice(12).join('.'));   // classify the embedded IPv4 via the v4 policy — ANY spelling
-    if ((b[0] & 0xfe) === 0xfc) return true;                                    // fc00::/7 unique-local
-    if (b[0] === 0xfe && (b[1] & 0xc0) === 0x80) return true;                   // fe80::/10 link-local
-    return false;
+    const pfx = (p, bits) => { const nb = bits >> 3, r = bits & 7; for (let i = 0; i < nb; i++) if (b[i] !== p[i]) return false; return !r || !(((b[nb] ^ p[nb]) & (0xff << (8 - r)))); };
+    // (1) forms that EMBED an IPv4 → classify the embedded octets via the v4 policy (ANY spelling)
+    if (pfx([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff], 96)) return isPrivateIp(b.slice(12).join('.'));     // ::ffff:0:0/96 IPv4-mapped
+    if (pfx([0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0], 96)) return isPrivateIp(b.slice(12).join('.'));  // 64:ff9b::/96 NAT64 well-known
+    if (pfx([0x20, 0x02], 16)) return isPrivateIp(b.slice(2, 6).join('.'));                                 // 2002::/16 6to4 → embedded relay IPv4 (bytes 2..5)
+    if (b.slice(0, 12).every((x) => x === 0)) return isPrivateIp(b.slice(12).join('.'));                    // ::/96 IPv4-compatible — covers ::1 loopback + :: unspecified (→ 0.0.0.x, private)
+    // (2) every OTHER non-globally-reachable special-use prefix → refuse
+    return pfx([0, 0x64, 0xff, 0x9b, 0, 1], 48)          // 64:ff9b:1::/48 NAT64 local-use (RFC 8215)
+      || (b[0] & 0xfe) === 0xfc                          // fc00::/7 unique-local
+      || (b[0] === 0xfe && (b[1] & 0xc0) === 0x80)       // fe80::/10 link-local
+      || b[0] === 0xff                                   // ff00::/8 multicast (never a unicast fetch target)
+      || pfx([0x20, 0x01, 0x0d, 0xb8], 32)               // 2001:db8::/32 documentation
+      || pfx([1, 0, 0, 0, 0, 0, 0, 0], 64);              // 100::/64 discard-only
   }
   return true;                                                                  // not an IP literal → caller resolves
 }

@@ -62,6 +62,10 @@ const USTID = /^ust:\d{4}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\.([01]\d|2[0-3])((
 const calOk = (y, mo, d) => { const t = new Date(Date.UTC(+y, +mo - 1, +d)); return t.getUTCFullYear() === +y && t.getUTCMonth() === +mo - 1 && t.getUTCDate() === +d; };
 const tsCalOk = (ts) => calOk(ts.slice(0, 4), ts.slice(5, 7), ts.slice(8, 10));
 const ustIdCalOk = (u) => calOk(u.slice(4, 8), u.slice(8, 10), u.slice(10, 12));
+// round-50 P0-01 — lite must enforce the SAME LIGHT semantic obligations as the full verifier, or a lite-VALID doc is
+// core-INVALID (GPT round-50: an omitted-schema partition + a raw-Unicode domain read VALID:LIGHT in lite / INVALID in core).
+// Kept BYTE-IDENTICAL to core (§4.4 closed envelope XOR, §4.3a A-label homograph guard, AEAD enc block); the differential pins it.
+const AEAD_ALGS = ['AES-256-GCM', 'XChaCha20-Poly1305'], B64URL = /^[A-Za-z0-9_-]+$/;
 const FLOOR = { partitions: 64, sizeBytes: 1048576 };   // §13 anonymous LIGHT floor (full UST raises these via a genesis grant)
 
 // ─── producer: keypair → buildState (auto per-partition hashes) → seal (sign the carried key) ─────────
@@ -114,6 +118,17 @@ export function verify(doc) {
     for (const k of Object.keys(part)) if (!RESERVED.envelope.includes(k)) return bad('E-MALFORMED', 'reserved-key: data.' + name + '.' + k);
     if (!KINDS.includes(part.kind)) return bad('E-MALFORMED', 'unknown partition kind: ' + name);
     if (part.privacy !== undefined && !PRIVACY.includes(part.privacy)) return bad('E-MALFORMED', 'unknown privacy: ' + name);
+    // round-50 P0-01 — §4.4 CLOSED envelope XOR (the per-partition hash is taken over `commit` WHENEVER present, so a public
+    // partition ALSO carrying a commit would bind the hash to the commit while DISPLAYING an unrelated value — "what you see ≠
+    // what is signed"). PUBLIC carries value + no commit/enc; PRIVATE carries commit + no plaintext value; ENCRYPTED a typed AEAD enc.
+    if (part.privacy === undefined) {
+      if (part.commit !== undefined || part.enc !== undefined) return bad('E-MALFORMED', 'public partition must not carry commit/enc (§4.4 public = {kind,value}): ' + name);
+      if (part.value === undefined) return bad('E-MALFORMED', 'public partition requires value (§4.4): ' + name);
+    } else {
+      if (part.commit === undefined) return bad('E-MALFORMED', 'private partition requires commit (§4.4): ' + name);
+      if (part.value !== undefined) return bad('E-MALFORMED', 'private partition must not carry a plaintext value (§4.4): ' + name);
+      if (part.privacy === 'encrypted') { const e = part.enc; if (!e || typeof e !== 'object' || !AEAD_ALGS.includes(e.alg) || typeof e.key_id !== 'string' || !B64URL.test(e.ct || '')) return bad('E-MALFORMED', 'encrypted partition missing/invalid enc{alg,key_id,ct} (§4.4): ' + name); }
+    }
   }
   // 2) canonical, content_hash, hashes⇄data bijection, per-partition hash recompute (§4.4, G19)
   let S; try { S = signedContent(doc); } catch (e) { return bad('E-CANON', e.detail || 'canon'); }
@@ -136,7 +151,11 @@ export function verify(doc) {
   // core returned INVALID). `attestation`/`derivation` REQUIRE provenance; `genesis`/`key`/`cadence` are the HIGH/TOP layer.
   if (st.id.class !== 'observation')
     return bad('E-MALFORMED', `ust-lite verifies class:"observation" only (class is required) — "${st.id.class}" needs provenance or the HIGH/TOP layer; use ust-protocol`);
-  if (/^sha256:[0-9a-f]{64}$/.test(st.id.domain_shard) && st.id.domain_shard !== st.id.key_id) return bad('E-MALFORMED', 'key-form domain_shard ≠ key_id');
+  const shardKeyForm = /^sha256:[0-9a-f]{64}$/.test(st.id.domain_shard);
+  if (shardKeyForm && st.id.domain_shard !== st.id.key_id) return bad('E-MALFORMED', 'key-form domain_shard ≠ key_id');
+  // round-50 P0-01 — §4.3a homograph guard: a NAME-form domain_shard MUST be an A-label (ASCII; punycode xn-- for IDN), never
+  // raw Unicode ('аpple.com' with Cyrillic U+0430 renders as 'apple.com' but is a different string). Core rejects it; lite must too.
+  if (!shardKeyForm && /[^\x00-\x7f]/.test(st.id.domain_shard)) return bad('E-MALFORMED', 'name-form domain_shard must be an A-label (ASCII; punycode xn-- for IDN), not raw Unicode glyphs (§4.3a homograph guard)');
   // 4) authenticity (the FLOOR): key_id == keyId(sig.pub) == state.id.key_id, strict Ed25519 over S
   const s = doc.sig;
   if (!s || s.alg !== 'Ed25519' || typeof s.pub !== 'string' || typeof s.sig !== 'string') return bad('E-MALFORMED', 'malformed sig');

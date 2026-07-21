@@ -1453,15 +1453,37 @@ console.log('\n═════════════════════�
   // array-like runs its indexed getters) and a caller-object `.byteLength` read (overridable) — and require EACH to be an
   // ALLOWLISTED post-door (snapshotBytes/snapshotBinary immutable copy) or genuine-source form. A new occurrence FAILS until
   // reviewed, so the class cannot recur silently — the exact `rawBytes.byteLength ?? Buffer.from(rawBytes)` shape fires HERE.
-  { const idxLines = readFileSync(new URL('../../packages/ust-protocol/index.mjs', import.meta.url), 'utf8').split('\n').map((l) => l.replace(/\/\/.*$/, ''));
-    const SAFE_FROM = new Set(['Buffer.from(gS.bytes)', 'Buffer.from(kCopy)', 'Buffer.from(cS.bytes)']);   // resolveKeysBytes/resolveCadenceBytes — snapshotBytes output, immutable
-    const SAFE_BYTELEN = new Set(['buf.byteLength']);   // buf = Buffer.from(await r.arrayBuffer()) — a genuine materialized Buffer (§13 discovery cap, line ~2666)
+  { const SAFE_FROM = new Set(['Buffer.from(gS.bytes)', 'Buffer.from(kCopy)', 'Buffer.from(cS.bytes)']);   // resolveKeysBytes/resolveCadenceBytes — snapshotBytes output, immutable
+    const SAFE_BYTELEN = new Set(['buf.byteLength', 'bytes.byteLength']);   // buf = Buffer.from(await r.arrayBuffer()); bytes.byteLength = decodePackage's snapshotBytes-output immutable buffer (checkAuthorityProofBytes admits before calling it)
     const unaccounted = [];
-    idxLines.forEach((l, i) => {
-      for (const m of l.matchAll(/(?:Buffer|Uint8Array)\.from\(([a-zA-Z_][\w.]*)\)/g)) if (!SAFE_FROM.has(m[0])) unaccounted.push(`index.mjs:${i + 1} ${m[0]}`);
-      for (const m of l.matchAll(/\b([a-zA-Z_]\w*)\.byteLength\b/g)) { if (m[1] === 'Buffer') continue; if (!SAFE_BYTELEN.has(m[0])) unaccounted.push(`index.mjs:${i + 1} ${m[0]}`); }
-    });
-    check('FROM-CODE BYTE-DOOR INVENTORY: every raw-byte read in index.mjs is post-door (snapshotBytes/snapshotBinary immutable copy) or an allowlisted genuine source — a NEW Buffer.from(<obj>) / Uint8Array.from(<obj>) / caller-object .byteLength fails until routed through the door (round-49 P1-02 structural guard; the verifyJson budget bypass cannot recur silently)' + (unaccounted.length ? ' — UNACCOUNTED: ' + unaccounted.join('; ') : ''), unaccounted.length === 0);
+    for (const mod of ['index.mjs', 'reference-checker.mjs']) {   // round-50 P1-03 — scan the WHOLE L1 TCB, not just index.mjs (a byte read moved to reference-checker.mjs would have evaded)
+      readFileSync(new URL('../../packages/ust-protocol/' + mod, import.meta.url), 'utf8').split('\n').map((l) => l.replace(/\/\/.*$/, '')).forEach((l, i) => {
+        for (const m of l.matchAll(/(?:Buffer|Uint8Array)(?:\.from|\[['"]from['"]\])\(([a-zA-Z_][\w.]*)\)/g)) if (!SAFE_FROM.has('Buffer.from(' + m[1] + ')')) unaccounted.push(`${mod}:${i + 1} ${m[0]}`);   // round-50 P1-03 — also catch bracket `Buffer["from"](x)`
+        for (const m of l.matchAll(/\b([a-zA-Z_]\w*)(?:\.byteLength\b|\[['"]byteLength['"]\])/g)) { if (m[1] === 'Buffer') continue; if (!SAFE_BYTELEN.has(m[1] + '.byteLength')) unaccounted.push(`${mod}:${i + 1} ${m[0]}`); }   // round-50 P1-03 — also catch computed `x["byteLength"]`
+      });
+    }
+    // round-50 P1-03 — HONEST scope: this is a heuristic LINT over the L1 TCB (index + reference-checker) catching the DIRECT
+    // byte-read shapes (dot + bracket `.from`, dot + computed `.byteLength`). It is NOT a proof — an alias (`const f = Buffer.from`),
+    // helper indirection, or `new Uint8Array(arraylike)` can still evade a regex (GPT round-50 P1-03; a complete guarantee needs an
+    // AST rule). The REAL proof that the doors are used is the BEHAVIORAL totality test below (hostile input → structured reject).
+    check('BYTE-DOOR LINT (heuristic, index + reference-checker): every DIRECT raw-byte read (dot/bracket Buffer|Uint8Array.from(<obj>), dot/computed caller .byteLength) is an allowlisted post-door/genuine form — a new one fails until routed through the door. NOT a proof (aliases/helpers/new-Uint8Array evade a regex; the behavioral totality test is the guarantee)' + (unaccounted.length ? ' — UNACCOUNTED: ' + unaccounted.join('; ') : ''), unaccounted.length === 0);
+    // round-50 P1-03/P1-02 — the BEHAVIORAL guarantee (syntax-independent): drive every raw-byte ENTRY with hostile inputs and
+    // assert a STRUCTURED verdict, NEVER a host throw and NEVER acting on a forged/overridable measurement. This holds regardless
+    // of HOW the bytes are read inside — it is the property the lint only approximates.
+    const enc0 = (o) => new Uint8Array(Buffer.from(JSON.stringify(o), 'utf8'));
+    const hostiles = [
+      new Proxy(new Uint8Array(8), { getPrototypeOf() { throw new Error('trap'); }, get() { throw new Error('trap'); } }),   // Proxy w/ throwing traps
+      (() => { class E extends Uint8Array { get byteLength() { return 1; } } return new E(4096); })(),                        // subclass w/ forged byteLength
+      (() => { const o = { length: 8 }; for (let i = 0; i < 8; i++) Object.defineProperty(o, i, { enumerable: true, get() { throw new Error('idx'); } }); return o; })(),   // array-like w/ throwing indexed getters
+    ];
+    let behavioralOk = true;
+    for (const h of hostiles) {
+      for (const call of [() => P.verifyJson(h, { maxInputBytes: 64 }), () => P.resolveKeysBytes(h, enc0([])), () => P.resolveCadenceBytes(h, enc0([]), 'ust:20260101.00', undefined), () => P.snapshotBytes(h), () => P.admitUtf8(h)]) {
+        let r; try { r = call(); } catch { behavioralOk = false; break; }   // a host throw escaping any byte entry = FAIL
+        if (!r || typeof r !== 'object') { behavioralOk = false; break; }    // must be a structured result, never undefined/primitive
+      }
+    }
+    check('BYTE-DOOR BEHAVIORAL TOTALITY (the guarantee): every raw-byte entry (verifyJson / resolveKeysBytes / resolveCadenceBytes / snapshotBytes / admitUtf8) returns a STRUCTURED verdict on a hostile Proxy / forged-byteLength subclass / throwing-getter array-like — never a host throw, never acting on a forged measurement (round-50 P1-02/P1-03)', behavioralOk);
   }
   { const idxSrc = readFileSync(new URL('../../packages/ust-protocol/index.mjs', import.meta.url), 'utf8');
     const refSrc = readFileSync(new URL('../../packages/ust-protocol/reference-checker.mjs', import.meta.url), 'utf8');
