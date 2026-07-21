@@ -1526,6 +1526,17 @@ console.log('\n═════════════════════�
       const kl = [{ x: '1' }]; const evilGen = new Proxy(gen47, { get(t, k, r) { kl.length = 0; return Reflect.get(t, k, r); } });
       const evil = rkSig(P.resolveKeys(evilGen, kl));
       check('R47 P0-01 (calculator boundary) resolveKeys — a signed genesis getter cannot empty the still-live signed keylog before its reduction (canonical bytes captured at the door; attacked resolved-set == benign)', benign === evil); } }
+  // round-47 (rev69 structural rework — the CALCULATOR boundary is now a distinct EXPORT, claim bound to mechanism) —
+  // resolveCadenceBytes is a pure function of immutable byte-strings (order-independent BY CONSTRUCTION: a byte-string cannot
+  // mutate a sibling, JSON.parse runs no caller code) and IS the sound public boundary; the object resolveCadence is a CONVENIENCE
+  // adapter that faithfully delegates to it (same verdict on the same data). This closes the rev65 over-label "migrated to bytes".
+  { const gK69 = kp('7c6d'.repeat(16));
+    const T69 = { generated_at: '2026-07-20T00:00:00Z', valid_from: '2026-07-20T00:00:00Z', valid_to: '2026-08-20T00:00:00Z' };
+    const gen69 = P.seal(P.buildGenesis({ domain_shard: 'noosphere.md', ust_id: 'ust:20260720.00', key_id: gK69.key_id }, T69, gK69.pubB64, 256, 1048576, '3600'), gK69.priv, gK69.pubB64);
+    const enc69 = (o) => new Uint8Array(Buffer.from(P.canon(o), 'utf8'));
+    const rBytes = P.resolveCadenceBytes(enc69(gen69), enc69([]), 'ust:20260720.01', undefined);
+    const rObj = P.resolveCadence(gen69, [], 'ust:20260720.01', {});
+    check('R47 (rev69 structural) resolveCadenceBytes IS the sound bytes-in boundary (pure function of immutable byte-strings, order-independent by construction) and the object resolveCadence adapter faithfully delegates to it (identical verdict on the same data)', JSON.stringify(rBytes) === JSON.stringify(rObj) && rBytes.cadence === 3600); }
   // round-46 self-audit (totality) — combineSubstrates was the LONE public door the hand-maintained totality sweep
   // (round-17/18/19/24/38/39) never listed: a hostile `verifiers` Proxy (Array.isArray→true, then a throwing .filter/length
   // trap) SYNC-threw a host exception at its array-normalization. Now it fails CLOSED to an empty plugin list.
@@ -1916,6 +1927,7 @@ console.log('\n═════════════════════�
     verifyAuthorityCheckpointChain: 'surface', verifyCheckpointMapUniqueness: 'surface', verifyCheckpointRecovery: 'surface',
     verifyCheckpointUniqueness: 'surface', verifyEpochTransition: 'surface', verifyKeylogTerminality: 'surface',
     verifyNoForkEvidence: 'surface', resolveAuthority: 'surface', resolveByDiscovery: 'surface', resolveCadence: 'surface',
+    resolveCadenceBytes: 'surface',   // round-47 rev69 — the SOUND bytes-in boundary (a pure function of immutable byte-strings; resolveCadence is its object adapter)
     resolveCheckpointRoots: 'surface', resolveKeys: 'surface', deriveAssurance: 'surface', deriveCheckpointFreshness: 'surface',
     forkChoice: 'surface', noEventBacking: 'surface', verifiedGenesisContext: 'surface', checkAuthorityProof: 'surface',
     checkAuthorityProofBytes: 'surface', combineSubstrates: 'surface', witnessNoFork: 'surface',
@@ -1975,7 +1987,7 @@ console.log('\n═════════════════════�
     verifyKeylogTerminality: [oHead, oProof], verifyNoForkEvidence: [oStmt, oConf], resolveAuthority: [oDoc, oOpts],
     compareEvidenceOrder: [oEv, oEv], quorumTrustDomains: [oList, oConf],   // round-38 P1-02 — the exported evidence algebra is now a consumer surface in the totality sweep (admits its operands)
     assuranceLE: [oAssur, oAssur], meetAssurance: [oAssur, oAssur], joinAssurance: [oAssur, oAssur], projectTier: [oAssur], capAssurance: [oAssur, oAssur], checkBounds: [oDoc],   // round-39 P1-02 — the assurance lattice + the exported bounds validator are consumer surfaces now that the door returns a sentinel (total-by-return, never a throw)
-    resolveByDiscovery: [oDoc, oOpts, netMock], resolveCadence: [oGen, oArr, oStr, oOpts], resolveCheckpointRoots: [oGen],
+    resolveByDiscovery: [oDoc, oOpts, netMock], resolveCadence: [oGen, oArr, oStr, oOpts], resolveCadenceBytes: [oBytes, oBytes, oStr, oBytes], resolveCheckpointRoots: [oGen],
     resolveKeys: [oGen, oArr], deriveAssurance: [oGraph], deriveCheckpointFreshness: [oChain, oConf], forkChoice: [oFrames, oOpts],
     noEventBacking: [oConf, oConf, oFrames], verifiedGenesisContext: [oGen], checkAuthorityProof: [oConf, oConf],
     checkAuthorityProofBytes: [oBytes, oBytes], combineSubstrates: [oArr], witnessNoFork: [oStr, oHash, netMock],

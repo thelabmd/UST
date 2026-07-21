@@ -1546,20 +1546,19 @@ export function ustGrid(from, to, cadenceSec) {
 // key-log pattern applied to cadence: a signed, prev-chained sequence of changes). Old data verifies under the
 // cadence signed for ITS time, so an operator changing cadence NEVER retroactively invalidates history. Each
 // entry is a normal transcript, verified by §14; the log is genesis-rooted and prev-chained. → {cadence}|{error}.
-export function resolveCadence(genesis, cadenceLog = [], atTime, opts) {
-  // round-47 P0-01 (the CALCULATOR boundary) — Theorem R's "independent reductions, order irrelevant" is FALSE for ≥2 live
-  // signed arguments: admitDeep executes the [[Get]] face (round-29 P0-01), so reducing `genesis` can fire a getter that empties
-  // the still-live `cadenceLog` BEFORE its own reduction — a signed-vs-signed cross-argument mutation the config-first rev57 fix
-  // never covered (round-47 GPT audit P0). The sound boundary is canonical BYTES: reduce every live argument to an IMMUTABLE
-  // canonical byte-string up front (no getter can reach a byte-string once captured), capturing the MUTATION-VULNERABLE
-  // structural argument (cadenceLog carries no self-signature to fail-close a mutation) BEFORE the self-verifying genesis (whose
-  // own mutation fails E-GENESIS), then process ONLY the re-parsed inert forms. The exact sound form is bytes-in from the caller;
-  // this is the object-adapter realization on the way there.
-  const _o = admitOpts(opts); if (_o === null) return { error: 'E-MALFORMED', detail: 'opts is not an inert record (round-29 P1-01 totality — a hostile 4th arg cannot throw at this door)' };   // round-26/29 — admit the opts at the door (a hostile Proxy 4th arg → structured, never a host throw)
-  let cB, gB;
-  try { cB = canon(admitDeep(cadenceLog)); gB = canon(admitDeep(genesis)); } catch { return { error: 'E-MALFORMED', detail: 'genesis/cadenceLog is not an inert record (round-47 — reduced to canonical bytes at the door)' }; }
-  cadenceLog = JSON.parse(cB); genesis = JSON.parse(gB);   // fresh inert forms from immutable bytes — no getters, no cross-argument aliasing survives
-  const { keylog } = _o;
+// round-47 P0-01 (structural rework rev69, the CALCULATOR boundary DONE, not claimed) — Theorem R's exact sound form is a pure
+// function of canonical BYTE-STRINGS: byte-strings are IMMUTABLE and `JSON.parse` invokes no caller code, so the per-argument
+// reductions ARE genuinely independent and order IS irrelevant (unlike an object API, where `admitDeep` fires the [[Get]] face
+// and reducing one signed argument can mutate a still-live sibling — the signed-vs-signed cross-argument class). THIS is the
+// sound public boundary, the same shape as `checkAuthorityProofBytes` — the calculator eats bytes. `resolveCadence` (below) is
+// a CONVENIENCE object adapter over it, not the security boundary.
+export function resolveCadenceBytes(genesisBytes, cadenceLogBytes, atTime, keylogBytes) {
+  let genesis, cadenceLog, keylog;
+  try {
+    genesis = JSON.parse(Buffer.from(genesisBytes).toString('utf8'));
+    cadenceLog = JSON.parse(Buffer.from(cadenceLogBytes).toString('utf8'));
+    keylog = (keylogBytes === undefined || keylogBytes === null) ? undefined : JSON.parse(Buffer.from(keylogBytes).toString('utf8'));
+  } catch { return { error: 'E-MALFORMED', detail: 'resolveCadence arguments must be canonical UTF-8 JSON byte-strings' }; }
   if (cadenceLog !== undefined && cadenceLog !== null && !Array.isArray(cadenceLog)) return { error: 'E-MALFORMED', detail: 'cadenceLog must be an array' };
   cadenceLog = cadenceLog ?? [];   // round-43 — ONLY an absent (undefined/null) cadence-log defaults to empty; a present non-array already returned E-MALFORMED above (never the `Array.isArray(X)?X:[]` coalesce that hides a malformed selector)
   // #75 P1-03 — cadence is a canonical positive-integer STRING of seconds ("1.5" / "030" / 1e2 rejected).
@@ -1596,6 +1595,22 @@ export function resolveCadence(genesis, cadenceLog = [], atTime, opts) {
     lastEff = effE; prev = contentHash(e);
   }
   return { cadence };
+}
+// CONVENIENCE object adapter over `resolveCadenceBytes` — serialize each live argument to canonical bytes, then call the SOUND
+// bytes-core. This is NOT the hostile-getter security boundary: there is NO fully order-independent multi-object reduction in JS
+// (a getter fires on any traversal, so serializing one argument can mutate a still-live sibling). A caller that needs soundness
+// against a hostile Proxy passes PRE-SERIALIZED immutable bytes to `resolveCadenceBytes`. The structural-arg-first serialization
+// here (mutation-vulnerable cadenceLog captured before the self-verifying genesis) closes the common object-caller case.
+export function resolveCadence(genesis, cadenceLog = [], atTime, opts) {
+  const _o = admitOpts(opts); if (_o === null) return { error: 'E-MALFORMED', detail: 'opts is not an inert record (round-29 P1-01 totality — a hostile 4th arg cannot throw at this door)' };
+  const enc = (s) => new Uint8Array(Buffer.from(s, 'utf8'));
+  let gEnc, cEnc, kEnc;
+  try {
+    cEnc = enc(canon(admitDeep(cadenceLog)));            // structural arg first
+    gEnc = enc(canon(admitDeep(genesis)));               // self-verifying anchor last (its own mutation fails its signature)
+    kEnc = (_o.keylog === undefined || _o.keylog === null) ? undefined : enc(canon(admitDeep(_o.keylog)));
+  } catch { return { error: 'E-MALFORMED', detail: 'genesis/cadenceLog/keylog is not an inert record' }; }
+  return resolveCadenceBytes(gEnc, cEnc, atTime, kEnc);
 }
 
 // ─── #76/#77 AUTHORITY CHECKPOINT — the latest-head authority object (distinct from the STREAM `buildCheckpoint`).

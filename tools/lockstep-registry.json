@@ -342,6 +342,12 @@
       "rev": "rev59",
       "model_locus": "roster is now the RUNTIME MODULE NAMESPACE",
       "conformance_check": "R47 P1-03 (roster completeness — RUNTIME namespace) — EVERY function-typed export of the module (100, incl. re-exports + arrow-consts + the byte kernel checkAuthorityProofBytes) is TOTAL on a hostile Proxy UNLESS explicitly classified MAY-THROW (producer / byte-string primitive / verdict class / throw-by-contract); a source-regex miss (arrow-const, re-export, future callable) can no longer evade the gate"
+    },
+    {
+      "id": "R69-bytes-in-boundary-export",
+      "rev": "rev69",
+      "model_locus": "IS the sound public boundary",
+      "conformance_check": "R47 (rev69 structural) resolveCadenceBytes IS the sound bytes-in boundary (pure function of immutable byte-strings, order-independent by construction) and the object resolveCadence adapter faithfully delegates to it (identical verdict on the same data)"
     }
   ]
 }

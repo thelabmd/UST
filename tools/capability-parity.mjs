@@ -55,7 +55,7 @@ const CAPS = {
   'uniqueness-attest':  { core: ['checkpointUniquenessClaim', 'buildUniquenessAttestation', 'verifyCheckpointUniqueness'] },
   'verifiable-map':     { core: ['buildVerifiableMap', 'checkpointMapLeaf', 'nameMapLeaf', 'verifyCheckpointMapUniqueness', 'verifyActiveGenesisUniqueness'] },
   'keylog-commitment':  { core: ['keylogLeaf', 'buildKeylogCommitment', 'verifyKeylogTerminality'], cli: 'rotateKeylog' },
-  'cadence-grid':       { core: ['ustGrid', 'resolveCadence'] },
+  'cadence-grid':       { core: ['ustGrid', 'resolveCadence', 'resolveCadenceBytes'] },
   'substrate-registry': { core: ['combineSubstrates'] },
   'discovery-shard':    { core: ['isPublicDnsShard'], cli: 'attestDiscovery' },
   'disclosure':         { core: ['blindedCommit', 'blindPartition'] },

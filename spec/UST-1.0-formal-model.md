@@ -1135,10 +1135,16 @@ decomposed as `A ∘ ρ`.
 `genesis` emptied the still-live `cadenceLog` before its own reduction, turning `E-KEY` into a successful cadence resolution — so
 `ρ_cadenceLog` was **not** a function of `cadenceLog` alone and order was **not** irrelevant. The metatheorem is corrected: the
 EXACT sound boundary is CANONICAL BYTES — an entry that is a pure function of immutable byte-strings (as `checkAuthorityProofBytes`
-already is). An object-form entry with two or more live signed arguments is an ADAPTER that must reduce every live argument to
-canonical bytes at the door (the CALCULATOR boundary), capturing the mutation-vulnerable/structural arguments before the
-self-verifying ones — or accept bytes directly. The methodical remediation migrates the multi-signed-argument object entries to
-this bytes boundary, class-wide; `resolveCadence` is the first (round-47 P0-01, bd UST-5t8). **Realization (rev55):** the authority adapters' TRUST config is now
+already is). **Realization (rev69 — the bytes-in boundary is now a distinct EXPORT, not an internal step, and the claim is bound to
+the mechanism):** `resolveCadenceBytes(genesisBytes, cadenceLogBytes, atTime, keylogBytes)` is a pure function of immutable
+byte-strings — order-independent BY CONSTRUCTION (a byte-string cannot mutate a sibling and `JSON.parse` runs no caller code) — and
+IS the sound public boundary; `resolveCadence` is a CONVENIENCE object adapter over it (serialize each argument, structural before
+self-verifying) documented in-code as NOT the hostile-getter boundary. HONEST scope (correcting the rev65 over-label "migrated to the
+bytes boundary"): there is NO fully order-independent multi-live-OBJECT reduction in JS — a getter fires on any traversal — so the
+object adapter closes the common object-caller case but the SOLE order-free boundary is bytes-in; a caller needing soundness against a
+hostile Proxy passes PRE-SERIALIZED bytes to `resolveCadenceBytes`. `resolveCadence` is the FIRST exemplar of this split; the rest of
+the multi-signed-argument class (`resolveKeys`, …) is being migrated the same way (still ordering-disciplined adapters at rev69 — not
+yet a claim of a bytes-in export each), the object form staying for backward-compatibility. (round-47 P0-01, bd UST-5t8.) **Realization (rev55):** the authority adapters' TRUST config is now
 reduced by `admitInert` (side-effect-free) — a config getter/`toJSON` never executes (*"R46 checkAuthorityProof REDUCES the config side-effect-free — a config accessor getter is NEVER executed (the automaton reads DATA, never runs it; this SUPERSEDES the rev45 source-level admission order — no code runs at the boundary at all)"*). The residual `E`s (the signed-proof reads) are
 sound by discipline 2 (read-once + content-hash). **Realization (rev56):** `checkAuthorityProof` is now literally
 `A ∘ (ρ_package, ρ_config)` — `ρ_config = admitInert → canonJSON` (unsigned, side-effect-free), `ρ_package` (new) reads the
