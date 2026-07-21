@@ -29,7 +29,8 @@ const genesis = seal(P.buildGenesis({ domain_shard: DOMAIN, ust_id: 'ust:2026072
 
 // ── the ABSTRACT reference model (independent of resolveKeys) ──────────────────────────────────────────────────────
 // state: { active:Set<kid>, all:Set<kid>, compromised:Set<kid> }. An event is {op, signer, target}. Returns null if the
-// event is ILLEGAL (the impl must reject it too — checked separately), else the next state.
+// event is ILLEGAL, else the next state. Derived from the NORMATIVE F.5e transition system (round-47 P1-02) — NOT read off the
+// implementation, so the differential below is a genuine independent witness, not a shared-blind-spot tautology.
 const step = (s, ev) => {
   if (!s.active.has(ev.signer)) return null;                                  // signer must be active
   const active = new Set(s.active), all = new Set(s.all), comp = new Set(s.compromised);
@@ -38,9 +39,12 @@ const step = (s, ev) => {
     all.add(ev.target); active.add(ev.target);
     if (ev.op === 'rotate' && ev.signer !== ev.target) { active.delete(ev.signer); }   // the superseded signer leaves active
   } else if (ev.op === 'retire' || ev.op === 'compromise') {
-    if (!all.has(ev.target)) return null;                                     // revoke of a never-authorized key
-    if (comp.has(ev.target)) return null;                                     // compromised is terminal — cannot re-revoke
-    if (!active.has(ev.target)) return null;                                  // already left active (rotated-out/revoked): the impl rejects a revoke of a non-active key at the active-signer/target gate
+    // F.5e (normative, derived from the SPEC — not copied from the impl, round-47 P1-02): `revoke(k, r)` requires `k ∈ bind`
+    // and `k ∉ compromised` (terminality). It does NOT require `k ∈ active` — a redundant revoke of a rotated-out / retired
+    // (non-compromised) key is admissible and harmless (adjudicated: nondecreasing timeline can only move retirement LATER),
+    // so a RETIRED key may be re-revoked as COMPROMISED (a legitimate later discovery of an earlier compromise).
+    if (!all.has(ev.target)) return null;                                     // revoke of a never-authorized key (k ∉ bind)
+    if (comp.has(ev.target)) return null;                                     // compromise is TERMINAL — no re-revoke / downgrade
     active.delete(ev.target);
     if (ev.op === 'compromise') comp.add(ev.target);
   }
@@ -73,7 +77,10 @@ const legalEvents = (s) => {
       evs.push({ op: 'add', signer, target: t });
       evs.push({ op: 'rotate', signer, target: t });
     }
-    for (const t of s.active) { if (t === signer) continue; evs.push({ op: 'retire', signer, target: t }); evs.push({ op: 'compromise', signer, target: t }); }
+    // F.5e revoke targets EVERY bound key (`k ∈ bind`), not only active ones — so the enumerator NOW reaches retired→compromised
+    // (re-revoking a rotated-out / retired key as compromised), the ordering the round-47 audit named but the old `s.active`
+    // generator never produced. step() filters the truly-illegal ones (a compromised target → null); the differential covers the rest.
+    for (const t of s.all) { if (t === signer) continue; evs.push({ op: 'retire', signer, target: t }); evs.push({ op: 'compromise', signer, target: t }); }
   }
   return evs;
 };
@@ -138,4 +145,4 @@ dfs(S0, [], P.contentHash(genesis), 0);
 
 console.log(`temporal-bmc: ${sequences} reachable event sequences (len ≤ ${LEN}, ${POOL.length + 1} keys); ${differentials} differential checks vs an independent abstract model; ${attacks} non-active-signer attacks; ${illegals} illegal-target transitions (F.5e-excluded, incl. re-revoke-of-compromised)`);
 if (fails.length) { console.error('✗ TEMPORAL BMC FAILED — a counterexample in the key-log state machine:'); for (const f of fails.slice(0, 20)) console.error('   • ' + f); process.exit(1); }
-console.log('✓ TEMPORAL BMC: over EVERY reachable key-log event sequence, resolveKeys agrees with an independent abstract state machine; NO non-active key can authorize a later entry; and EVERY compromise-terminality transition (re-revoke or re-authorize a compromised key) is REJECTED — target-state legality tested DIRECTLY, not only via the differential whose model shared the impl\'s rules (round-47 P1-02)');
+console.log('✓ TEMPORAL BMC: over EVERY reachable key-log event sequence (incl. retired→compromised, now enumerated), resolveKeys agrees with an abstract model DERIVED FROM THE NORMATIVE F.5e SPEC — not copied from the impl, so the differential is a genuine independent witness; NO non-active key can authorize a later entry; and EVERY compromise-terminality transition is REJECTED directly (round-47 P1-02, structural step 2/3)');
