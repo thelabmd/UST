@@ -117,3 +117,10 @@ test('P1-06 toVerifiedEvidence maps a FINAL result to typed pow-header-chain evi
   assert.equal(ev.facts.not_before, '2026-07-01T00:00:00Z');
   assert.equal(toVerifiedEvidence('sha256:subj', { final: false }), null);
 });
+
+test('totality (round-46 self-audit): a hostile anchor declines (null), never a host throw', async () => {
+  const mk = () => new Proxy([{}], { get() { throw new Error('H'); }, ownKeys() { throw new Error('H'); }, getOwnPropertyDescriptor() { throw new Error('H'); } });
+  const junk = [null, undefined, {}, [], 'x', 123, mk()];
+  const sv = makeSubstrateVerify({ fetchImpl: async () => { throw new Error('net'); } });
+  for (const j of junk) { const r = await sv(j, j); assert.ok(r === null || (r && typeof r === 'object'), 'substrateVerify must decline/structured, never host-throw'); }
+});

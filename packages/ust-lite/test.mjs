@@ -50,6 +50,12 @@ const attDoc = lite.seal(attState, kp.privateKey, kp.pub);
 ok('lite.verify rejects hand-forged class:attestation w/o provenance', lite.verify(attDoc).error === 'E-MALFORMED');
 ok('full.verify rejects the same doc (PARITY — no lite-only VALID)', !full.isValid(full.verify(attDoc)));
 
+// totality (round-46 self-audit) — lite.verify is total: a hostile Proxy / malformed doc is a structured INVALID, never a host throw.
+const mkHostile = () => new Proxy([{}], { get() { throw new Error('H'); }, ownKeys() { throw new Error('H'); }, getOwnPropertyDescriptor() { throw new Error('H'); } });
+let liteTotal = true;
+for (const j of [null, undefined, {}, [], 'x', 123, mkHostile()]) { try { const r = lite.verify(j); if (!r || r.result !== 'INVALID') liteTotal = false; } catch { liteTotal = false; } }
+ok('lite.verify is TOTAL — hostile/malformed doc → structured INVALID, never a host throw', liteTotal);
+
 console.log(`\n  ust-lite validity vs full ust-protocol   PASS ${pass}   FAIL ${fail}`);
 if (F.length) { F.forEach((f) => console.log('    ✗ ' + f)); process.exit(1); }
 console.log('  ✓ a ust-lite document IS a valid UST document — byte-identical, cross-verified both ways');

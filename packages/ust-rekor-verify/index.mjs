@@ -30,10 +30,17 @@ const hexToBytes = (h) => Buffer.from(h.replace(/^sha256:/, ''), 'hex');
 // RFC 6962 §2.1.1 inclusion-proof verification (canonical, incl. the right-edge while-shift — a naive
 // left/right test is WRONG for a leaf near the tree's right edge, where fn==sn). leaf = SHA256(0x00||entry),
 // interior = SHA256(0x01||left||right).
-export function verifyInclusion({ leafHash, index, treeSize, hashes, rootHash }) {
-  if (index >= treeSize || index < 0) return false;
-  let hash = leafHash, fn = index, sn = treeSize - 1;
-  for (const sib of hashes.map(hexToBytes)) {
+export function verifyInclusion(proof) {
+  // totality (round-46 self-audit) — an inclusion proof is UNTRUSTED input: a null/hostile arg, a HOSTILE Proxy (a throwing getter
+  // fires on the destructuring below), or a non-array `hashes` must be a structured `false` (proof does not hold), never a host
+  // throw. Fail-closed (false = not proven). The whole read+recompute is guarded because a getter can throw at any field access.
+  try {
+    if (!proof || typeof proof !== 'object') return false;
+    const { leafHash, index, treeSize, hashes, rootHash } = proof;
+    if (!Array.isArray(hashes) || typeof index !== 'number' || typeof treeSize !== 'number') return false;
+    if (index >= treeSize || index < 0) return false;
+    let hash = leafHash, fn = index, sn = treeSize - 1;
+    for (const sib of hashes.map(hexToBytes)) {
     if (fn === sn || (fn & 1) === 1) {                 // right child, OR at the right edge → sibling on LEFT
       hash = sha256(Buffer.concat([Buffer.from([0x01]), sib, hash]));
       while (fn !== 0 && (fn & 1) === 0) { fn >>= 1; sn >>= 1; }   // climb past the right-edge run
@@ -41,8 +48,9 @@ export function verifyInclusion({ leafHash, index, treeSize, hashes, rootHash })
       hash = sha256(Buffer.concat([Buffer.from([0x01]), hash, sib]));
     }
     fn >>= 1; sn >>= 1;
-  }
-  return fn === 0 && hash.equals(hexToBytes(rootHash));
+    }
+    return fn === 0 && hash.equals(hexToBytes(rootHash));
+  } catch { return false; }
 }
 
 // Verify a Sigstore/Go signed-note checkpoint: the log's ECDSA signature over "origin\nsize\nroothash\n"
@@ -71,7 +79,10 @@ export function verifyCheckpoint(checkpoint, expectedRootHex, expectedTreeSize, 
 export function makeSubstrateVerify({ fetchImpl = fetch, api = REKOR, rekorPubKeyPem = REKOR_PUBKEY_PEM } = {}) {
   const pubKey = createPublicKey(rekorPubKeyPem);
   return async function substrateVerify(anchor, root) {
-    const a = anchor?.substrate === 'rekor' ? anchor : (anchor?.anchor?.substrate === 'rekor' ? anchor.anchor : null);
+    // totality (round-46 self-audit) — the anchor is UNTRUSTED: read it behind a guard so a hostile getter/Proxy declines (null →
+    // the router tries the next plugin), never a host throw. The integrated path passes an inert admitted proof; this covers a direct call.
+    let a;
+    try { a = anchor?.substrate === 'rekor' ? anchor : (anchor?.anchor?.substrate === 'rekor' ? anchor.anchor : null); } catch { return null; }
     if (!a || typeof root !== 'string') return null;   // not ours → let the router try the next plugin
 
     let proof = a.inclusionProof, integratedTime = a.integratedTime, bodyB64 = a.body;

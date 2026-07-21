@@ -57,9 +57,11 @@ export function parseOtsBitcoin(ots) {
 
 export function makeSubstrateVerify({ upgrade = true, fetchImpl = fetch, explorers = EXPLORERS, minConfirmations = 6, quorum = 2 } = {}) {
   return async function substrateVerify(anchor, root) {
-    const sub = anchor?.substrate ?? anchor?.anchor?.substrate;
+    // totality (round-46 self-audit) — the anchor is UNTRUSTED: read its fields behind a guard so a hostile getter/Proxy declines
+    // (null → the router tries the next plugin), never a host throw. The integrated path passes an inert admitted proof; this covers a direct call.
+    let sub, otsB64;
+    try { sub = anchor?.substrate ?? anchor?.anchor?.substrate; otsB64 = anchor?.ots ?? anchor?.anchor?.ots; } catch { return null; }
     if (sub && sub !== 'bitcoin-ots') return null;                 // not ours → router delegates onward
-    const otsB64 = anchor?.ots ?? anchor?.anchor?.ots;
     if (!otsB64 || typeof root !== 'string') return null;
     const OTS = loadOTS();
     if (!OTS) return null;                                          // P1-08: opentimestamps not installed (opt-in substrate) → decline, router delegates onward

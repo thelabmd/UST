@@ -80,3 +80,11 @@ test('P1-06 toVerifiedEvidence maps a FINAL Rekor result to typed transparency-l
   assert.equal(ev.facts.position, '42');
   assert.equal(toVerifiedEvidence('sha256:subj', { final: false }), null);
 });
+
+test('totality (round-46 self-audit): hostile/malformed input is a structured reject, never a host throw', async () => {
+  const mk = () => new Proxy([{}], { get() { throw new Error('H'); }, ownKeys() { throw new Error('H'); }, getOwnPropertyDescriptor() { throw new Error('H'); } });
+  const junk = [null, undefined, {}, [], 'x', 123, mk(), { leafHash: mk(), index: 0, treeSize: 1, hashes: mk(), rootHash: 'x' }];
+  for (const j of junk) assert.equal(verifyInclusion(j), false, 'verifyInclusion must return false, never throw');
+  const sv = makeSubstrateVerify({ fetchImpl: async () => { throw new Error('net'); } });
+  for (const j of junk) { const r = await sv(j, j); assert.ok(r === null || (r && typeof r === 'object'), 'substrateVerify must decline/structured, never host-throw'); }
+});

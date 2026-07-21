@@ -87,6 +87,10 @@ export function seal(state, privateKey, pubB64url) {
 //     LIGHT does NOT resolve name authority or time — those are HIGH/TOP (full UST). Identity is `self-asserted`.
 export function verify(doc) {
   const bad = (error, detail) => ({ result: 'INVALID', error, detail });
+  // totality (round-46 self-audit) — snapshot the doc ONCE into an inert record BEFORE any field read: a hostile getter/Proxy
+  // would otherwise throw a host exception at the first `doc.ust` access (or split a two-face payload across the reads below).
+  // JSON round-trip preserves the canonical values, so signedContent/signature are unaffected; a throwing getter → structured reject.
+  try { doc = JSON.parse(JSON.stringify(doc)); } catch { return bad('E-MALFORMED', 'document is not an inert record'); }
   // 1) structural admission + reserved-key isolation (no unsigned surface beside a VALID verdict)
   if (typeof doc !== 'object' || doc === null) return bad('E-MALFORMED', 'not an object');
   if (doc.ust === undefined || doc.state === undefined || doc.sig === undefined) return bad('E-MALFORMED', 'missing ust/state/sig');
