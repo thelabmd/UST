@@ -29,14 +29,44 @@ export function isPrivateIp(ip) {
     );
   }
   if (v === 6) {
-    const a = ip.toLowerCase().split('%')[0];
-    if (a === '::1' || a === '::') return true;                                 // loopback / unspecified
-    const m = a.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);                         // IPv4-mapped → classify as v4
-    if (m) return isPrivateIp(m[1]);
-    return a.startsWith('fc') || a.startsWith('fd') ||                          // fc00::/7 unique-local
-      a.startsWith('fe8') || a.startsWith('fe9') || a.startsWith('fea') || a.startsWith('feb'); // fe80::/10 link-local
+    // round-49 P1-01 — classify by BYTE RANGE, not textual spelling: the old `^::ffff:(dotted-decimal)$` regex missed the
+    // equivalent HEX form (`::ffff:7f00:1` = 127.0.0.1) and every compressed variant, so a mapped-loopback SSRF slipped through.
+    const b = ipv6ToBytes(ip.toLowerCase().split('%')[0]);
+    if (!b) return true;                                                        // unparseable (net.isIP said v6, but be safe) → refuse
+    if (b.every((x) => x === 0)) return true;                                   // :: unspecified
+    if (b.slice(0, 15).every((x) => x === 0) && b[15] === 1) return true;       // ::1 loopback
+    const mapped = b.slice(0, 10).every((x) => x === 0) && b[10] === 0xff && b[11] === 0xff;   // ::ffff:0:0/96 IPv4-mapped
+    const compat = b.slice(0, 12).every((x) => x === 0);                        // ::/96 IPv4-compatible (deprecated)
+    const nat64 = b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b && b.slice(4, 12).every((x) => x === 0);   // 64:ff9b::/96 NAT64
+    if (mapped || compat || nat64) return isPrivateIp(b.slice(12).join('.'));   // classify the embedded IPv4 via the v4 policy — ANY spelling
+    if ((b[0] & 0xfe) === 0xfc) return true;                                    // fc00::/7 unique-local
+    if (b[0] === 0xfe && (b[1] & 0xc0) === 0x80) return true;                   // fe80::/10 link-local
+    return false;
   }
   return true;                                                                  // not an IP literal → caller resolves
+}
+
+// Parse a lower-cased IPv6 literal to its 16 octets (handles `::` compression + an embedded IPv4 tail `::ffff:1.2.3.4` /
+// `::1.2.3.4`). round-49 P1-01 — the mapped range must be caught in EVERY spelling, so classification runs over bytes, not text.
+function ipv6ToBytes(a) {
+  let s = a, v4 = null;
+  const li = s.lastIndexOf(':');
+  if (li >= 0 && s.slice(li + 1).includes('.')) {                              // embedded dotted IPv4 tail
+    const parts = s.slice(li + 1).split('.');
+    if (parts.length !== 4 || parts.some((p) => !/^\d{1,3}$/.test(p) || Number(p) > 255)) return null;
+    v4 = parts.map(Number); s = s.slice(0, li + 1);                            // keep the trailing ':' before the tail
+  }
+  const dbl = s.split('::');
+  if (dbl.length > 2) return null;
+  const lh = dbl[0] ? dbl[0].split(':').filter(Boolean) : [];
+  const rh = dbl.length === 2 ? (dbl[1] ? dbl[1].split(':').filter(Boolean) : []) : null;
+  const need = 8 - (v4 ? 2 : 0);
+  const hextets = rh === null ? lh : [...lh, ...Array(need - lh.length - rh.length).fill('0'), ...rh];
+  if (rh === null ? hextets.length !== need : (need - lh.length - rh.length) < 0) return null;
+  const bytes = [];
+  for (const h of hextets) { if (!/^[0-9a-f]{1,4}$/.test(h)) return null; const n = parseInt(h, 16); bytes.push((n >> 8) & 0xff, n & 0xff); }
+  if (v4) bytes.push(...v4);
+  return bytes.length === 16 ? bytes : null;
 }
 
 // Wrap a fetch so a discovery target that resolves to a private address is refused before connecting.

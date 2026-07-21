@@ -136,10 +136,29 @@ export function snapshotBytes(input, maxBytes, sizeErr) {
   if (maxBytes !== undefined && len > maxBytes) return { error: sizeErr || 'E-BYTES-SIZE' };
   const copy = new Uint8Array(len); copy.set(input); return { bytes: copy };   // fresh immutable copy via the intrinsic set — no caller getter runs
 }
+// round-49 P1-02 — the same door for verifyJson's BROADER binary domain (a UTF-8 string OR ArrayBuffer/TypedArray/Buffer/
+// DataView). `snapshotBytes` is the exact-Uint8Array case; here the length and bytes are read through INTRINSIC getters only,
+// so a subclass with an OWN `byteLength` getter cannot forge the transport measurement, and the decode runs on the immutable
+// copy — closing the verifyJson budget bypass and making the intrinsic snapshot the ONLY measured/decoded form.
+const AB_BYTELENGTH = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'byteLength').get;
+const TA_BYTEOFFSET = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteOffset').get;
+const DV = typeof DataView !== 'undefined' ? DataView.prototype : null;
+const DV_BUFFER = DV ? Object.getOwnPropertyDescriptor(DV, 'buffer').get : null;
+const DV_BYTEOFFSET = DV ? Object.getOwnPropertyDescriptor(DV, 'byteOffset').get : null;
+const DV_BYTELENGTH = DV ? Object.getOwnPropertyDescriptor(DV, 'byteLength').get : null;
+function snapshotBinary(input) {
+  const fromBuf = (buf, off, len) => { if (typeof SharedArrayBuffer !== 'undefined' && buf instanceof SharedArrayBuffer) return null; const c = new Uint8Array(len); c.set(new Uint8Array(buf, off, len)); return c; };
+  if (input instanceof ArrayBuffer) { let n; try { n = AB_BYTELENGTH.call(input); } catch { return null; } const c = new Uint8Array(n); c.set(new Uint8Array(input, 0, n)); return c; }
+  try { return fromBuf(TA_BUFFER.call(input), TA_BYTEOFFSET.call(input), TA_BYTELENGTH.call(input)); } catch { /* not a TypedArray */ }
+  try { if (DV_BUFFER) return fromBuf(DV_BUFFER.call(input), DV_BYTEOFFSET.call(input), DV_BYTELENGTH.call(input)); } catch { /* not a DataView */ }
+  return null;
+}
 // Strict UTF-8 decode: Node's Buffer.toString('utf8') silently maps invalid bytes to U+FFFD, so 0xFF and the real
 // 3-byte U+FFFD collapse to one string. fatal:true rejects invalid UTF-8 instead (P1-01). → string | null.
 function strictUtf8(bytes) {
-  try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes)); }
+  const b = bytes instanceof Uint8Array ? bytes : snapshotBinary(bytes);   // round-49 P1-02 sweep — intrinsic admit; a plain array-like → null (never Uint8Array.from, which runs its getters)
+  if (b === null) return null;
+  try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(b); }
   catch { return null; }
 }
 // round-19 P1-01 — ONE Unicode byte-admission (§6), shared by the discovery resolver AND the byte-checker TCB, so
@@ -147,7 +166,8 @@ function strictUtf8(bytes) {
 // a document via discovery). (1) a leading UTF-8 BOM (EF BB BF) is REJECTED, not silently stripped — TextDecoder would
 // alias two distinct byte-strings to one decoded object (M-BYTE injectivity). → { text } | { err:'BOM' } | { err:'UTF8' }.
 export function admitUtf8(bytes) {
-  const b = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+  const b = bytes instanceof Uint8Array ? bytes : snapshotBinary(bytes);   // round-49 P1-02 sweep — intrinsic admit; array-like → null → structured UTF8 error, no getter runs
+  if (b === null) return { err: 'UTF8' };
   if (b.length >= 3 && b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) return { err: 'BOM' };
   const t = strictUtf8(b);
   return t === null ? { err: 'UTF8' } : { text: t };
@@ -2543,7 +2563,12 @@ export function verifyJson(rawBytes, opts = {}) {
   // host TypeError (ERR_INVALID_ARG_TYPE) instead of a structured verdict — I4 totality demands a structured result.
   if (!isStr && !(rawBytes instanceof ArrayBuffer || ArrayBuffer.isView(rawBytes)))
     return bad('E-MALFORMED', 'raw input must be a UTF-8 string or a byte buffer (ArrayBuffer/TypedArray/Buffer) — a non-binary argument returns structured, never a host TypeError (round-25 P1-02)');
-  const byteLen = isStr ? Buffer.byteLength(rawBytes, 'utf8') : (rawBytes.byteLength ?? Buffer.from(rawBytes).length);
+  // round-49 P1-02 — admit the binary input through the INTRINSIC-based door BEFORE measuring: a Uint8Array subclass with an
+  // OWN `byteLength` getter returning 1 (intrinsic 2008) forged the transport size and bypassed maxInputBytes. Measure + decode
+  // the immutable intrinsic snapshot, never a caller-overridable property or the original object (closes the single-door gap d1).
+  const snap = isStr ? null : snapshotBinary(rawBytes);
+  if (!isStr && snap === null) return bad('E-MALFORMED', 'raw byte input must be a genuine ArrayBuffer/TypedArray/Buffer/DataView read through intrinsic getters (round-49 P1-02 — no caller-overridable byteLength)');
+  const byteLen = isStr ? Buffer.byteLength(rawBytes, 'utf8') : snap.length;
   const inputBudget = admitBudget(opts.maxInputBytes, BOUNDS.sizeBytes); if (inputBudget === null) return bad('E-MALFORMED', 'maxInputBytes must be a finite positive integer of bytes (round-38 P1-03/R4 — a caller resource scalar may only TIGHTEN the 64 MiB ceiling, never expand or disable it via Infinity/NaN)');
   if (byteLen > inputBudget)
     return { result: 'INDETERMINATE', reason: 'resource_limit', detail: `raw input ${byteLen} B > input budget ${inputBudget} B — transport admission refused, verification not started` };
@@ -2551,7 +2576,7 @@ export function verifyJson(rawBytes, opts = {}) {
   // the real 3-byte U+FFFD collapse to ONE string ⇒ distinct byte-strings, one verdict (breaks I4). fatal reject.
   let raw;
   if (isStr) { raw = rawBytes; if (raw.charCodeAt(0) === 0xFEFF) return bad('E-CANON', 'raw input has a leading U+FEFF BOM — rejected (round-19 P1-01)', { obligation: '§6 canonical UTF-8' }); }   // round-19 P1-01 — a pre-decoded string with a leading BOM (same domain as the byte checker's E-BOM)
-  else { const a = admitUtf8(rawBytes); if (a.err === 'BOM') return bad('E-CANON', 'raw input has a leading UTF-8 BOM (EF BB BF) — rejected, not stripped (round-19 P1-01)', { obligation: '§6 canonical UTF-8' }); if (a.err) return bad('E-CANON', 'raw input is not valid UTF-8 (invalid byte sequence)', { obligation: '§6 canonical UTF-8' }); raw = a.text; }
+  else { const a = admitUtf8(snap); if (a.err === 'BOM') return bad('E-CANON', 'raw input has a leading UTF-8 BOM (EF BB BF) — rejected, not stripped (round-19 P1-01)', { obligation: '§6 canonical UTF-8' }); if (a.err) return bad('E-CANON', 'raw input is not valid UTF-8 (invalid byte sequence)', { obligation: '§6 canonical UTF-8' }); raw = a.text; }
   const dup = scanDuplicateKeys(raw);
   if (dup) return bad('E-CANON', dup);
   let obj; try { obj = JSON.parse(raw); } catch { return bad('E-MALFORMED', 'not valid JSON'); }

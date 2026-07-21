@@ -56,6 +56,30 @@ let liteTotal = true;
 for (const j of [null, undefined, {}, [], 'x', 123, mkHostile()]) { try { const r = lite.verify(j); if (!r || r.result !== 'INVALID') liteTotal = false; } catch { liteTotal = false; } }
 ok('lite.verify is TOTAL — hostile/malformed doc → structured INVALID, never a host throw', liteTotal);
 
+// 7) round-49 P0-01 DIFFERENTIAL — the drift-catcher. GPT round-49 found lite reading VALID:LIGHT on an omitted class and an
+//    impossible calendar date (2026-02-31) that the full verifier REJECTS — a lite-only false accept, because lite re-implements
+//    validation as a SHAPE regex that drifted looser than core. The invariant is soundness: lite VALID ⇒ core VALID. A resign()
+//    builds a valid state, mutates it, re-seals (so the disagreement is verifier SEMANTICS, not a broken signature), and we assert
+//    lite NEVER accepts what core rejects across omitted-required-member + impossible-calendar shapes.
+const resign = (mutate) => { const s = JSON.parse(JSON.stringify(lite.buildState(id, time, data))); mutate(s); return lite.seal(s, kp.privateKey, kp.pub); };
+const corpus = [
+  ['class absent', resign((s) => { delete s.id.class; })],
+  ['class attestation', resign((s) => { s.id.class = 'attestation'; })],
+  ['generated_at 2026-02-31', resign((s) => { s.time.generated_at = '2026-02-31T12:00:00Z'; })],
+  ['valid_to 2026-13-01', resign((s) => { s.time.valid_to = '2026-13-01T12:00:00Z'; })],
+  ['ust_id 20260231 (impossible date)', resign((s) => { s.id.ust_id = 'ust:20260231.12'; })],
+  ['ust_id 20260229 (non-leap Feb 29)', resign((s) => { s.id.ust_id = 'ust:20260229.12'; })],
+];
+let diffOk = true;
+for (const [name, doc] of corpus) {
+  const liteValid = lite.verify(doc).result === 'VALID:LIGHT';
+  const coreValid = full.isValid(full.verify(doc));
+  if (liteValid && !coreValid) { diffOk = false; F.push('P0-01 DIFFERENTIAL lite-VALID/core-INVALID: ' + name); }   // the soundness break
+}
+ok('round-49 P0-01 differential: lite VALID ⇒ core VALID (no lite-only accept over absent-class / impossible-calendar shapes)', diffOk);
+ok('round-49 P0-01 pin: absent class → lite INVALID (was VALID:LIGHT)', lite.verify(corpus[0][1]).error === 'E-MALFORMED');
+ok('round-49 P0-01 pin: 2026-02-31 generated_at → lite INVALID (was VALID:LIGHT)', lite.verify(corpus[2][1]).error === 'E-MALFORMED');
+
 console.log(`\n  ust-lite validity vs full ust-protocol   PASS ${pass}   FAIL ${fail}`);
 if (F.length) { F.forEach((f) => console.log('    ✗ ' + f)); process.exit(1); }
-console.log('  ✓ a ust-lite document IS a valid UST document — byte-identical, cross-verified both ways');
+console.log('  ✓ a ust-lite document IS a valid UST document — byte-identical, cross-verified both ways, AND lite VALID ⇒ core VALID over adversarial shapes (round-49 P0-01 differential)');

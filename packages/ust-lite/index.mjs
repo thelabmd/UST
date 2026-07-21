@@ -56,6 +56,12 @@ const KINDS = ['captured', 'computed'], PRIVACY = ['blinded', 'encrypted'];
 const CLASSES = ['observation', 'attestation', 'derivation', 'genesis', 'key', 'cadence'];
 const TS = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\dZ$/;
 const USTID = /^ust:\d{4}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\.([01]\d|2[0-3])(([0-5]\d)([0-5]\d)?)?$/;
+// round-49 P0-01 — the regex is a SHAPE floor only (`2026-02-31` passes it); the full verifier requires a REAL calendar date,
+// so lite must too, or a lite-VALID doc is core-INVALID. Same rule as core's calendarValid — round-trip through Date.UTC and
+// require the components to survive (deterministic on every engine). Kept BYTE-IDENTICAL to core; the differential gate pins it.
+const calOk = (y, mo, d) => { const t = new Date(Date.UTC(+y, +mo - 1, +d)); return t.getUTCFullYear() === +y && t.getUTCMonth() === +mo - 1 && t.getUTCDate() === +d; };
+const tsCalOk = (ts) => calOk(ts.slice(0, 4), ts.slice(5, 7), ts.slice(8, 10));
+const ustIdCalOk = (u) => calOk(u.slice(4, 8), u.slice(8, 10), u.slice(10, 12));
 const FLOOR = { partitions: 64, sizeBytes: 1048576 };   // §13 anonymous LIGHT floor (full UST raises these via a genesis grant)
 
 // ─── producer: keypair → buildState (auto per-partition hashes) → seal (sign the carried key) ─────────
@@ -66,6 +72,7 @@ export function keypair() {
 }
 export function buildState(id, time, data) {
   if (id.class !== undefined && id.class !== 'observation') throw err('E-MALFORMED', 'ust-lite builds class:"observation" only — use ust-protocol for attestation/derivation/genesis/key/cadence');
+  id = { ...id, class: 'observation' };   // round-49 P0-01 — class is REQUIRED (the verifier now rejects an absent class); ust-lite always stamps observation
   const n = Object.keys(data).length;
   if (n > FLOOR.partitions) throw err('E-BOUNDS', `${n} partitions > LIGHT floor ${FLOOR.partitions} (raise via a genesis grant on full UST)`);
   const hashes = {};
@@ -120,15 +127,15 @@ export function verify(doc) {
     if (recomputed !== st.hashes[name]) return bad('E-CANON', 'partition hash mismatch: ' + name);
   }
   // 3) shape (§8/§6): ust_id, RFC3339-Z times, valid_from ≤ valid_to, class registry, key-form self-certification
-  if (!USTID.test(st.id.ust_id)) return bad('E-MALFORMED', 'ust_id shape');
+  if (!USTID.test(st.id.ust_id) || !ustIdCalOk(st.id.ust_id)) return bad('E-MALFORMED', 'ust_id shape or date not on the calendar');
   if (!TS.test(st.time.generated_at) || !TS.test(st.time.valid_from) || !TS.test(st.time.valid_to)) return bad('E-MALFORMED', 'timestamp not RFC3339-Z');
+  if (!tsCalOk(st.time.generated_at) || !tsCalOk(st.time.valid_from) || !tsCalOk(st.time.valid_to)) return bad('E-MALFORMED', 'timestamp date not on the calendar');   // round-49 P0-01 — real date, not just shape
   if (st.time.valid_from > st.time.valid_to) return bad('E-MALFORMED', 'valid_from > valid_to');
-  if (st.id.class !== undefined && !CLASSES.includes(st.id.class)) return bad('E-MALFORMED', 'unknown class');
-  // §14.5 / N10 class↔provenance: ust-lite carries NO provenance, so it handles `observation` (data) ONLY.
-  // `attestation`/`derivation` REQUIRE provenance (constituents+root / based_on); `genesis`/`key`/`cadence` are the
-  // HIGH/TOP trust layer. Accepting them here would let a malformed doc read VALID:LIGHT that full UST rejects.
-  if (st.id.class !== undefined && st.id.class !== 'observation')
-    return bad('E-MALFORMED', `ust-lite verifies class:"observation" only — "${st.id.class}" needs provenance or the HIGH/TOP layer; use ust-protocol`);
+  // §14.5 / N10 class↔provenance: ust-lite carries NO provenance, so it handles `observation` (data) ONLY, and class is
+  // REQUIRED — the full verifier rejects an absent/unknown class (round-49 P0-01: an omitted class read VALID:LIGHT here while
+  // core returned INVALID). `attestation`/`derivation` REQUIRE provenance; `genesis`/`key`/`cadence` are the HIGH/TOP layer.
+  if (st.id.class !== 'observation')
+    return bad('E-MALFORMED', `ust-lite verifies class:"observation" only (class is required) — "${st.id.class}" needs provenance or the HIGH/TOP layer; use ust-protocol`);
   if (/^sha256:[0-9a-f]{64}$/.test(st.id.domain_shard) && st.id.domain_shard !== st.id.key_id) return bad('E-MALFORMED', 'key-form domain_shard ≠ key_id');
   // 4) authenticity (the FLOOR): key_id == keyId(sig.pub) == state.id.key_id, strict Ed25519 over S
   const s = doc.sig;

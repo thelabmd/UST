@@ -376,6 +376,10 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   // rc.12 P0-2/P1-7: transport admission is resource_limit, decided on BYTES before decode
   const rTrans = P.verifyJson(Buffer.alloc(67_108_865, 120));
   check('transport: over-budget Buffer → INDETERMINATE(resource_limit) BEFORE decode', rTrans.result === 'INDETERMINATE' && rTrans.reason === 'resource_limit');
+  // round-49 P1-02 — the transport measurement is read through the INTRINSIC byteLength (snapshotBinary), not a caller-overridable
+  // property: a Uint8Array SUBCLASS whose own `byteLength` getter reports 1 (intrinsic 2008) must NOT bypass maxInputBytes.
+  const forgedLen = (() => { class Evil extends Uint8Array { get byteLength() { return 1; } }; const e = new Evil(2008); return P.verifyJson(e, { maxInputBytes: 64 }); })();
+  check('round-49 P1-02: a Uint8Array subclass with a forged byteLength getter cannot bypass the transport budget — measured by the intrinsic snapshot (resource_limit on the REAL 2008 B, not the forged 1 B)', forgedLen.result === 'INDETERMINATE' && forgedLen.reason === 'resource_limit');
   // rc.12 capability ceiling: protocol-valid but beyond THIS verifier
   const rCapb = P.verify(mk(), { context: 'data', maxSupportedBytes: 100 });
   check('capability: valid doc beyond verifier budget → INDETERMINATE(resource_limit)', rCapb.result === 'INDETERMINATE' && rCapb.reason === 'resource_limit');
@@ -397,7 +401,7 @@ console.log('\n═════════════════════�
   const priv = ['localhost', '127.0.0.1', '169.254.169.254', '192.168.1.1', 'foo.internal', 'x.local',
     'y.onion', '::1', 'fd00::1', 'host:8080', 'nohostonly', 'a..b.com', 'http://x.com', 'x.com/p', 'user@x.com'];
   check('ssrf guard: public DNS names pass', pub.every(P.isPublicDnsShard));
-  check('ssrf guard: IPs/localhost/internal/ports/paths refused', priv.every((s) => !P.isPublicDnsShard(s)));
+  check('ssrf PORTABLE LEXICAL floor: isPublicDnsShard rejects each of these ' + priv.length + ' IP-literal/localhost/internal/port/path forms (the browser-safe floor; the Node resolve-time guard + IPv4-mapped-IPv6 normalization is covered separately in ssrf.test.mjs — round-49 P1-03: this label is the lexical list, not the full guard)', priv.every((s) => !P.isPublicDnsShard(s)));
 
   // resolveByDiscovery: an internal-address document NEVER makes a network call (fetchImpl asserts none)
   let touched = 0;
@@ -405,7 +409,7 @@ console.log('\n═════════════════════�
   const evilId = { ...ID, domain_shard: '169.254.169.254', ust_id: 'ust:20260628.15' };
   const evil = P.seal(P.buildState(evilId, T, { p: { kind: 'captured', value: { x: '1' } } }), A.priv, A.pubB64);
   const r1 = await P.resolveByDiscovery(evil, { context: 'data' }, { fetchImpl: spyFetch });
-  check('resolveByDiscovery: SSRF target never fetched', touched === 0 && !!r1.resolution?.skipped);
+  check('resolveByDiscovery: a document whose domain_shard is a literal internal IP (169.254.169.254) is SKIPPED — no fetch attempted (round-49 P1-03: one representative internal-literal case; the full resolve-time private-address refusal is exercised in ssrf.test.mjs)', touched === 0 && !!r1.resolution?.skipped);
 
   // offline forbids the network even for a public name
   const okId = { ...ID, domain_shard: 'noosphere.md', ust_id: 'ust:20260628.15' };
