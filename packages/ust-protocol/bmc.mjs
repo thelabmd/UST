@@ -105,21 +105,43 @@ for (const vv of valids) {
 // (verified against GPT's fault-injected mutant: it catches ReinforceMap[Freshness, QuorumAgreement] → VALID).
 {
   const RULE_KIND = { Genesis: 'Genesis', CheckpointZero: 'Chain', CheckpointStep: 'Chain', ConnectorEvidence: 'Evidence', AfterOrder: 'After', Corroborated: 'Freshness', MapUnique: 'MapUnique', QuorumAgreement: 'QuorumAgreement', ReinforceMap: 'Freshness', ReinforceQuorum: 'Freshness', FutureGenesisCommitment: 'FutureCommitted', ActivateGenesis: 'EpochActivated', NameBound: 'Identity', Anchored: 'Time', ProjectAssurance: 'Assurance' };
-  // required child-KIND per position, per composite rule (from the interpreter's `sub(i).j.kind !== 'K'` gates)
-  const CHILD_SIG = { CheckpointZero: ['Genesis'], CheckpointStep: ['Chain'], ConnectorEvidence: ['Genesis'], AfterOrder: ['Evidence', 'Evidence'], MapUnique: ['Chain'], QuorumAgreement: ['Chain'], ReinforceMap: ['Freshness', 'MapUnique'], ReinforceQuorum: ['Freshness', 'QuorumAgreement'], FutureGenesisCommitment: ['Chain'], NameBound: ['Genesis'] };
+  // required child-KIND per position, per composite rule (from the interpreter's `sub(i).j.kind !== 'K'` gates). round-48 P1-02
+  // — COMPLETE: every rule the interpreter gates on child kind, all 22 positions (was a 13-position hand SUBSET that omitted
+  // Corroborated's 4, ActivateGenesis's 2, ProjectAssurance's 3 → "every composite child-position" measured the wrong total).
+  // The interpSig cross-check below re-derives this from the interpreter source and FAILS on any drift.
+  const CHILD_SIG = { CheckpointZero: ['Genesis'], CheckpointStep: ['Chain'], ConnectorEvidence: ['Genesis'], AfterOrder: ['Evidence', 'Evidence'], Corroborated: ['Chain', 'Evidence', 'Evidence', 'After'], MapUnique: ['Chain'], QuorumAgreement: ['Chain'], ReinforceMap: ['Freshness', 'MapUnique'], ReinforceQuorum: ['Freshness', 'QuorumAgreement'], FutureGenesisCommitment: ['Chain'], ActivateGenesis: ['FutureCommitted', 'Genesis'], NameBound: ['Genesis'], ProjectAssurance: ['Identity', 'Freshness', 'Time'] };
   const wk = {}, allWit = {};
   for (const vv of valids) { const pkg = JSON.parse(Buffer.from(vv.package_b64url, 'base64url').toString('utf8')); Object.assign(allWit, pkg.witnesses || {}); (function walk(n) { if (!n || typeof n !== 'object' || !n.rule) return; const k = RULE_KIND[n.rule]; if (k && !wk[k]) wk[k] = n; for (const c of n.children || []) walk(c); })(pkg.term); }
   const cfg3 = new Uint8Array(Buffer.from(valids[0].config_b64url, 'base64url'));
   const runT = (term) => { try { return P.checkAuthorityProofBytes(new Uint8Array(Buffer.from(P.canon({ term, witnesses: allWit }), 'utf8')), cfg3); } catch { return { result: 'INVALID' }; } };
-  // round-47 step 3/3 — bind the claim to the mechanism: track EVERY (rule,position) pair and report which are exercised vs
-  // which are SKIPPED and WHY. A skip is no longer silent (the old `continue` hid ReinforceMap[0] behind a missing MapUnique
-  // witness → the "every composite rule" claim was false). With the accept.reinforce-map baseline the MapUnique kind is now
-  // present, so the residual should be EMPTY; if a future kind drops out, the harness SAYS SO instead of quietly narrowing.
-  let coveredPositions = 0; const skippedPositions = [];
+  // round-48 P1-02 — the DENOMINATOR must be the INTERPRETER's, not a hand-list. Re-derive every kind-gated child position from
+  // the interpreter SOURCE and CROSS-CHECK CHILD_SIG against it: a rule/position/kind the interpreter gates but CHILD_SIG omits
+  // or mis-declares FAILS here. The "13 vs 22" drift (a hand subset silently narrowing the denominator) can no longer hide.
+  const refSrc = readFileSync(new URL('./reference-checker.mjs', import.meta.url), 'utf8');
+  const interpSig = {};
+  { const cases = [...refSrc.matchAll(/case '([^']+)':\s*\{/g)];
+    for (let c = 0; c < cases.length; c++) {
+      const name = cases[c][1], start = cases[c].index, end = c + 1 < cases.length ? cases[c + 1].index : start + 3000;
+      const body = refSrc.slice(start, end);
+      const subs = [...body.matchAll(/\bsub\((\d+)\)/g)].map((x) => +x[1]);
+      const kinds = [...body.matchAll(/\.kind !== '([^']+)'/g)].map((x) => x[1]);
+      if (subs.length) interpSig[name] = { n: Math.max(...subs) + 1, kinds };
+    }
+  }
+  for (const [rule, s] of Object.entries(interpSig)) {
+    const declared = CHILD_SIG[rule];
+    if (!declared) { fails.push(`P3 DENOMINATOR DRIFT (round-48 P1-02): interpreter gates ${rule} on ${s.n} child position(s) but CHILD_SIG omits it — the coverage denominator drifted from the interpreter`); continue; }
+    if (declared.length !== s.n) fails.push(`P3 DENOMINATOR DRIFT (round-48 P1-02): ${rule} — interpreter gates ${s.n} child positions, CHILD_SIG declares ${declared.length}`);
+    s.kinds.forEach((k, i) => { if (declared[i] !== k) fails.push(`P3 DENOMINATOR DRIFT (round-48 P1-02): ${rule}[${i}] — interpreter requires ${k}, CHILD_SIG declares ${declared[i]}`); });
+  }
+  // coverage over the SOURCE-VERIFIED denominator. A position whose sibling needs a kind ABSENT from the corpus is a DECLARED
+  // residual (counted against the true total + NAMED — not a silent subset: the denominator now SHOWS it, so it cannot narrow).
+  const totalPositions = Object.values(CHILD_SIG).reduce((n, s) => n + s.length, 0);
+  let coveredPositions = 0; const residual = [];
   for (const [rule, sig] of Object.entries(CHILD_SIG)) {
     for (let i = 0; i < sig.length; i++) {
       const missing = [...new Set(sig.filter((k, j) => j !== i && !wk[k]))];   // sibling kinds with no witness to hold position ≠ i
-      if (missing.length) { skippedPositions.push(`${rule}[${i}] (no ${missing.join('/')} witness for a sibling)`); continue; }
+      if (missing.length) { residual.push(`${rule}[${i}] (corpus lacks a ${missing.join('/')} witness)`); continue; }
       coveredPositions++;
       for (const [wrongKind, wrongTerm] of Object.entries(wk)) {
         if (wrongKind === sig[i]) continue;                   // that would be the CORRECT kind
@@ -129,10 +151,9 @@ for (const vv of valids) {
       }
     }
   }
-  console.log(`bmc Phase 3 coverage: ${coveredPositions} composite child-positions exercised over ${Object.keys(wk).length} witness kinds (${Object.keys(wk).sort().join(', ')}); ${skippedPositions.length ? 'RESIDUAL (declared, not silent): ' + skippedPositions.join('; ') : 'NO skipped positions — every composite child-position covered'}`);
-  if (skippedPositions.length) fails.push(`P3 COVERAGE: ${skippedPositions.length} composite child-position(s) skipped for a missing witness kind — the child-algebra claim must not silently narrow (round-47 step 3/3): ${skippedPositions.join('; ')}`);
+  console.log(`bmc Phase 3 coverage: ${coveredPositions}/${totalPositions} interpreter child-positions exercised (denominator SOURCE-VERIFIED against the rule interpreter — round-48 P1-02) over ${Object.keys(wk).length} witness kinds (${Object.keys(wk).sort().join(', ')}); ${residual.length ? 'DECLARED residual (corpus lacks the kind — explicit + counted, not a silent subset): ' + residual.join('; ') : 'ALL positions covered'}`);
 }
 
 console.log(`bmc: Phase 1 (per-rule inductive step) ${phase1} probes; Phase 2 (exhaustive single-mutation) ${phase2} tampers over ${baselines} VALID baselines; Phase 3 (child-judgment algebra) ${phase3} wrong-kind-child probes`);
 if (fails.length) { console.error('✗ BMC FAILED — a totality/determinism/soundness counterexample:'); for (const f of fails.slice(0, 20)) console.error('   • ' + f); process.exit(1); }
-console.log('✓ BMC: every rule is TOTAL + DETERMINISTIC + CONTRACT-GATED over its immediate-shape space; NO single-edit mutation of a VALID proof is accepted; and over EVERY coverable composite child-position a WRONG-KIND child judgment is rejected. SCOPE (bound to the mechanism, round-47): this exercises the KIND dimension of the induction step; the child-COORDINATE dimension (a right-kind child from the wrong (s,n,h)) is covered BY CONSTRUCTION in the conformance corpus — the three `unify.*` cross-child vectors drive ReinforceMap/ReinforceQuorum/Corroborated with a genuine child proven at a SECOND coordinate and assert the unify gate fires. Construction is the ONLY sound path: unforgeable-judgment re-verifies every child from its own sub-proof (a fabricated verdict is INVALID), so a lighter injectable-verdict harness would be unsound. No judgment kind is silently skipped (a missing kind FAILS the coverage gate).');
+console.log('✓ BMC: every rule is TOTAL + DETERMINISTIC + CONTRACT-GATED over its immediate-shape space; NO single-edit mutation of a VALID proof is accepted; and over EVERY coverable composite child-position a WRONG-KIND child judgment is rejected. SCOPE (bound to the mechanism, round-47): this exercises the KIND dimension of the induction step; the child-COORDINATE dimension (a right-kind child from the wrong (s,n,h)) is covered BY CONSTRUCTION in the conformance corpus — the three `unify.*` cross-child vectors drive ReinforceMap/ReinforceQuorum/Corroborated with a genuine child proven at a SECOND coordinate and assert the unify gate fires. Construction is the ONLY sound path: unforgeable-judgment re-verifies every child from its own sub-proof (a fabricated verdict is INVALID), so a lighter injectable-verdict harness would be unsound. The coverage DENOMINATOR is SOURCE-VERIFIED against the rule interpreter (round-48 P1-02) — a position the interpreter gates but the harness omits FAILS the gate; a position the corpus cannot yet witness is a DECLARED, counted residual, never a silent subset.');

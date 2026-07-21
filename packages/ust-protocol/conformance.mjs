@@ -1538,13 +1538,33 @@ console.log('\n═════════════════════�
     const rObj = P.resolveCadence(gen69, [], 'ust:20260720.01', {});
     check('R47 (rev69 structural) resolveCadenceBytes IS the sound bytes-in boundary (pure function of immutable byte-strings, order-independent by construction) and the object resolveCadence adapter faithfully delegates to it (identical verdict on the same data)', JSON.stringify(rBytes) === JSON.stringify(rObj) && rBytes.cadence === 3600);
     const kBytes = P.resolveKeysBytes(enc69(gen69), enc69([])), kObj = P.resolveKeys(gen69, []);
-    check('R47 (rev70 structural) resolveKeysBytes IS the sound bytes-in boundary (immutable byte-strings, order-independent by construction) and the object resolveKeys adapter faithfully delegates (same resolved active-set on the same data)', !kBytes.error && kBytes.active.size === 1 && !kObj.error && kObj.active.size === 1); }
+    check('R47 (rev70 structural) resolveKeysBytes IS the sound bytes-in boundary (immutable byte-strings, order-independent by construction) and the object resolveKeys adapter faithfully delegates (same resolved active-set on the same data)', !kBytes.error && kBytes.active.size === 1 && !kObj.error && kObj.active.size === 1);
+    // round-48 P0-01 — the bytes-in door must ENFORCE the immutable-byte-string domain, not assume it. GPT round-48: `Buffer.from`
+    // runs an ARRAY-LIKE's indexed getters, so a getter in arg1 mutated the still-live bytes of arg2 BEFORE capture (a revoked key
+    // restored → verdict flip). `snapshotBytes` now rejects a non-native-Uint8Array at the door, before any getter runs. PIN both
+    // the honest native-Uint8Array path (a revoke retires the key) AND the attack (array-like arg1 → rejected, NO cross-arg flip).
+    const T69b = { generated_at: '2026-07-20T01:00:00Z', valid_from: '2026-07-20T01:00:00Z', valid_to: '2026-08-20T01:00:00Z' };
+    const revoke69 = P.seal(P.buildKeyLogEntry({ domain_shard: 'noosphere.md', ust_id: 'ust:20260720.01', key_id: gK69.key_id }, T69b, { op: 'revoke', pub: gK69.pubB64, reason: 'retired' }, P.contentHash(gen69)), gK69.priv, gK69.pubB64);
+    const gU = enc69(gen69), kU = enc69([revoke69]);
+    const honestKB = P.resolveKeysBytes(gU, kU);
+    const sib = new Uint8Array(kU);
+    const evil = { length: gU.length };
+    for (let i = 0; i < gU.length; i++) Object.defineProperty(evil, i, { enumerable: true, get() { if (i === 0) { sib.fill(0x20); sib.set(new Uint8Array(Buffer.from('[]', 'utf8'))); } return gU[i]; } });
+    const attackedKB = P.resolveKeysBytes(evil, sib);
+    check('R47 (rev70/round-48 P0-01) resolveKeysBytes ENFORCES the immutable-byte-string domain: a native-Uint8Array revoke retires the genesis key, AND an ARRAY-LIKE arg1 whose getter rewrites the sibling key-log to [] is REJECTED at the door (E-*) — never a cross-argument verdict flip that restores a revoked key', !honestKB.error && !honestKB.active.has(gK69.key_id) && !!attackedKB.error && !(attackedKB.active && attackedKB.active.has(gK69.key_id)));
+    check('R47 (rev69/round-48 P0-01) resolveCadenceBytes likewise rejects an array-like byte argument at the door — snapshotBytes runs no caller getter before capture', !!P.resolveCadenceBytes(evil, enc69([]), 'ust:20260720.02', undefined).error); }
   // round-46 self-audit (totality) — combineSubstrates was the LONE public door the hand-maintained totality sweep
   // (round-17/18/19/24/38/39) never listed: a hostile `verifiers` Proxy (Array.isArray→true, then a throwing .filter/length
   // trap) SYNC-threw a host exception at its array-normalization. Now it fails CLOSED to an empty plugin list.
-  check('R46 self-audit (totality) combineSubstrates on a HOSTILE verifiers Proxy → returns a combinator that claims no substrate (null/unavailable), NEVER a host throw at the array-normalization door', (() => {
+  check('R46 self-audit (totality) combineSubstrates on a HOSTILE verifiers Proxy → returns a combinator that claims no substrate (null/unavailable), NEVER a host throw at the array-normalization door', await (async () => {
+    // round-48 P1-01 — the label promises TWO clauses (returns a combinator AND it claims no substrate); the old assertion
+    // tested only `typeof fn === 'function'` and never CALLED the combinator, so a mutant returning a fault-injected 'anchored'
+    // substrate stayed green. DRIVE the returned combinator with inert args and assert it yields null — the semantic floor.
     const hostile = new Proxy([{}], { get() { throw new Error('HOSTILE'); }, ownKeys() { throw new Error('HOSTILE'); }, getOwnPropertyDescriptor() { throw new Error('HOSTILE'); } });
-    try { const fn = P.combineSubstrates(hostile); return typeof fn === 'function'; } catch { return false; }
+    let fn; try { fn = P.combineSubstrates(hostile); } catch { return false; }   // no host throw at the array-normalization door
+    if (typeof fn !== 'function') return false;                                  // clause 1: returns a combinator
+    let r; try { r = await fn({}, 'root', {}); } catch { return false; }         // drive it (inert args) — still no throw
+    return r === null;                                                           // clause 2: it claims NO substrate
   })());
   // round-46 self-audit (totality, FROM-CODE — closes the round-44 gate-completeness class at its root) — the totality sweep
   // was a HAND-maintained roster of exports, which is exactly why combineSubstrates fell out of it. Enumerate EVERY
@@ -1946,6 +1966,7 @@ console.log('\n═════════════════════�
     // ── EXEMPT (pure primitive/crypto/id/leaf/lattice): consume TRUSTED post-verification values, not untrusted wire ──
     canon: 'primitive', keyId: 'primitive', contentHash: 'primitive', merkleRoot: 'primitive', H: 'primitive', Hbytes: 'primitive',
     seed: 'primitive', strictB64url: 'primitive', admitUtf8: 'primitive', admitDeep: 'primitive (the door itself; canon-transparent)',
+    snapshotBytes: 'primitive (the byte-admission door — exact native Uint8Array → immutable copy, total: a hostile Proxy yields E-BYTES-TYPE, never a throw; round-48 P0-01)',
     anyLoneSurrogate: 'primitive', edVerifyStrict: 'primitive', signedContent: 'primitive', partitionHash: 'primitive',
     blindedCommit: 'primitive', blindPartition: 'primitive', assuranceLE: 'surface', assuranceState: 'primitive (the assurance door — returns a reject sentinel like admitDeep, never a throw)',
     axisRank: 'primitive', joinAssurance: 'surface', meetAssurance: 'surface', projectTier: 'surface', capAssurance: 'surface',

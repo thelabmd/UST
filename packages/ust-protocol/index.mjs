@@ -119,6 +119,23 @@ export function parseCadenceInt(s) {
 // Number(...): `["4096"]`, `"0x80"`, `"1.28e2"`, `" 128 "`, `"+128"`, `"0128"` all collapse to a number under Number()
 // and would manufacture authority-bearing capacity / lower a recovery takeover threshold. → a safe integer, or undefined.
 const canonUint = (s) => { if (typeof s !== 'string' || !/^(0|[1-9][0-9]*)$/.test(s)) return undefined; const n = Number(s); return Number.isSafeInteger(n) && n >= 0 ? n : undefined; };
+// round-48 P0-01 — THE ONE sound byte-admission door. GPT round-48 refuted the "immutable byte-string, order-independent BY
+// CONSTRUCTION" claim on resolveKeysBytes/resolveCadenceBytes: those did `Buffer.from(arg)` directly, and Buffer.from runs an
+// ARRAY-LIKE's indexed GETTERS while copying — so a getter in arg1 mutated the still-live bytes of arg2 BEFORE arg2 was
+// captured (a revoked key restored → verdict flip). The domain must be ENFORCED, not assumed. Accept ONLY an EXACT native
+// Uint8Array — a Proxy/subclass/array-like/string is rejected (the intrinsic byteLength/buffer getters read an internal slot a
+// Proxy lacks → throw; a subclass has a different prototype) — then copy into a FRESH immutable buffer with the intrinsic
+// setter, so NO caller code runs and no argument can touch a sibling before capture. checkAuthorityProofBytes already admitted
+// here (its own copy, round-8/9 P0-01); the two resolvers were the entries that BYPASSED it. Now there is ONE door, no drift.
+const TA_BYTELENGTH = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteLength').get;
+const TA_BUFFER = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'buffer').get;
+export function snapshotBytes(input, maxBytes, sizeErr) {
+  if (!(input instanceof Uint8Array) || Object.getPrototypeOf(input) !== Uint8Array.prototype) return { error: 'E-BYTES-TYPE' };   // EXACT native Uint8Array — a subclass (Buffer/its proto differs) or Proxy is rejected
+  let len, buf; try { len = TA_BYTELENGTH.call(input); buf = TA_BUFFER.call(input); } catch { return { error: 'E-BYTES-TYPE' }; }   // intrinsic getters, never an overridden accessor
+  if (typeof SharedArrayBuffer !== 'undefined' && buf instanceof SharedArrayBuffer) return { error: 'E-BYTES-SHARED' };
+  if (maxBytes !== undefined && len > maxBytes) return { error: sizeErr || 'E-BYTES-SIZE' };
+  const copy = new Uint8Array(len); copy.set(input); return { bytes: copy };   // fresh immutable copy via the intrinsic set — no caller getter runs
+}
 // Strict UTF-8 decode: Node's Buffer.toString('utf8') silently maps invalid bytes to U+FFFD, so 0xFF and the real
 // 3-byte U+FFFD collapse to one string. fatal:true rejects invalid UTF-8 instead (P1-01). → string | null.
 function strictUtf8(bytes) {
@@ -840,13 +857,23 @@ const substrateFinal = (sub) => decodeSubstrate(sub) !== null;
 // resolveAuthority (name authority) AND resolveCadence — a cadence-log entry MUST be signed by an AUTHORIZED
 // key (not any LIGHT doc with the same domain_shard), the P0 the cadence-log missed.
 // The SOUND bytes-in boundary for the key-log reducer (round-47 rev70 — the same split as `resolveCadenceBytes`): a pure
-// function of IMMUTABLE byte-strings, order-independent BY CONSTRUCTION (a byte-string cannot mutate a sibling; `JSON.parse`
-// runs no caller code). THIS is the sound public boundary; `resolveKeys` (below) is a CONVENIENCE object adapter over it.
+// function of IMMUTABLE byte-strings — order-independent because EACH argument is admitted through `snapshotBytes` (an EXACT
+// native Uint8Array copied into a fresh immutable buffer with NO caller getter run) BEFORE either is parsed, so no argument can
+// mutate a sibling (round-48 P0-01 — the domain is ENFORCED at the door, not assumed). THIS is the sound public boundary;
+// `resolveKeys` (below) is a CONVENIENCE object adapter over it.
 export function resolveKeysBytes(genesisBytes, keylogBytes) {
+  const gS = snapshotBytes(genesisBytes);                                          // reject array-like/Proxy/subclass BEFORE any copy; capture into an immutable buffer
+  if (gS.error) return { error: 'E-GENESIS', detail: 'genesis bytes must be a native Uint8Array (' + gS.error + ')' };
+  let kCopy = null;
+  if (keylogBytes !== undefined && keylogBytes !== null) {
+    const kS = snapshotBytes(keylogBytes);
+    if (kS.error) return { error: 'E-MALFORMED', detail: 'key-log bytes must be a native Uint8Array (' + kS.error + ')' };
+    kCopy = kS.bytes;
+  }
   let genesis, keylog;
   try {
-    genesis = JSON.parse(Buffer.from(genesisBytes).toString('utf8'));
-    keylog = (keylogBytes === undefined || keylogBytes === null) ? [] : JSON.parse(Buffer.from(keylogBytes).toString('utf8'));
+    genesis = JSON.parse(Buffer.from(gS.bytes).toString('utf8'));                  // gS.bytes/kCopy are immutable copies — Buffer.from here runs no getters
+    keylog = kCopy === null ? [] : JSON.parse(Buffer.from(kCopy).toString('utf8'));
   } catch { return { error: 'E-GENESIS', detail: 'resolveKeys arguments must be canonical UTF-8 JSON byte-strings' }; }
   if (!genesis || typeof genesis !== 'object') return { error: 'E-GENESIS', detail: 'no genesis' };
   if (!Array.isArray(keylog)) return { error: 'E-MALFORMED', detail: 'key-log must be an array' };
@@ -1562,11 +1589,24 @@ export function ustGrid(from, to, cadenceSec) {
 // sound public boundary, the same shape as `checkAuthorityProofBytes` — the calculator eats bytes. `resolveCadence` (below) is
 // a CONVENIENCE object adapter over it, not the security boundary.
 export function resolveCadenceBytes(genesisBytes, cadenceLogBytes, atTime, keylogBytes) {
+  // round-48 P0-01 — admit EACH byte argument through `snapshotBytes` (exact native Uint8Array → immutable copy, no caller
+  // getter) BEFORE parsing any of them, so the "independent reductions" claim above is ENFORCED, not assumed (a `Buffer.from`
+  // on a raw array-like arg would run its getters and mutate a still-live sibling). `atTime` is a value, not bytes.
+  const gS = snapshotBytes(genesisBytes);
+  if (gS.error) return { error: 'E-MALFORMED', detail: 'genesis bytes must be a native Uint8Array (' + gS.error + ')' };
+  const cS = snapshotBytes(cadenceLogBytes);
+  if (cS.error) return { error: 'E-MALFORMED', detail: 'cadence-log bytes must be a native Uint8Array (' + cS.error + ')' };
+  let kCopy = null;
+  if (keylogBytes !== undefined && keylogBytes !== null) {
+    const kS = snapshotBytes(keylogBytes);
+    if (kS.error) return { error: 'E-MALFORMED', detail: 'key-log bytes must be a native Uint8Array (' + kS.error + ')' };
+    kCopy = kS.bytes;
+  }
   let genesis, cadenceLog, keylog;
   try {
-    genesis = JSON.parse(Buffer.from(genesisBytes).toString('utf8'));
-    cadenceLog = JSON.parse(Buffer.from(cadenceLogBytes).toString('utf8'));
-    keylog = (keylogBytes === undefined || keylogBytes === null) ? undefined : JSON.parse(Buffer.from(keylogBytes).toString('utf8'));
+    genesis = JSON.parse(Buffer.from(gS.bytes).toString('utf8'));
+    cadenceLog = JSON.parse(Buffer.from(cS.bytes).toString('utf8'));
+    keylog = kCopy === null ? undefined : JSON.parse(Buffer.from(kCopy).toString('utf8'));
   } catch { return { error: 'E-MALFORMED', detail: 'resolveCadence arguments must be canonical UTF-8 JSON byte-strings' }; }
   if (cadenceLog !== undefined && cadenceLog !== null && !Array.isArray(cadenceLog)) return { error: 'E-MALFORMED', detail: 'cadenceLog must be an array' };
   cadenceLog = cadenceLog ?? [];   // round-43 — ONLY an absent (undefined/null) cadence-log defaults to empty; a present non-array already returned E-MALFORMED above (never the `Array.isArray(X)?X:[]` coalesce that hides a malformed selector)

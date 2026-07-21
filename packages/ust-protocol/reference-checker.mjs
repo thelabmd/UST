@@ -15,9 +15,9 @@
 import { canon, H, keyId, edVerifyStrict, contentHash, verify, isValid, verifyKeylogTerminality,
   verifyCheckpointMapUniqueness, evidenceCaps, authorityScopeId, genesisEpoch,
   resolveKeys, buildKeylogCommitment, authorityCheckpointId, strictB64url, isPublicDnsShard,
-  admitUtf8, anyLoneSurrogate, admitDeep } from './index.mjs';   // round-19 P1-01 — ONE Unicode byte-admission, shared with the discovery resolver. round-46 — admitDeep is the proven canon-transparent side-effect-free reduction for the PACKAGE domain (canon: string leaves); admitInert (below) is its canonJSON-domain sibling for the CONFIG (numeric leaves). Both read DATA descriptors and never execute a getter/toJSON.
+  admitUtf8, anyLoneSurrogate, admitDeep, snapshotBytes } from './index.mjs';   // round-19 P1-01 — ONE Unicode byte-admission, shared with the discovery resolver. round-46 — admitDeep is the proven canon-transparent side-effect-free reduction for the PACKAGE domain (canon: string leaves); admitInert (below) is its canonJSON-domain sibling for the CONFIG (numeric leaves). Both read DATA descriptors and never execute a getter/toJSON. round-48 P0-01 — snapshotBytes is the ONE byte-admission door (was defined here; moved to index.mjs so the two resolvers admit through the SAME door — no drift).
 
-export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev73';
+export const REFERENCE_CHECKER_VERSION = '1.0.0-rc.37-L1-rev74';
 // RULE_CONTRACTS (§2b) — the STRUCTURAL source of truth: exactly one inference rule per name, one switch branch per
 // name, and a fixed (children arity, witness count, allowed params, conclusion kind). DecodeTerm enforces these on
 // decode; a term with an extra child / extra witness / free param / unknown field / stored conclusion is rejected
@@ -206,21 +206,10 @@ function utf8Strict(bytes) {
 // lone-surrogate rejection (round-13 P1-04) is the SHARED index.anyLoneSurrogate (round-19 P1-01) — imported above, no
 // second copy to drift: a JSON \uD800 escape yields a JS string holding an UNPAIRED surrogate (not a Unicode SCALAR), so
 // other-language canonicalizers replace/reject it; checked ITERATIVELY over the parsed tree (keys + values).
-// the intrinsic %TypedArray%.prototype.byteLength getter — it reads the [[ViewedArrayBuffer]] internal slot, so calling
-// it on a Proxy (which has no such slot) THROWS. That distinguishes a NATIVE Uint8Array from a Proxy/subclass that only
-// passes `instanceof` (round-8 P0-01).
-const TA_BYTELENGTH = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'byteLength').get;
-const TA_BUFFER = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'buffer').get;   // intrinsic buffer getter — bypasses any overridden accessor (round-9 P0-01)
-// SnapshotBytes: accept ONLY a native Uint8Array (Uint8Array only, no string; a Proxy is rejected because the intrinsic
-// getter throws), reject SharedArrayBuffer-backed views, and copy into a fresh immutable buffer. Once native is proven,
-// `.buffer`/`.set` are trap-free. The theorem begins here.
-function snapshotBytes(input, maxBytes, sizeErr) {
-  if (!(input instanceof Uint8Array) || Object.getPrototypeOf(input) !== Uint8Array.prototype) return { error: 'E-BYTES-TYPE' };   // EXACT native Uint8Array — a subclass (its proto differs) or Proxy is rejected (round-9 P0-01)
-  let len, buf; try { len = TA_BYTELENGTH.call(input); buf = TA_BUFFER.call(input); } catch { return { error: 'E-BYTES-TYPE' }; }   // intrinsic getters, never an overridden accessor
-  if (typeof SharedArrayBuffer !== 'undefined' && buf instanceof SharedArrayBuffer) return { error: 'E-BYTES-SHARED' };
-  if (maxBytes !== undefined && len > maxBytes) return { error: sizeErr || 'E-BYTES-SIZE' };   // round-15 P1-02: reject the ceiling from the intrinsic byteLength BEFORE allocating the copy — no oversize (32 MiB) copy on a package/config that is rejected next line anyway
-  const copy = new Uint8Array(len); copy.set(input); return { bytes: copy };
-}
+// SnapshotBytes — THE byte-admission door (accept ONLY an exact native Uint8Array, reject Proxy/subclass/array-like via the
+// intrinsic byteLength/buffer getters that read an internal slot, then copy into a fresh immutable buffer) is now defined ONCE
+// in index.mjs and IMPORTED (round-48 P0-01), so this kernel and the resolveKeysBytes/resolveCadenceBytes cores admit through
+// the SAME door with no drift. "The theorem begins here" — at that single primitive.
 // DecodeTerm (§2b, M-DEC): build the closed Term ADT strictly to each RULE_CONTRACTS entry — exact children arity, exact
 // witness count, allowed params only, NO unknown fields / stored conclusion / extra children/witnesses/free params. A
 // JSON value is a finite tree (no cycles/sharing to guard), so bounds are just depth + node count.
