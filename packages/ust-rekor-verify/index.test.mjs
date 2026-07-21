@@ -88,3 +88,15 @@ test('totality (round-46 self-audit): hostile/malformed input is a structured re
   const sv = makeSubstrateVerify({ fetchImpl: async () => { throw new Error('net'); } });
   for (const j of junk) { const r = await sv(j, j); assert.ok(r === null || (r && typeof r === 'object'), 'substrateVerify must decline/structured, never host-throw'); }
 });
+
+test('SSRF/injection (round-46 self-audit): an untrusted uuid/logIndex is validated BEFORE the URL — a path/query-injection value declines, no fetch', async () => {
+  const fetched = [];
+  const sv = makeSubstrateVerify({ fetchImpl: async (u) => { fetched.push(String(u)); return { ok: false }; } });
+  const anchor = (extra) => ({ substrate: 'rekor', ...extra });
+  for (const bad of [{ uuid: '../../../admin' }, { uuid: 'evil@attacker.com' }, { uuid: 'x'.repeat(200) }, { logIndex: '1;DROP' }, { logIndex: -5 }, { logIndex: 1.5 }])
+    await sv(anchor(bad), 'a'.repeat(64));
+  assert.equal(fetched.filter((u) => /admin|attacker|DROP|-5|1\.5|xxxx/.test(u)).length, 0, 'a malformed uuid/logIndex must NEVER reach the fetch URL');
+  await sv(anchor({ uuid: 'a'.repeat(64) }), 'b'.repeat(64));
+  await sv(anchor({ logIndex: 42 }), 'b'.repeat(64));
+  assert.ok(fetched.some((u) => u.includes('a'.repeat(64))) && fetched.some((u) => u.includes('logIndex=42')), 'a valid uuid/logIndex proceeds to fetch');
+});

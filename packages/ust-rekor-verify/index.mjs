@@ -89,6 +89,13 @@ export function makeSubstrateVerify({ fetchImpl = fetch, api = REKOR, rekorPubKe
     // fetch the entry if the anchor only carries a pointer (logIndex) — the API is a fallback; the pinned-key
     // signature (below) is what decides, so a MITM'd API response cannot forge finality.
     if ((!proof || !bodyB64) && (a.logIndex != null || a.uuid)) {
+      // round-46 self-audit — the uuid/logIndex come from the UNTRUSTED anchor and are interpolated into the fetch URL. The host is
+      // fixed by `api` (a uuid in the path cannot redirect hosts) and the pinned-key signature below is the finality decider, so this
+      // is not exploitable — but an unvalidated value in a URL is an audit-flag and defense-in-depth: validate the FORMAT (a rekor
+      // entry UUID is 64–80 hex; logIndex a non-negative integer) before constructing the URL, else decline.
+      const uuidOk = a.uuid == null || /^[0-9a-f]{64,80}$/.test(String(a.uuid));
+      const idxOk = a.logIndex == null || (Number.isInteger(a.logIndex) && a.logIndex >= 0);
+      if (!uuidOk || !idxOk) return { final: false, time: 'unproven' };
       try {
         const url = a.uuid ? `${api}/api/v1/log/entries/${a.uuid}` : `${api}/api/v1/log/entries?logIndex=${a.logIndex}`;
         const r = await fetchImpl(url, { signal: AbortSignal.timeout(10000) });
