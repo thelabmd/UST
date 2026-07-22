@@ -258,7 +258,7 @@ DEFINED as "a SET of capabilities" yet the theorem asserted "every axis is a tot
 4-chain the live verifier pinned to `opaque` — a phantom coordinate). The corrected structure:
 
 ```
-Strength          := Integrity × IdentityStrength × FreshnessStrength × TimeStrength     (2·4·4·2 = 64, each a CHAIN)
+Strength          := Integrity × IdentityStrength × FreshnessStrength × TimeStrength     (2·3·4·2 = 48, each a CHAIN — identity is 3 rungs since round-53 dropped `pinned`)
 CapabilitySupport := (P(Caps), ⊆)                                                        (a finite Boolean lattice)
 AssuranceReport   := { strength ∈ Strength, support ∈ P(Caps), basis }
 ```
@@ -288,7 +288,7 @@ Each strength axis is a finite TOTAL order of earned strengths (a rank): *"LATTI
 ∈ 𝓐 := ∏ axes`, ordered COMPONENTWISE (`A ≤ A'` iff `≤` on every axis). `(𝓐, ≤)` is a finite distributive LATTICE —
 meet = per-axis min, join = per-axis max — a reflexive/antisymmetric partial order
 (*"LATTICE (2) product order reflexive + antisymmetric"*) obeying the lattice laws over the full
-*"LATTICE product = 64 states"* (*"LATTICE (3) meet=glb, join=lub, commutative + absorption"*).
+*"LATTICE product = 48 states"* (*"LATTICE (3) meet=glb, join=lub, commutative + absorption"*).
 
 **Gap 1 — independence WITHOUT `⊥` (M1.4).** The symbol `⊥` was overloaded (bottom / orthogonality / probabilistic
 independence / contradiction — and the model carries no probability measure). The honest statement is PRODUCT
@@ -363,7 +363,7 @@ never self-declared": `ℐ_C` is the consumer's, and the meet is computed, never
 
 *Sketch.* Each strength axis order is total and finite, so `∏` under the componentwise order is a finite
 distributive lattice with per-coordinate meet/join (standard); the three properties are checked exhaustively over
-all `2·4·4·2 = 64` states and `64²` pairs. `Π` is monotone because each of its three read coordinates is monotone and the
+all `2·3·4·2 = 48` states and `48²` pairs. `Π` is monotone because each of its three read coordinates is monotone and the
 `TOP/HIGH/LIGHT` thresholds are up-sets; agreement with §14 is the `identity×time` case check. `ceil(C)` is an
 element of `𝓐`, so `A ∧ ceil(C) ≤ A` is immediate from meet, giving downgrade-resistance (F.5b) as a lattice fact,
 not a separate axiom. ∎
@@ -471,7 +471,7 @@ realized now.)
 - clause (2), self-declared domain excluded: *"P0-2: self-declared trust_domain inside the signed claim → rejected"*.
 - clause (3), issuer ∉ `roots_C`: *"P0-2: witness NOT in the consumer trustRoots → not accepted"*.
 - clause (1), typed epoch binding: *"P0-2: tampered no-fork claim ... → NOT authoritative"* and *"... not bound to this active genesis (cross-epoch replay) → NOT authoritative"*.
-- Proposition F.5a.1: *"P0-2: raw noForkConfirmed → consumer-override (NOT authoritative), independently_verified:false"* and *"... raw noForkConfirmed alone → consumer-override, NOT authoritative (overclaim closed)"*.
+- Proposition F.5a.1: *"P0-2: raw noForkConfirmed → consumer-override (NOT authoritative), independently_verified:false"* and *"... raw noForkConfirmed alone on a name-form doc without binding → INDETERMINATE"*.
 - `π_override` (tier only on opt-in): *"caller air-gap override (honored) → HIGH, strength consumer-override + not independently verified"* and *"explicit --no-fork-confirmed (honored) still overrides ... → HIGH"*.
 
 All green at REV 44 (conformance 228/0, cli 130/0, mcp live 11/0).

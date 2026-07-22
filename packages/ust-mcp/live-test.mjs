@@ -27,7 +27,9 @@ check('live:tools/list = 12', tools.tools.length === 12, 'got ' + tools.tools.le
 check('live:key_id over the wire', (await call(client, 'ust_key_id', { pub: A.pubB64 })).key_id === A.key_id);
 
 // THE agent flow, entirely over MCP: build → sign with own key → verify
-const built = await call(client, 'ust_build_observation', { domain_shard: 'helioradar.com', ust_id: 'ust:20260705.16', key_id: A.key_id, time: t, data: { sw: { kind: 'captured', value: { kp: '3.3' } } } });
+// round-53 (UST-ybn): the agent flow (build → sign with own key → verify, no genesis) is the LIGHT key-identity case — a
+// name-form domain_shard would be an unbindable domain claim (→ INDETERMINATE). The honest LIGHT identity is the KEY: key-form domain_shard = key_id.
+const built = await call(client, 'ust_build_observation', { domain_shard: A.key_id, ust_id: 'ust:20260705.16', key_id: A.key_id, time: t, data: { sw: { kind: 'captured', value: { kp: '3.3' } } } });
 const sig = edSign(null, Buffer.from(built.signing_input, 'utf8'), A.priv).toString('base64url');
 const doc = { ust: '1.0', state: built.state, sig: { alg: 'Ed25519', key_id: A.key_id, pub: A.pubB64, sig } };
 check('live:build→sign→verify = VALID', (await call(client, 'ust_verify', { doc })).result.startsWith('VALID'));

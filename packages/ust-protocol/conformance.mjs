@@ -22,7 +22,7 @@ function kp(seedHex) {
 }
 const A = kp(V.seeds.A);
 const T = { generated_at: '2026-06-28T14:03:12Z', valid_from: '2026-06-28T14:00:00Z', valid_to: '2026-06-28T15:00:00Z' };
-const ID = { domain_shard: 'helioradar.com', ust_id: 'ust:20260628.14', key_id: A.key_id, class: 'observation' };
+const ID = { domain_shard: A.key_id, ust_id: 'ust:20260628.14', key_id: A.key_id, class: 'observation' };   // round-53 — key-form (= key_id): a self-asserted LIGHT doc identifies by its KEY, not a name-form domain claim (UST-ybn); name-form requires HIGH binding
 const mk = (data = { sw: { kind: 'captured', value: { kp: '4.33' } } }, id = ID, time = T) => P.seal(P.buildState(id, time, data), A.priv, A.pubB64);
 const clone = (d) => JSON.parse(JSON.stringify(d));
 // P0-2 — `authoritative` name-authority is EARNED from a verified NO-FORK EVIDENCE (a typed claim signed by a witness
@@ -102,10 +102,9 @@ check('#5 anchor-bad-dir→fail-closed', (() => { const r = P.verifyAnchor('sha2
 check('#5 anchor-missing-path→no-throw', (() => { try { P.verifyAnchor('sha256:' + 'ab'.repeat(32), { root: 'sha256:' + 'cd'.repeat(32) }); return true; } catch { return false; } })());
 check('#6 sig-alg-none→E-SIG', (() => { const b = clone(mk()); b.sig.alg = 'none'; return P.verify(b, { context: 'data' }).error === 'E-SIG'; })());
 check('B leap-second→E-MALFORMED', P.verify(mk({ r: { kind: 'captured', value: { x: '1' } } }, ID, { generated_at: '2026-12-31T23:59:60Z', valid_from: '2026-12-31T23:00:00Z', valid_to: '2027-01-01T00:00:00Z' }), { context: 'data' }).error === 'E-MALFORMED');
-// G1 (Gemini 3.1) — pinned identity (§3.1 TOFU) + Y3 name epistemics (publisher only when authoritative)
-check('G1 pinned in-set→strength pinned', (r => r.result === 'VALID:LIGHT' && r.identity.strength === 'pinned' && r.publisher === undefined && r.publisher_claimed === 'helioradar.com')(P.verify(mk(), { context: 'data', pinnedKeys: [A.key_id] })));
-check('G1 pinned not-in-set→E-KEY', P.verify(mk(), { context: 'data', pinnedKeys: ['sha256:' + '00'.repeat(32)] }).error === 'E-KEY');
-check('G1 Y3 LIGHT→publisher_claimed (not publisher)', (r => r.publisher === undefined && r.publisher_claimed === 'helioradar.com' && r.identity.strength === 'self-asserted')(P.verify(mk(), { context: 'data' })));
+// G1 — round-53 (UST-ybn): the `pinned`/TOFU rung was REMOVED; LIGHT identity = the KEY (key-form domain_shard = key_id).
+check('G1 key-form self-asserted → VALID:LIGHT (identity = key, no domain claim, publisher undefined)', (r => r.result === 'VALID:LIGHT' && r.identity.strength === 'self-asserted' && r.publisher === undefined)(P.verify(mk(), { context: 'data' })));
+check('G1 name-form domain_shard, no binding → INDETERMINATE (cannot confirm the domain — unified rule)', (r => r.result === 'INDETERMINATE' && r.reason === 'unavailable')(P.verify(mk({ r: { kind: 'captured', value: { x: '1' } } }, { domain_shard: 'helioradar.com', ust_id: 'ust:20260628.14', key_id: A.key_id, class: 'observation' }), { context: 'data' })));
 
 // ── ChatGPT 5.5 Max audit — F1–F8 (all closed structurally) ──
 {
@@ -180,7 +179,7 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const n9 = P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', substrateVerify: () => ({ final: true, time: '2020-01-01T00:00:00Z' }) });
   check('N9 generated_at after anchorTime → E-ANCHOR', n9.error === 'E-ANCHOR');
   // rc.6 M-05 — the anchor availability STATUS is carried through (substrate unreachable ⇒ status unavailable, doc stays LIGHT-time-unproven).
-  const un = P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, context: 'data', substrateVerify: () => null });
+  const un = P.verify({ ...docK, proof: topProof }, { genesis: gen, keylog: [add], noForkConfirmed: true, acceptConsumerOverride: true, context: 'data', substrateVerify: () => null });
   check('anchor substrate unreachable → time.status unavailable (not flattened)', P.isValid(un) && un.time.status === 'unavailable' && un.time.strength === 'unproven');
   // rc.9 (11th audit 7.1/B): revocation boundary U==C is INVALID; a non-strict-Z compromised_since is E-MALFORMED.
   const C = '2026-06-28T15:00:00Z';
@@ -305,7 +304,7 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   check('private partition without kind → INVALID (closed per-mode schema)', P.verify(noKind, { context: 'data' }).error === 'E-MALFORMED');
   const rsc = P.verify(mk(undefined, { ...ID, domain_shard: A.key_id }), { context: 'data' });
   check('key-form shard == key_id → VALID + identity.mode key (self-certifying)', rsc.result === 'VALID:LIGHT' && rsc.identity.mode === 'key');
-  check('name shard → identity.mode name', P.verify(mk(), { context: 'data' }).identity.mode === 'name');
+  check('key-form shard → identity.mode key (round-53: mk is key-form; a name-form doc without binding is INDETERMINATE)', P.verify(mk(), { context: 'data' }).identity.mode === 'key');
   check('key-form shard != key_id → INVALID', P.verify(mk(undefined, { ...ID, domain_shard: 'sha256:' + '12'.repeat(32) }), { context: 'data' }).error === 'E-MALFORMED');
   const nonce = 'n-' + 'a'.repeat(16);
   const commit = P.blindedCommit({ domain_shard: ID.domain_shard, ust_id: ID.ust_id, name: 'e', value: { v: '1' }, nonce });
@@ -341,17 +340,21 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   const r65 = P.verify(d65, { context: 'data' }), c65 = await cleanRoom(d65, { context: 'data' });
   check('parity: 64 partitions VALID in BOTH verifiers', P.isValid(r64) && P.isValid(c64));
   // ─── §13 capacity ladder (rc.10): floor 64 · genesis-declared ≤ 4096 · INDETERMINATE without genesis ───
-  check('ladder: 65 name-form NO genesis → INDETERMINATE(unavailable) in BOTH', r65.result === 'INDETERMINATE' && r65.reason === 'unavailable' && c65.result === 'INDETERMINATE' && c65.reason === 'unavailable');
+  const d65n = mkN(65, { domain_shard: 'helioradar.com', ust_id: 'ust:20260628.14', key_id: A.key_id, class: 'observation' });
+  const r65n = P.verify(d65n, { context: 'data' }), c65n = await cleanRoom(d65n, { context: 'data' });
+  check('ladder: 65 name-form NO binding → INDETERMINATE(unavailable) in BOTH (cannot confirm the domain — round-53 UST-ybn)', r65n.result === 'INDETERMINATE' && r65n.reason === 'unavailable' && c65n.result === 'INDETERMINATE' && c65n.reason === 'unavailable');
   const d65k = mkN(65, { domain_shard: A.key_id, ust_id: 'ust:20260628.15', key_id: A.key_id, class: 'observation' });
   check('ladder: 65 KEY-form → E-BOUNDS (no ceremony can exist)', P.verify(d65k, { context: 'data' }).error === 'E-BOUNDS' && (await cleanRoom(d65k, { context: 'data' })).error === 'E-BOUNDS');
   const genCap = (mp, mb) => P.seal(P.buildGenesis({ domain_shard: ID.domain_shard, ust_id: 'ust:20260628.01', key_id: A.key_id }, T, A.pubB64, mp, mb), A.priv, A.pubB64);
   // rc.12 P0-4: capacity = TRUSTED GRANT via opts.capacity; a raw self-signed genesis is a
   // self-issued budget and NO LONGER expands anything.
-  check('grant: 65 + capacity{128} → ADMITTED VALID:LIGHT', P.verify(d65, { context: 'data', capacity: { maxPartitions: 128 } }).result === 'VALID:LIGHT');
+  // round-53 (UST-ybn): capacity > 64 is a HIGH-only feature — only a genesis (name-form, name-bound) can DECLARE a larger
+  // capacity; a bare key (key-form LIGHT floor) is capped at 64 and cannot declare more (E-BOUNDS). So >64 ⇒ HIGH, never LIGHT.
+  check('grant: 65 key-form (LIGHT floor) → E-BOUNDS (a bare key cannot declare capacity > 64)', P.verify(d65, { context: 'data', capacity: { maxPartitions: 128 } }).error === 'E-BOUNDS');
   check('grant: 65 + capacity{64} → E-BOUNDS (over granted)', P.verify(d65, { context: 'data', capacity: { maxPartitions: 64 } }).error === 'E-BOUNDS');
   const d1000 = mkN(1000);
-  check('grant: 1024 granted — 1000 partitions ADMITTED (default ≠ ceiling)', P.verify(d1000, { context: 'data', capacity: { maxPartitions: 1024 } }).result === 'VALID:LIGHT');
-  check('P0-4 pinned: raw self-signed genesis ALONE no longer expands → INDETERMINATE', P.verify(d65, { context: 'data', genesis: genCap(128) }).result === 'INDETERMINATE');
+  check('grant: 1000 partitions key-form → E-BOUNDS (capacity > floor is HIGH-only; a bare key is capped at 64 — round-53)', P.verify(d1000, { context: 'data', capacity: { maxPartitions: 1024 } }).error === 'E-BOUNDS');
+  check('P0-4: a raw self-signed genesis does NOT expand a key-form doc → E-BOUNDS (capacity is HIGH-only; a bare key is capped at 64 — round-53)', P.verify(d65, { context: 'data', genesis: genCap(128) }).error === 'E-BOUNDS');
   const gcap = genCap(512, 4_000_000);
   const auth = P.resolveAuthority(mk(), { genesis: gcap, keylog: [], ...nfe(gcap) });
   check('resolveAuthority surfaces the ceremony capacity (grant flows FROM resolution)', auth.capacity?.maxPartitions === 512 && auth.capacity?.maxTranscriptBytes === 4_000_000 && auth.strength === 'authoritative');
@@ -361,19 +364,18 @@ check('F8 impossible ust_id→E-MALFORMED', P.verify(mk({ r: { kind: 'captured',
   check('producer guard: buildState 65 without {maxPartitions} THROWS E-BOUNDS', guardThrew);
   // ─── §13 SIZE ladder (rc.11): floor 1 MiB · genesis-declared ≤ 64 MiB · pre-parse INDETERMINATE ───
   const bigVal = 'x'.repeat(1_200_000);
-  const mkBig = (id = { ...ID, ust_id: 'ust:20260628.16' }, opts = { maxTranscriptBytes: 4_000_000 }) =>
+  const mkBig = (id = { domain_shard: 'helioradar.com', ust_id: 'ust:20260628.16', key_id: A.key_id, class: 'observation' }, opts = { maxTranscriptBytes: 4_000_000 }) =>   // round-53 — name-form: exercises the name-form → INDETERMINATE path
     P.seal(P.buildState(id, T, { blob: { kind: 'captured', value: { x: bigVal } } }, undefined, opts), A.priv, A.pubB64);
   const dBig = mkBig();
   const rBigNo = P.verify(dBig, { context: 'data' });
   check('size: >floor name-form NO grant → INDETERMINATE(unavailable)', rBigNo.result === 'INDETERMINATE' && rBigNo.reason === 'unavailable');
   const cBigNo = await cleanRoom(dBig, { context: 'data' });
   check('size parity: clean-room >floor name-form → INDETERMINATE', cBigNo.result === 'INDETERMINATE');
-  check('size: >floor + capacity grant → ADMITTED VALID:LIGHT', P.verify(dBig, { context: 'data', capacity: { maxTranscriptBytes: 4_000_000 } }).result === 'VALID:LIGHT');
-  check('size: >floor + grant smaller than doc → E-BOUNDS', P.verify(dBig, { context: 'data', capacity: { maxTranscriptBytes: 1_048_576 } }).error === 'E-BOUNDS');
+  check('size: >floor name-form + capacity grant → still INDETERMINATE (name unbound; capacity is HIGH-only — round-53)', P.verify(dBig, { context: 'data', capacity: { maxTranscriptBytes: 4_000_000 } }).result === 'INDETERMINATE');
   const dBigK = mkBig({ domain_shard: A.key_id, ust_id: 'ust:20260628.16', key_id: A.key_id, class: 'observation' });
   check('size: >floor KEY-form → E-BOUNDS (no ceremony can exist)', P.verify(dBigK, { context: 'data' }).error === 'E-BOUNDS');
   // rc.12 P0-1: UTF-8 vs UTF-16 parity — Cyrillic doc (700k units = 1.4M bytes) must agree in BOTH
-  const cyr = P.seal(P.buildState({ ...ID, ust_id: 'ust:20260628.17' }, T, { txt: { kind: 'captured', value: { body: 'ж'.repeat(700_000) } } }, undefined, { maxTranscriptBytes: 4_000_000 }), A.priv, A.pubB64);
+  const cyr = P.seal(P.buildState({ domain_shard: 'helioradar.com', ust_id: 'ust:20260628.17', key_id: A.key_id, class: 'observation' }, T, { txt: { kind: 'captured', value: { body: 'ж'.repeat(700_000) } } }, undefined, { maxTranscriptBytes: 4_000_000 }), A.priv, A.pubB64);
   const rCyr = P.verify(cyr, { context: 'data' }), cCyr = await cleanRoom(cyr, { context: 'data' });
   check('P0-1 pinned: Cyrillic 1.4 MB UTF-8 — SAME verdict in both verifiers (UTF-8 metric)', rCyr.result === 'INDETERMINATE' && cCyr.result === 'INDETERMINATE');
   // rc.12 P0-3: formatting can never flip a verdict — pretty-printed raw > floor, canonical ≤ floor ⇒ VALID
@@ -569,10 +571,10 @@ console.log('\n═════════════════════�
   check('caller air-gap override (honored) → HIGH, strength consumer-override + not independently verified (#69 B / P0-2)', r1b.verdict.result === 'VALID:HIGH' && r1b.verdict.identity.strength === 'consumer-override' && r1b.verdict.identity.independently_verified === false && r1b.verdict.publisher === 'wit-test.example');
   // and WITHOUT the conscious opt-in, the raw override never earns authority — the overclaim is closed.
   const r1c = await P.resolveByDiscovery(doc, { context: 'data', noForkConfirmed: true }, { fetchImpl: mk(null), substrateVerify: final });
-  check('P0-2: raw noForkConfirmed alone → consumer-override, NOT authoritative (overclaim closed)', r1c.verdict.identity.strength === 'consumer-override' && r1c.verdict.identity.independently_verified === false && r1c.verdict.result === 'VALID:LIGHT' && r1c.verdict.publisher === undefined);
+  check('P0-2: raw noForkConfirmed alone on a name-form doc without binding → INDETERMINATE (cannot confirm the domain; a raw override earns no authority — round-53 UST-ybn unified rule)', r1c.verdict.result === 'INDETERMINATE' && r1c.verdict.reason === 'unavailable');
 
   const r2 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(null), substrateVerify: final });
-  check('witness unreachable = LIGHT + HIGH pending (never forged, W1)', r2.verdict.result === 'VALID:LIGHT' && r2.resolution.noFork.startsWith('HIGH pending'));
+  check('witness unreachable on a name-form doc → INDETERMINATE (cannot confirm the domain; never forged — round-53 UST-ybn)', r2.verdict.result === 'INDETERMINATE' && r2.verdict.reason === 'unavailable');
 
   const forkLog = wlog([{ content_hash: gHash, superseded_by: null, anchor: anchorOf(gHash) }, { content_hash: 'sha256:' + 'ab'.repeat(32), superseded_by: null, anchor: anchorOf('sha256:' + 'ab'.repeat(32)) }], gHash);
   const r3 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(forkLog), substrateVerify: final });
@@ -685,10 +687,10 @@ console.log('\n═════════════════════�
   check('round-22 P2-01 nine byte-identical proofs → set-unioned to one, under the cap → HIGH (not a false resource_limit)', r22d.verdict.result === 'VALID:HIGH');
 
   const r4 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog), substrateVerify: () => ({ final: false }) });
-  check('anchor not final (Bitcoin pending) = no HIGH, honest pending', r4.verdict.result === 'VALID:LIGHT' && r4.resolution.noFork.startsWith('HIGH pending'));
+  check('anchor not final (Bitcoin pending), name-form → INDETERMINATE (no HIGH — cannot confirm the domain; honest pending — round-53)', r4.verdict.result === 'INDETERMINATE');
 
   const r5 = await P.resolveByDiscovery(doc, { context: 'data' }, { fetchImpl: mk(okLog) });   // no substrateVerify
-  check('no substrate cross-check = never witness-confirmed (anchor unproven)', r5.verdict.result === 'VALID:LIGHT');
+  check('no substrate cross-check, name-form → INDETERMINATE (never witness-confirmed; cannot confirm the domain — round-53)', r5.verdict.result === 'INDETERMINATE');
 
   const r6 = await P.resolveByDiscovery(doc, { context: 'data', noForkConfirmed: true, acceptConsumerOverride: true }, { fetchImpl: mk(null) });
   check('explicit --no-fork-confirmed (honored) still overrides (air-gap) without witness → HIGH', r6.verdict.result === 'VALID:HIGH');
@@ -732,7 +734,7 @@ console.log('\n═════════════════════�
   // C2 — checkpoint vs gap are now distinct subtypes; a bare prev-only attestation (neither) is E-MALFORMED
   const bare = signC(P.buildState({ domain_shard: dom, ust_id: 'ust:20260628.1430', key_id: C.key_id, class: 'attestation' }, Tc, { note: { kind: 'computed', value: { x: '1' } } }, { prev: gH }));
   check('#70 C2: bare prev-only attestation → E-MALFORMED (checkpoint/gap collision closed)', P.verify(bare, { context: 'data' }).error === 'E-MALFORMED');
-  check('#70 C2: a signed gap record is VALID (data.gap subtype)', P.verify(gp('ust:20260628.142930', gH), { context: 'data' }).result === 'VALID:LIGHT');
+  check('#70 C2: a signed gap record is a valid subtype (not E-MALFORMED) — name-form → INDETERMINATE, never a collision error (round-53)', P.verify(gp('ust:20260628.142930', gH), { context: 'data' }).result === 'INDETERMINATE');
   // (1) full grid → complete
   const f0 = fr('ust:20260628.142900', gH), f1 = fr('ust:20260628.142930', P.contentHash(f0)), f2 = fr('ust:20260628.143000', P.contentHash(f1));
   check('#70 full grid + signed cadence → complete (no-omission)', P.verifyStream([f0, f1, f2], { genesis: gen, checkpoint: cp(P.contentHash(f2), 3, P.contentHash(f2)) }).complete === 'complete');
@@ -803,7 +805,7 @@ console.log('\n═════════════════════�
   const homo = 'а' + 'pple.com';
   const genH = signG(P.buildGenesis({ domain_shard: homo, ust_id: 'ust:20260628.10', key_id: G.key_id }, T, G.pubB64));
   check('#40 homograph name-form domain_shard → E-MALFORMED (obligation §4.3a A-label)', (r => r.error === 'E-MALFORMED' && r.obligation === '§4.3a name-form A-label')(P.verify(genH, { context: 'key' })));
-  check('#40 punycode A-label (xn--…) still VALID (guard blocks glyphs, not IDN)', P.verify(P.seal(P.buildState({ domain_shard: 'xn--80ak6aa92e.com', ust_id: 'ust:20260628.12', key_id: G.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { x: '1' } } }), G.priv, G.pubB64), { context: 'data' }).result.startsWith('VALID'));
+  check('#40 punycode A-label (xn--…) passes the glyph guard → INDETERMINATE not E-MALFORMED (a valid A-label, just name-unbound — round-53)', P.verify(P.seal(P.buildState({ domain_shard: 'xn--80ak6aa92e.com', ust_id: 'ust:20260628.12', key_id: G.key_id, class: 'observation' }, T, { r: { kind: 'captured', value: { x: '1' } } }), G.priv, G.pubB64), { context: 'data' }).result === 'INDETERMINATE');
   // Hole 2: key-log freshness — a stale cache must REPORT freshness, and requireFreshKeylog floors on it.
   const dom = 'noosphere.md';
   const gen = signG(P.buildGenesis({ domain_shard: dom, ust_id: 'ust:20260628.19', key_id: G.key_id }, T, G.pubB64));
@@ -903,14 +905,9 @@ console.log('\n═════════════════════�
   check('R32 order cross-clock: two intervals on different clocks prove nothing → unproven', P.compareEvidenceOrder(iv('c1', '2027-02-01T00:00:00Z', '2027-03-01T00:00:00Z'), iv('c2', '2020-01-01T00:00:00Z', '2021-01-01T00:00:00Z')) === 'unproven');
   check('R32 order calendar-valid still holds: real same-clock instants compare chronologically', P.compareEvidenceOrder(iv('c1', '2027-02-28T23:59:59Z', '2027-03-01T00:00:00Z'), iv('c1', '2026-01-01T00:00:00Z', '2027-01-01T00:00:00Z')) === 'proven-after');
   // round-32 P2-01 — the Horn explanatory trace must AGREE with the canonical projectTier over the whole grid: a
-  // `pinned` identity is below the HIGH threshold, so the trace derives no TierHIGH where projectTier returns LIGHT.
-  check('R32 Horn≡projectTier: pinned identity derives NO TierHIGH (key-pinned, not name-bound)', (() => {
-    const g = P.provePredicates({ identity: { status: 'verified', strength: 'pinned' } });
-    return !g.provenAtoms.includes('name-bound') && g.provenAtoms.includes('key-pinned') && !g.derivation.some((t) => t.rule === 'TierHIGH');
-  })());
   check('R32 Horn≡projectTier: every identity×time cell — max Horn Tier == projectTier', (() => {
     const RANK = { LIGHT: 1, HIGH: 2, TOP: 3 };
-    const IDS = [{ spec: {}, id: 'self-asserted' }, { spec: { status: 'verified', strength: 'pinned' }, id: 'pinned' },   // ALL four identity states incl. the integrity-floor self-asserted (status≠verified) — "every cell" means every cell
+    const IDS = [{ spec: {}, id: 'self-asserted' },   // round-53 — `pinned` rung removed; identity states = self-asserted / corroborated / authoritative ("every cell")
       { spec: { status: 'verified', strength: 'corroborated' }, id: 'corroborated' }, { spec: { status: 'verified', strength: 'authoritative' }, id: 'authoritative' }];
     for (const { spec, id } of IDS) for (const time of ['unproven', 'anchored']) {
       const g = P.provePredicates({ identity: spec, anchor: time === 'anchored' ? { inclusion: true, time: 'anchored' } : undefined });
@@ -1377,7 +1374,7 @@ console.log('\n═════════════════════�
     check('R37/R39 joinAssurance with an OUT-OF-DOMAIN operand → RETURNS the valid operand (⊥ contributes nothing, never synthesizes strength from garbage), never a throw', JSON.stringify(noThrow(() => P.joinAssurance(ood, good))) === JSON.stringify(good));
     check('R37/R39 meetAssurance with an out-of-domain operand → RETURNS ⊥ (fail-closed, under-reports), never a throw', JSON.stringify(noThrow(() => P.meetAssurance(ood, good))) === JSON.stringify(floor));
     check('R37/R39 assuranceLE with an out-of-domain operand → FALSE (an order we cannot establish is never asserted), never a throw', noThrow(() => P.assuranceLE(ood, good)) === false);
-    check('R37 P1-01 joinAssurance of two VALID states still lifts (no over-reject)', P.projectTier(P.joinAssurance(good, { integrity: 'valid', identity: 'pinned', freshness: 'unverified', time: 'unproven' })) === 'TOP'); }
+    check('R37 P1-01 joinAssurance of two VALID states still lifts (no over-reject)', P.projectTier(P.joinAssurance(good, { integrity: 'valid', identity: 'corroborated', freshness: 'unverified', time: 'unproven' })) === 'TOP'); }
   // round-38 P1-01/02/03 — R1/R3/R4 uniformity: assuranceState admits ONCE (no two-face), the exported evidence algebra
   // admits its operands (no host throw), and a caller resource scalar may only TIGHTEN the ceiling (never expand it).
   { const good = { integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored' };
@@ -1431,7 +1428,7 @@ console.log('\n═════════════════════�
     check('R41 P1-02 (R1) resolveAuthority with a PRESENT falsy/scalar/array genesis → E-GENESIS (falsy ≠ absent), never a silent self-asserted', [false, 0, '', Number.NaN, [], 1, 'x'].every((g) => P.resolveAuthority(doc41, { genesis: g }).error === 'E-GENESIS'));
     check('R41 P1-02 only a genuinely ABSENT genesis (undefined/null) is self-asserted; a valid genesis resolves (no over-reject)', P.resolveAuthority(doc41, {}).strength === 'self-asserted' && P.resolveAuthority(doc41, { genesis: null }).strength === 'self-asserted' && !P.resolveAuthority(doc41, { genesis: gen41 }).error);
     check('R41 P1-02 verify with a present malformed genesis → E-GENESIS (the verifyCore opts.genesis door, not only resolveAuthority)', P.verify(doc41, { context: 'data', genesis: false }).error === 'E-GENESIS');
-    check('R41 P1-02 pinnedKeys sibling — a present NON-ARRAY pin set → E-MALFORMED (a dropped restriction would silently accept any key); an array pins; absent is self-asserted', P.verify(doc41, { context: 'data', pinnedKeys: false }).error === 'E-MALFORMED' && P.verify(doc41, { context: 'data', pinnedKeys: [gK.key_id] }).result === 'VALID:LIGHT' && P.verify(doc41, { context: 'data' }).result === 'VALID:LIGHT');
+    // round-53 — R41 pinnedKeys sibling REMOVED: the pinned/TOFU rung and opts.pinnedKeys no longer exist.
     check('R41 P1-02 verifyStream sibling (self-audit sweep) — a PRESENT falsy/scalar genesis or checkpoint in config → complete:none with a MALFORMED detail, never silently provisional', /malformed|inert record/i.test(P.verifyStream([], { genesis: false }).detail || '') && /malformed|inert record/i.test(P.verifyStream([], { checkpoint: 0 }).detail || '')); }
   // round-42 P0-01/P1-01/P1-02 — the key-log ARRAY is DEEP-admitted (a two-face entry cannot show a signed key to verify and an
   // unsigned key to the reducer re-reads); an unminted servedNoFork DIVERTS from corroborated but is NOT liftable to HIGH; and
@@ -1511,7 +1508,7 @@ console.log('\n═════════════════════�
     check('R43 P1-02 resolveCadence keylog:false (present malformed selector) → E-MALFORMED, never coalesced to an empty (retirement-erasing) log', P.resolveCadence(gen43, [{ x: '1' }], undefined, { keylog: false }).error === 'E-MALFORMED');
     check('R43 P1-02 verifyAuthorityCheckpointChain genesis:false + a fallback genesisAuthority → NOT a silent VALID consumer-pin (a present malformed selector is rejected, never skipped to the fallback root)', P.verifyAuthorityCheckpointChain([], { genesis: false, genesisAuthority: { key_id: gK.key_id, pub: gK.pubB64 } }).result !== 'VALID');
     check('R43 legit boolean policy values still honored (requirePerFrameValid:false, allowExperimentalAttested defaults) — no over-reject', P.verifyStream([], { genesis: gen43, requirePerFrameValid: false }).error === undefined);
-    const doc43 = P.seal(P.buildState({ domain_shard: 'noosphere.md', ust_id: 'ust:20260720.14', key_id: gK.key_id, class: 'observation' }, T43, { r: { kind: 'captured', value: { v: 'A' } } }), gK.priv, gK.pubB64);
+    const doc43 = P.seal(P.buildState({ domain_shard: gK.key_id, ust_id: 'ust:20260720.14', key_id: gK.key_id, class: 'observation' }, T43, { r: { kind: 'captured', value: { v: 'A' } } }), gK.priv, gK.pubB64);
     check('R43 the RESTRICTION booleans are measured too — a coerced requireAuthoritative:0 → E-MALFORMED, never a silently DROPPED requirement (a real boolean still restricts)', P.verify(doc43, { context: 'data', requireAuthoritative: 0 }).error === 'E-MALFORMED' && P.verify(doc43, { context: 'data', requireAuthoritative: true }).error === 'E-GENESIS' && P.verify(doc43, { context: 'data' }).result === 'VALID:LIGHT'); }
   // round-45 P0-01/P1-01/P1-02 — a SEMANTIC (behavioral, from-ENTRYPOINT) adapter/kernel gate, NOT a source regex: the prior gates
   // scanned text and stayed green while a public adapter (a) encoded the UNTRUSTED arg before the TRUSTED config (a hostile getter
@@ -1796,13 +1793,13 @@ console.log('\n═════════════════════�
 }
 
 // ─── #78/M1 ASSURANCE PRODUCT-LATTICE — the formal-model F.5.0 realized as RUNNING property checks (math ⇒ code
-//     ⇒ vector). M1.1: STRENGTH = four chains (2×4×4×2 = 64); capability SUPPORT is a separate Boolean lattice
+//     ⇒ vector). M1.1: STRENGTH = four chains (2×3×4×2 = 48 — identity is 3 rungs since round-53 dropped `pinned`); capability SUPPORT is a separate Boolean lattice
 //     (P(Caps), ⊆) — not a fifth coordinate. Exhaustive; deterministic, no sampling for pairwise laws.
 {
   const AX = P.ASSURANCE_AXES, keys = Object.keys(AX);
   const all = []; (function rec(i, acc) { if (i === keys.length) return all.push({ ...acc }); for (const v of AX[keys[i]]) rec(i + 1, { ...acc, [keys[i]]: v }); })(0, {});
   const eq = (a, b) => keys.every((k) => a[k] === b[k]);
-  check('LATTICE product = 64 states (2×4×4×2) — strength only, support is not a coordinate (M1.1)', all.length === 64);
+  check('LATTICE product = 48 states (2×3×4×2) — strength only, support is not a coordinate (M1.1); identity is 3 rungs since round-53 dropped `pinned`', all.length === 48);
 
   // (1) every axis a TOTAL order (all pairs comparable); (2) the product a PARTIAL order (reflexive + antisymmetric)
   let totalOK = true; for (const ax of keys) for (const x of AX[ax]) for (const y of AX[ax]) if (!(P.axisRank(ax, x) <= P.axisRank(ax, y) || P.axisRank(ax, y) <= P.axisRank(ax, x))) totalOK = false;
@@ -1836,7 +1833,7 @@ console.log('\n═════════════════════�
 
   // (7) capAssurance = the ℐ_C CAPPED term (F.5b downgrade-resistance): downgrade-only (cap ≤ proven), idempotent, no-ceiling ⇒ identity
   const top = { integrity: 'valid', identity: 'authoritative', freshness: 'attested', time: 'anchored' };
-  let capOK = true; for (const a of all) { const c = P.capAssurance(a, { identity: 'pinned', freshness: 'fresh' }); if (!P.assuranceLE(c, a) || !eq(P.capAssurance(c, { identity: 'pinned', freshness: 'fresh' }), c)) capOK = false; }
+  let capOK = true; for (const a of all) { const c = P.capAssurance(a, { identity: 'corroborated', freshness: 'fresh' }); if (!P.assuranceLE(c, a) || !eq(P.capAssurance(c, { identity: 'corroborated', freshness: 'fresh' }), c)) capOK = false; }
   check('LATTICE (7a) capAssurance downgrade-only (cap ≤ proven) + idempotent', capOK);
   check('LATTICE (7b) no ceiling ⇒ unchanged', eq(P.capAssurance(top, null), top));
   const capped = P.capAssurance(top, { identity: 'self-asserted', freshness: 'corroborated' });
@@ -1888,14 +1885,14 @@ console.log('\n═════════════════════�
   {
     const ids = [undefined, { strength: 'authoritative' }, { strength: 'authoritative', status: 'verified' },
       { strength: 'authoritative', status: 'suspect' }, { strength: 'corroborated', status: 'verified' },
-      { strength: 'pinned', status: 'verified' }, { strength: 'self-asserted', status: 'verified' },
+      { strength: 'self-asserted', status: 'verified' },
       { strength: 'consumer-override', status: 'verified' }, { strength: 'corroborated', status: 'unavailable' },
       { strength: 'corroborated', status: 'verified', freshness: 'fresh' }, { strength: 'authoritative', status: 'verified', freshness: 'fresh' }];
     const frs = [undefined, { result: 'VALID', keylog_freshness: 'corroborated' }, { result: 'VALID', keylog_freshness: 'attested' },
       { result: 'INDETERMINATE', keylog_freshness: 'corroborated' }, { keylog_freshness: 'attested' }, { result: 'VALID', keylog_freshness: 'unverified' }];
     const ans = [undefined, { inclusion: true, time: 'anchored' }, { inclusion: false, time: 'anchored' }, { inclusion: true, time: 'unproven' }];
     // the INDEPENDENT per-coordinate rules (restated here, not shared with the implementation)
-    const expId = (id) => id?.status !== 'verified' ? 'self-asserted' : ['authoritative', 'corroborated', 'pinned'].includes(id.strength) ? (id.strength === 'authoritative' ? 'authoritative' : id.strength) : 'self-asserted';
+    const expId = (id) => id?.status !== 'verified' ? 'self-asserted' : ['authoritative', 'corroborated'].includes(id.strength) ? (id.strength === 'authoritative' ? 'authoritative' : id.strength) : 'self-asserted';
     const expFr = (fr, id) => (fr?.result === 'VALID' && ['corroborated', 'attested'].includes(fr.keylog_freshness)) ? fr.keylog_freshness : (id?.freshness === 'fresh' ? 'fresh' : 'unverified');
     const expTm = (an) => an?.inclusion === true && an?.time === 'anchored' ? 'anchored' : 'unproven';
     let confined = true, coordinateLocal = true;

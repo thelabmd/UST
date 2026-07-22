@@ -690,8 +690,10 @@ function verifyCore(doc, opts = {}) {
       timeField = { strength: a.time, status: a.status, inclusion: true, ...(a.anchorTime ? { anchorTime: a.anchorTime } : {}), ...(a.assurance ? { assurance: a.assurance } : {}) };
     }
     const provenAnchorTime = timeField.strength === 'anchored' ? timeField.anchorTime : undefined;   // the proven upper bound U (else undefined)
-    // step 3 — name authority (§14.3): HIGH resolves genesis+key-log; else a PINNED key (TOFU, §3.1) if the caller
-    // supplies pinnedKeys — a key NOT in the pin set is INVALID (that is what pinning means); else self-asserted.
+    // step 3 — name authority (§14.3): HIGH resolves genesis+key-log; else self-asserted (a bare signed KEY, no domain
+    // claim). round-53 — the `pinned`/TOFU rung was REMOVED: a domain claim survives hijack / key-loss / compromise ONLY
+    // via the keylog (rotation / revocation / compromised_since), which a TOFU pin cannot — so a domain claim requires
+    // HIGH (genesis+key-log), never a fragile middle tier. A bare key stays self-asserted (LIGHT, domain_shard = key-form).
     // round-16 P0-01 — ONLY the PROVEN anchor time feeds the K_n(t) query; a raw caller `opts.anchorTime` is NOT a
     // proven upper bound and must never become the coordinate (it made a retired-key doc VALID:HIGH with a forged/absent
     // string while the honest late U rejected it). No proof ⇒ U is undefined ⇒ a closed key lifecycle fails closed.
@@ -701,11 +703,10 @@ function verifyCore(doc, opts = {}) {
     if (acceptOverride === ADMIT_REJECT) return bad('E-MALFORMED', 'acceptConsumerOverride must be a boolean (round-42 P1-02 — a non-boolean grant would flip the consumer-override projection by truthiness)');
     let identity;
     if (opts.genesis != null) identity = resolveAuthority(doc, { ...opts, anchorTime: provenAnchorTime !== undefined ? provenAnchor(provenAnchorTime) : undefined });   // round-41 P1-02 — a PRESENT genesis (incl. a falsy one) resolves authority; a malformed genesis returns E-GENESIS (propagated below), never a silent self-asserted (round-17 P0-02 — mint a proven-anchor TOKEN; a raw opts.anchorTime is dropped and can never reach K_n(t))
-    else if (opts.pinnedKeys != null) identity = Array.isArray(opts.pinnedKeys)
-      ? (opts.pinnedKeys.includes(st.id.key_id) ? { strength: 'pinned', status: 'verified' } : { error: 'E-KEY', detail: 'key_id not in the pinned set (§3.1 TOFU)' })
-      : { error: 'E-MALFORMED', detail: 'pinnedKeys must be an array of key_ids (round-41 P1-02 — a present non-array pin set is MALFORMED, not absent; a silently dropped pin restriction would accept any key as self-asserted)' };
-    else identity = { strength: 'self-asserted', status: 'verified' };
-    if (identity.error) return bad(identity.error, identity.detail);              // forked genesis / broken key-log / not pinned
+    else identity = { strength: 'self-asserted', status: 'verified' };   // round-53 — `pinned`/TOFU rung removed: a bare key is self-asserted; a domain claim requires genesis+key-log (HIGH), no fragile middle
+    if (identity.error) return bad(identity.error, identity.detail);              // forked genesis / broken key-log
+    // round-53 (UST-ybn) — the name-form-requires-binding rule is applied at TIER level below: it depends on the FINAL
+    // tier (which includes consumer-override HIGH), not the intermediate identity.strength.
     if (reqAuth && !(identity.strength === 'authoritative' && identity.status === 'verified'))
       return identity.status === 'unavailable'
         ? { result: 'INDETERMINATE', reason: 'unavailable', identity, detail: identity.detail }   // W1: retry, NOT failure
@@ -809,6 +810,20 @@ function verifyCore(doc, opts = {}) {
         return bad('E-ANCHOR', 'anchored (TOP) required but no anchor proof is attached (downgrade rejected)');
       return { result: 'INDETERMINATE', reason: 'unavailable', detail: 'anchored (TOP) required; proof present but substrate is ' + timeField.status + '/' + timeField.strength + ' — retry' };
     }
+    // round-53 (UST-ybn — the LIGHT ambiguity fix, unified rule): a NAME-FORM domain_shard is a DOMAIN CLAIM, valid only
+    // when the name binding is CONFIRMED — i.e. the doc reaches a NAME-BOUND tier (HIGH/TOP). At HIGH/TOP the identity axis
+    // established a binding: an authoritative genesis+key-log, corroboration, or a consciously-honored liftable override. A
+    // LIGHT tier means the identity axis did NOT reach a name binding — the domain label is unbacked ⇒ "cannot confirm ⇒
+    // INDETERMINATE": never a bare VALID (the forgery-misread) and never INVALID (a legit doc verified offline / key-log
+    // pending is not malformed). The trigger is the TIER, not `nameAuthoritative`: nameAuthoritative (ln 778, publisher vs
+    // publisher_claimed) is STRICTER — a corroborated doc is name-bound at HIGH yet still publisher_claimed; it must stay
+    // VALID:HIGH, not collapse to INDETERMINATE. A self-asserted KEY-IDENTITY uses key-form domain_shard (= key_id) and
+    // stays VALID:LIGHT.
+    // EXEMPT the authority-establishing classes: a `genesis` DECLARES the name it roots (self-asserted by design — the
+    // consumer pins it), and `key`/`cadence` log entries continue the key-log chain; they are name-form by nature and
+    // verified via their own chain, not standalone domain claims. The rule is for STATE documents (observation/attestation/derivation).
+    if (tier === 'LIGHT' && shardMode === 'name' && st.id.class !== 'genesis' && st.id.class !== 'key' && st.id.class !== 'cadence')
+      return { result: 'INDETERMINATE', reason: 'unavailable', identity: { ...identity, mode: shardMode }, detail: 'name-form domain_shard is a domain claim the verifier could not confirm (tier resolved to LIGHT — the identity axis reached no name binding): supply genesis to bind the name (→ HIGH), or use key-form domain_shard = key_id for a self-asserted key-identity document (→ VALID:LIGHT). "cannot confirm" ⇒ INDETERMINATE (UST-ybn — the unified rule)' };
     return { result: 'VALID:' + tier, tier, assurance, identity: { ...identity, mode: shardMode }, disclosed, sources, ...nameField,
       ...(identity.noFork ? { no_fork: identity.noFork } : {}),
       ust_id: st.id.ust_id, class: st.id.class, content_hash: ch, time: timeField, provenance: provenanceReport,
@@ -2265,7 +2280,7 @@ export { verifyAuthorityBundle, buildAuthorityProof, checkAuthorityProof, checkA
 //     supplies — EVIDENCE_CAPS_UNIVERSE below); support DERIVES strength, it is not a fifth coordinate.
 export const ASSURANCE_AXES = deepFreeze({   // round-25 P0-04 — DEEP-frozen: mutating a nested axis array (e.g. reordering `identity`) would change projectTier's ranks and the exported REGISTRY alias → history-dependent TCB
   integrity: ['invalid', 'valid'],                                            // the §14 floor (canon/hash/sig) — the Integrity axis
-  identity:  ['self-asserted', 'pinned', 'corroborated', 'authoritative'],    // A_id: name-binding + active-genesis uniqueness (§12.1a)
+  identity:  ['self-asserted', 'corroborated', 'authoritative'],    // A_id: name-binding + active-genesis uniqueness (§12.1a). round-53 — 'pinned'/TOFU rung removed: a domain claim needs the keylog, not a fragile pin
   freshness: ['unverified', 'fresh', 'corroborated', 'attested'],             // A_fresh: terminality + order + checkpoint uniqueness (§12.2a / §12.3.5)
   time:      ['unproven', 'anchored'],                                        // Fₜ: the anchor filtration (§11.2)
 });
@@ -2358,7 +2373,7 @@ export function provePredicates(seams = {}) {
   const idStr = !verified ? 'self-asserted'
     : identity.strength === 'authoritative' ? 'authoritative'
     : identity.strength === 'corroborated' ? 'corroborated'
-    : identity.strength === 'pinned' ? 'pinned' : 'self-asserted';
+    : 'self-asserted';   // round-53 — no `pinned` rung: identity is self-asserted (bare key) OR name-bound (corroborated/authoritative)
   const frStr = (freshness?.result === 'VALID' && (freshness.keylog_freshness === 'corroborated' || freshness.keylog_freshness === 'attested')) ? freshness.keylog_freshness
     : identity?.freshness === 'fresh' ? 'fresh' : 'unverified';                       // fresh = the single-view §12.2a rung carried by the identity resolution
   const tmStr = anchor?.inclusion === true && anchor?.time === 'anchored' ? 'anchored' : 'unproven';
@@ -2370,7 +2385,6 @@ export function provePredicates(seams = {}) {
   const atomSet = ['integrity-valid'];
   if (idStr === 'authoritative') atomSet.push('name-bound', 'active-genesis-unique');
   else if (idStr === 'corroborated') atomSet.push('name-bound');                          // corroborated ≥ the HIGH threshold ⇒ name-bound (TierHIGH)
-  else if (idStr === 'pinned') atomSet.push('key-pinned');                                // round-32 P2-01 — pinned < corroborated ⇒ NOT name-bound; the Horn trace must not derive TierHIGH where projectTier returns LIGHT (key-pinned lifts no Tier rule)
   if (frStr === 'corroborated' || frStr === 'attested') atomSet.push('checkpoint-authorized', 'scope-bound', 'keylog-append-only', 'snapshot-terminal', 'checkpoint-committed', 'checkpoint-after-target');
   if (frStr === 'attested') atomSet.push('checkpoint-unique');
   if (tmStr === 'anchored') atomSet.push('time-anchored');
@@ -2458,7 +2472,7 @@ export function verifyStream(frames, config) {
   const seenUstId = new Set(), seenPrev = new Set();
   let lastE = null;
   for (const [i, f] of frames.entries()) {
-    if (rpfv) { const v = verify(f, { context: 'data' }); if (!isValid(v)) return { error: 'E-SIG', detail: 'frame ' + i + ' invalid: ' + v.error }; } // X2 (round-43 — the ADMITTED boolean, never the coerced opts field)
+    if (rpfv) { const v = verify(f, { context: 'data' }); if (v.error) return { error: 'E-SIG', detail: 'frame ' + i + ' invalid: ' + v.error }; } // X2 — per-frame INTEGRITY (signature). round-53 (UST-ybn): a name-form frame with a VALID signature is INDETERMINATE (identity unconfirmed at bare LIGHT), NOT an error — the stream's identity/completeness is a SEPARATE axis, so accept INDETERMINATE, fail only on a real integrity error (round-43 — the ADMITTED boolean, never the coerced opts field)
     if (f.state.id.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'frame ' + i + ' domain_shard != stream authority (' + authority + ') — mixed-authority stream' };
     if (boundKeys && boundKeys.get(f.state.id.key_id) !== f.sig.pub) return { error: 'E-AUTHORITY', detail: 'frame ' + i + ' key not bound to the authority key-log — impersonation (key ∉ K_A, §12.2)' };
     if (seenUstId.has(f.state.id.ust_id)) return { error: 'E-PREV', detail: 'duplicate ust_id (fork, Y1): ' + f.state.id.ust_id };
@@ -2484,7 +2498,7 @@ export function verifyStream(frames, config) {
   if (checkpoint) {
     if (!genesis) return { complete: 'provisional', head: prevHash, reason: 'origin-unbound: no genesis, cannot bound completeness (TOP needs a HIGH origin)' };
     const cv = verify(checkpoint, { context: 'data' });
-    if (!isValid(cv) || checkpoint.state.id.class !== 'attestation') return { error: 'E-PREV', detail: 'invalid checkpoint' };
+    if (cv.error || checkpoint.state.id.class !== 'attestation') return { error: 'E-PREV', detail: 'invalid checkpoint' };   // round-53 — INTEGRITY (signature), not tier: a name-form checkpoint with a valid signature is INDETERMINATE (identity), NOT an error; the stream's authority is resolved separately
     if (checkpoint.state.id.domain_shard !== authority) return { error: 'E-AUTHORITY', detail: 'checkpoint not from the stream authority (' + authority + ') — TOP completeness cannot cross authority' };
     if (boundKeys && boundKeys.get(checkpoint.state.id.key_id) !== checkpoint.sig.pub) return { error: 'E-AUTHORITY', detail: 'checkpoint key not bound to the authority key-log (impersonation, §12.2)' };
     const a = checkpoint.state.data.checkpoint?.value;

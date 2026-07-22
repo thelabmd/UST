@@ -337,8 +337,10 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
   const auth = P.resolveAuthority(obs, { genesis: g.genesis, keylog: [g.keylog0], ...nfe(g.genesis) });
   const high = P.verify(obs, { context: 'data', genesis: g.genesis, keylog: [g.keylog0], ...nfe(g.genesis), capacity: auth.capacity });
   check('ceremony_artifacts_reach_high', high.result === 'VALID:HIGH' && high.publisher === DOMAIN);
-  // UST-3dj — the SAME authoritative rung through the REAL `verify` BINARY (flag parse + forward, not only the core
-  // path above): --witness <evidence> + --trust-root ⇒ VALID:HIGH authoritative; a bare --no-fork-confirmed ⇒ only consumer-override.
+  // UST-3dj — the SAME authoritative rung through the REAL `verify` BINARY (flag parse + forward, not only the core path
+  // above): --witness <evidence> + --trust-root ⇒ VALID:HIGH authoritative. round-53 (UST-ybn): a bare --no-fork-confirmed
+  // on a NAME-FORM doc earns no name binding (the fork is only consumer-asserted, not evidenced) ⇒ the domain claim is
+  // unconfirmed ⇒ INDETERMINATE, never VALID:HIGH. The contrast (witnessed ⇒ HIGH, bare ⇒ below name-binding) is preserved.
   { const { execSync } = await import('node:child_process'); const { writeFileSync } = await import('node:fs');
     const dir = (process.env.TMPDIR || '/tmp').replace(/\/$/, '');
     writeFileSync(dir + '/ust-rt-doc.json', JSON.stringify(obs)); writeFileSync(dir + '/ust-rt-gen.json', JSON.stringify(g.genesis));
@@ -348,7 +350,7 @@ const mkCf = ({ existing, dohConfirms, genHash }) => {
     const authOut = run(`--witness ${dir}/ust-rt-wit.json --trust-root ${_wid}=${_wpub}`);
     check('cli_verify_witness_flags_reach_authoritative', /VALID:HIGH/.test(authOut) && /identity\s*:\s*authoritative/.test(authOut));
     const ovrOut = run('--no-fork-confirmed');
-    check('cli_verify_bare_nofork_stays_consumer_override', /identity\s*:\s*consumer-override/.test(ovrOut) && !/VALID:HIGH/.test(ovrOut));
+    check('cli_verify_bare_nofork_on_name_form_is_indeterminate', /INDETERMINATE/.test(ovrOut) && !/VALID:HIGH/.test(ovrOut));
   }
 }
 

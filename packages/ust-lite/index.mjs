@@ -165,6 +165,10 @@ export function verify(doc) {
   if (strictB64url(s.sig, 64) === null) return bad('E-SIG', 'sig not canonical 64-byte b64url');
   if (keyId(s.pub) !== s.key_id || s.key_id !== st.id.key_id) return bad('E-SIG', 'key_id ≠ H(ust:keylog, pub) or ≠ state.id.key_id');
   if (!edVerifyStrict(s.pub, S, s.sig)) return bad('E-SIG', 'Ed25519 verify failed');
+  // round-53 (UST-ybn — the LIGHT ambiguity fix, unified rule): authentic, but ust-lite is the LIGHT floor with NO
+  // binding capability (no genesis/key-log), so it CANNOT confirm a name-form DOMAIN CLAIM ⇒ "cannot confirm ⇒
+  // INDETERMINATE", never a bare VALID (the forgery-misread). A self-asserted KEY-IDENTITY uses key-form domain_shard.
+  if (!shardKeyForm) return { result: 'INDETERMINATE', reason: 'unavailable', ust_id: st.id.ust_id, key_id: st.id.key_id, content_hash: contentHash(doc), detail: 'name-form domain_shard is a domain claim ust-lite cannot confirm (no binding): use key-form domain_shard = key_id for a self-asserted key-identity document (→ VALID:LIGHT), or verify with genesis+key-log via ust-protocol (→ HIGH). "cannot confirm" ⇒ INDETERMINATE (UST-ybn)' };
   return { result: 'VALID:LIGHT', tier: 'LIGHT', identity: 'self-asserted', publisher_claimed: st.id.domain_shard,
     ust_id: st.id.ust_id, key_id: st.id.key_id, content_hash: contentHash(doc), completeness: 'not_evaluated' };
 }

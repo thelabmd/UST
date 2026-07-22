@@ -9,7 +9,7 @@ let pass = 0, fail = 0; const F = [];
 const ok = (id, cond) => { if (cond) pass++; else { fail++; F.push(id); } };
 
 const kp = lite.keypair();
-const id = { domain_shard: 'example.md', ust_id: 'ust:20260715.12', key_id: kp.key_id, class: 'observation' };
+const id = { domain_shard: kp.key_id, ust_id: 'ust:20260715.12', key_id: kp.key_id, class: 'observation' };  // LIGHT identity = the key (key-form domain_shard); a name-form shard is a domain claim → INDETERMINATE (round-53 UST-ybn)
 const time = { generated_at: '2026-07-15T12:00:00Z', valid_from: '2026-07-15T12:00:00Z', valid_to: '2026-07-15T13:00:00Z' };
 const data = { temp: { kind: 'captured', value: { celsius: '21.5' } } };
 

@@ -506,8 +506,11 @@ export async function attestDiscovery({ domain, mirrors = [], expectHash = null,
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     baseline = await r.text();
     const { verdict, doc } = verifyRaw(baseline);
+    // round-53 (UST-ybn): a NON-genesis name-form doc now verifies INDETERMINATE (not name-bound), so the class gate must
+    // precede the validity gate — otherwise a served observation is rejected with the vague "does not VERIFY" instead of the
+    // precise "not a genesis". A genesis is name-form by design (exempt from the name-claim rule) and verifies normally.
+    if (doc && doc.state?.id?.class !== 'genesis') throw new Error(`well-known serves class:${doc.state?.id?.class ?? '?'} — not a genesis`);
     if (!P.isValid(verdict)) throw new Error('published document does not VERIFY' + (verdict.error ? ` (${verdict.error})` : ''));
-    if (doc.state?.id?.class !== 'genesis') throw new Error(`well-known serves class:${doc.state?.id?.class ?? '?'} — not a genesis`);
     if (doc.state?.id?.domain_shard !== domain) throw new Error(`genesis domain_shard is ${doc.state?.id?.domain_shard ?? '?'} — not ${domain}`);
     hash = P.contentHash(doc);
     if (expectHash && hash !== expectHash) throw new Error(`content_hash differs from --expect (${hash} ≠ ${expectHash})`);

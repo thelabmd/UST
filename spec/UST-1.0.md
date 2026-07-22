@@ -137,8 +137,9 @@ without reading valid-AT-WHAT; nothing silently claims trust it did not establis
 - **LIGHT — trust in a minute (THE FLOOR).** A signed, canonical, addressable state document. *Publish* =
   generate a keypair, sign your canonical JSON, serve it (the pubkey travels in `sig.pub`). *Verify* = recompute
   the canonical + per-partition hashes (integrity) + strict-Ed25519-verify the signature against the carried
-  (or out-of-band pinned) key. Identity strength = `self-asserted` (the key signed it; `domain_shard` is a
-  self-asserted LABEL) or `pinned` (TOFU / pinned key). NO genesis, NO key log, NO anchor required. This is the
+  key. Identity strength = `self-asserted` — the key signed it. Identity at LIGHT is the KEY: `domain_shard` MUST be
+  KEY-FORM (= `key_id`). A NAME-FORM `domain_shard` (a real domain) is a domain claim the LIGHT floor cannot confirm ⇒
+  it verifies **INDETERMINATE** (never a bare VALID — the forgery-misread); bind the name at HIGH (genesis + key log). NO genesis, NO key log, NO anchor required. This is the
   0.29-light floor + the ONE justified hardening (a mandatory signature). One library call each way. **A LIGHT
   consumer MUST NOT attribute or display `domain_shard` as the publisher (Y3): LIGHT authenticates a KEY, not a
   NAME — a griefer floods `self-asserted` docs under any label for free. Name attribution requires HIGH+.**
@@ -915,7 +916,7 @@ transparent **`consumer-override`** (`independently_verified: false`) that reach
 ONLY when the consumer CONSCIOUSLY honors it (`acceptConsumerOverride`); it is NEVER silently reported as
 `authoritative` (the removed overclaim, the same class as a raw `mapInclusion:true`).
 
-**Strength ladder (normative verdict values).** `self-asserted` / `pinned` (LIGHT) ⊊ `corroborated` (HIGH —
+**Strength ladder (normative verdict values).** `self-asserted` (LIGHT) ⊊ `corroborated` (HIGH —
 served-list no-fork) ⊊ `authoritative` (HIGH — INDEPENDENT non-membership: verified no-fork evidence or an
 anchored name-map). A raw caller override surfaces as `consumer-override` (`independently_verified: false`),
 DISTINCT from `authoritative` and honored only on explicit opt-in. Only `authoritative` surfaces the definitive
@@ -980,9 +981,9 @@ DISTINCT from `authoritative` and honored only on explicit opt-in. Only `authori
   `sig.pub`; at HIGH/TOP the key is resolved via this genesis-rooted log, which ALSO makes the `domain_shard`
   NAME authoritative. (§3.1 tiers.)
 - **LIGHT has NO revocation (X4).** Revocation lives in the key log, which LIGHT does not consult — a
-  `self-asserted`/`pinned` verification NEVER sees a revocation, so a compromised key keeps verifying at LIGHT.
-  A consumer needing revocation (or name authority) MUST verify at HIGH/TOP. This is inherent to a carried/pinned
-  (TOFU) key.
+  `self-asserted` verification NEVER sees a revocation, so a compromised key keeps verifying at LIGHT.
+  A consumer needing revocation (or name authority) MUST verify at HIGH/TOP. This is inherent to a carried
+  key.
 
 ### 12.2a Key-log freshness — "still valid" is authenticated non-membership (#40)
 
@@ -1334,7 +1335,7 @@ unresolved dependency ⇒ the corresponding error (never `VALID`).
    ⇒ E-MALFORMED — G19: no partition may dodge its per-partition hash). Recompute each `hashes.<p>` (§4.4); a
    stored hash differing from the recomputed one ⇒ E-CANON; a failure to canonicalize ⇒ E-CANON.
 3. **Name authority (TIER — NOT a floor gate).** The LIGHT floor does NOT resolve genesis. The verifier reports
-   an identity STRENGTH (`self-asserted` | `pinned` | `authoritative`) WITH a STATUS (`verified` | `unavailable`
+   an identity STRENGTH (`self-asserted` | `corroborated` | `authoritative`) WITH a STATUS (`verified` | `unavailable`
    | `conflict`) — AVAILABILITY is distinct from FAILURE (§15):
    - resolved to a name-binding genesis (§12) AND POSITIVELY confirmed via the witness that NO conflicting
      genesis exists → `authoritative`/`verified`;
@@ -1496,7 +1497,7 @@ reached; a document does NOT change format across tiers OR roles — even genesi
   within bounds. NO genesis / anchor / completeness required. (This is the ~0.29-light adoption floor: publish
   in a minute.)
 - **Conforming verifier — LIGHT:** recompute canonical + per-partition hashes + strict-Ed25519-verify against
-  the carried/pinned key, fail-closed, report identity strength `self-asserted`/`pinned`. Passes the FLOOR
+  the carried key, fail-closed, report identity strength `self-asserted`. Passes the FLOOR
   vectors (canonicalization/NFC/ordering, per-partition captured-vs-computed hashing, domain separation,
   strict-Ed25519 malleability, bounds/cycle, error codes).
 - **HIGH producer/verifier:** + genesis-rooted key log → `authoritative` identity, rotation/revocation
