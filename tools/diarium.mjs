@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// UST diary — seal ONE entry and append it to diary.md as a prev-chained, key-form LIGHT stream.
+// UST diary — seal ONE entry and append it to diarium.md as a prev-chained, key-form LIGHT stream.
 //
-// This is the machinery behind the diary described in diary.md: an agent's memory kept as a verifiable UST stream.
+// This is the machinery behind the diary described in diarium.md: an agent's memory kept as a verifiable UST stream.
 // Each entry is a key-form `observation` (identity = the diary key, not a domain), signed, with `prev` = the previous
 // entry's content_hash — one stream, in order, no gaps. A published entry is NEVER edited; a correction is the next entry.
 //
-// Usage:  node tools/diary.mjs <entry-body.md>
+// Usage:  node tools/diarium.mjs <entry-body.md>
 //   entry-body.md = the human entry (a "## title" line + a few sentences of prose). Its exact text is what gets sealed,
 //   so verifying the entry proves the prose is unaltered.
 //
@@ -16,7 +16,7 @@ import * as P from '../packages/ust-protocol/index.mjs';
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 
-const DIARY = new URL('../diary.md', import.meta.url).pathname;
+const DIARY = new URL('../diarium.md', import.meta.url).pathname;
 const ENV = new URL('../.env', import.meta.url).pathname;
 
 // --- signing key from .env ---
@@ -28,7 +28,7 @@ const priv = createPrivateKey({ key: Buffer.concat([Buffer.from('302e02010030050
 const pub = createPublicKey(priv).export({ format: 'der', type: 'spki' }).slice(-32).toString('base64url');
 const kid = P.keyId(pub);
 
-// --- prev = content_hash of the last sealed transcript already in diary.md (none ⇒ genesis) ---
+// --- prev = content_hash of the last sealed transcript already in diarium.md (none ⇒ genesis) ---
 const md = existsSync(DIARY) ? readFileSync(DIARY, 'utf8') : '';
 const blocks = [...md.matchAll(/```json\n([\s\S]*?)\n```/g)].map((x) => x[1]);
 let prev;
@@ -36,7 +36,7 @@ if (blocks.length) { try { prev = P.contentHash(JSON.parse(blocks[blocks.length 
 
 // --- the new entry ---
 const bodyPath = process.argv[2];
-if (!bodyPath || !existsSync(bodyPath)) { console.error('✗ usage: node tools/diary.mjs <entry-body.md>'); process.exit(1); }
+if (!bodyPath || !existsSync(bodyPath)) { console.error('✗ usage: node tools/diarium.mjs <entry-body.md>'); process.exit(1); }
 const body = readFileSync(bodyPath, 'utf8').trim();
 if (!body) { console.error('✗ empty entry'); process.exit(1); }
 if (body.length > 560) { console.error(`✗ entry is ${body.length} characters — the cap is 560 (two standard tweets). Cut it, don't split it.`); process.exit(1); }
